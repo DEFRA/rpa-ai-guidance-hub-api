@@ -1,39 +1,37 @@
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from logging import getLogger
 
+import fastapi
 import uvicorn
-from fastapi import FastAPI
 
-from app.common.mongo import get_mongo_client
-from app.common.tracing import TraceIdMiddleware
-from app.config import config
-from app.example.router import router as example_router
-from app.health.router import router as health_router
+from app import config as app_config
+from app.common import mongo, tracing
+from app.health import router as health_router
+from app.review import router as review_router
 
 logger = getLogger(__name__)
 
+config = app_config.get_config()
+
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    # Startup
-    client = await get_mongo_client()
+async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
+    client = await mongo.get_mongo_client()
     logger.info("MongoDB client connected")
     yield
-    # Shutdown
     if client:
         await client.close()
         logger.info("MongoDB client closed")
 
 
-app = FastAPI(lifespan=lifespan)
+app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")
 
-# Setup middleware
-app.add_middleware(TraceIdMiddleware)
+app.add_middleware(tracing.TraceIdMiddleware)
 
-# Setup Routes
-app.include_router(health_router)
-app.include_router(example_router)
+app.include_router(health_router.router)
+app.include_router(review_router.router)
 
 
 def main() -> None:  # pragma: no cover
@@ -45,7 +43,7 @@ def main() -> None:  # pragma: no cover
         os.environ.pop("HTTPS_PROXY", None)
 
     uvicorn.run(
-        "app.main:app",
+        "app.entrypoints.fastapi:app",
         host=config.host,
         port=config.port,
         log_config=config.log_config,

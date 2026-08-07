@@ -24,7 +24,7 @@ This is work-in-progress. See [To Do List](./TODO.md)
 
 ### Python
 
-Please install python `>= 3.12` and `pipx` in your environment. This template uses [uv](https://github.com/astral-sh/uv) to manage the environment and dependencies.
+Please install python `>= 3.14` (see `.python-version`) and `pipx` in your environment. This project uses [uv](https://github.com/astral-sh/uv) to manage the environment and dependencies.
 
 ```python
 # install uv via pipx
@@ -44,13 +44,26 @@ This opinionated template uses the [`Fast API`](https://fastapi.tiangolo.com/) P
 
 ### Environment Variable Configuration
 
-The application uses Pydantic's `BaseSettings` for configuration management in `app/config.py`, automatically mapping environment variables to configuration fields.
+The application uses Pydantic's `BaseSettings` for configuration management in `app/config.py`, automatically mapping environment variables to configuration fields. Configuration is loaded using `python-dotenv` which supports both `.env` files and environment variables.
 
-In CDP, environment variables and secrets need to be set using CDP conventions.  See links below:
+In CDP, environment variables and secrets need to be set using CDP conventions. See links below:
 - [CDP App Config](https://github.com/DEFRA/cdp-documentation/blob/main/how-to/config.md)
 - [CDP Secrets](https://github.com/DEFRA/cdp-documentation/blob/main/how-to/secrets.md)
 
 For local development - see [instructions below](#local-development).
+
+#### Bedrock Configuration
+
+The application uses AWS Bedrock for LLM access. The following environment variables are required:
+
+| Variable | Description | Example |
+| --- | --- | --- |
+| `AWS_REGION` | AWS region for Bedrock service | `eu-west-2` |
+| `AWS_ACCESS_KEY_ID` | AWS access key ID | Set via CDP secrets |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret access key | Set via CDP secrets |
+| `CLAUDE_SONNET_MODEL_CONFIG` | Bedrock model configuration | `anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test` |
+
+The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardrail_id:guardrail_version]`
 
 ### Linting and Formatting
 
@@ -135,11 +148,10 @@ See the `Dockerfile` and `compose.yml` for details
 
 Follow the convention below for environment variables and secrets in local development.
 
-**Note** that it does not use `.env` or `python-dotenv` as this is not the convention in the CDP environment.
+**Environment variables:** `.env` file in the project root.
 
-**Environment variables:** `compose/aws.env`.
-
-**Secrets:** `compose/secrets.env`. You need to create this, as it's excluded from version control.
+**Compose directory:** The `compose/` directory contains helper scripts and environment configurations:
+- `compose/floci/start.d/10-setup-resources.sh` - This script is used to set up the necessary AWS resources in the local Floci environment. It runs when the Floci container starts, ensuring that your local AWS environment is ready for development.
 
 **Libraries:** Ensure the python virtual environment is configured and libraries are installed using `uv sync`, [as above](#python)
 
@@ -147,34 +159,31 @@ Follow the convention below for environment variables and secrets in local devel
 
 ### Development
 
-This app can be run locally by either using the Docker Compose project or via the provided script `scripts/start_dev_server.sh`.
+This app can be run locally by either using the Docker Compose project or project scripts.
 
 #### Using Docker Compose
 
 To run the application using Docker Compose, you can use the following command:
 
 ```bash
-docker compose --profile service up --build
+docker compose up --build
 ```
 
 If you want to enable hot-reloading, you can press the `w` key once the compose project is running to enable `watch` mode.
 
-#### Using the provided script
+#### Running on the host
 
-To run the application using the provided script, you can execute:
+To run the application directly on the host with its dependencies in Docker:
 
 ```bash
-./scripts/start_dev_server.sh
+# start the dependencies only
+docker compose up -d floci mongodb redis
+
+# start the application
+uv run --env-file .env rpa-ai-guidance-hub-api
 ```
 
-This script will:
-
-- Check if Docker is running
-- Start dependent services with Docker Compose (Localstack, MongoDB)
-- Set up environment variables for local development
-- Load configuration from compose/aws.env and compose/secrets.env
-- Verify the Python virtual environment is set up
-- Start the FastAPI application with hot-reload enabled
+This loads configuration from `.env`, and enables hot-reload when `PYTHON_ENV=development`.
 
 The service will then run on `http://localhost:8085`
 
@@ -192,13 +201,11 @@ uv run pytest
 
 ## API endpoints
 
-| Endpoint             | Description                    |
-| :------------------- | :----------------------------- |
-| `GET: /docs`         | Automatic API Swagger docs     |
-| `GET: /health`       | Health check endpoint          |
-| `GET: /example/test` | Simple example endpoint        |
-| `GET: /example/db`   | Database query example         |
-| `GET: /example/http` | HTTP client example            |
+| Endpoint                        | Description                    |
+|:--------------------------------| :----------------------------- |
+| `GET: /docs`                    | Automatic API Swagger docs     |
+| `GET: /health`                  | Health check endpoint          |
+| `GET: /review/assets`           | Simple example endpoint        |
 
 ## Custom Cloudwatch Metrics
 

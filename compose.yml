@@ -1,59 +1,62 @@
 services:
-  localstack:
-    image: localstack/localstack:4.9.2
+  floci:
+    image: floci/floci@sha256:b604da97e8c481c407f8e8d3300a8317d68058ac757dfa2af15fd6c4e9d25c59 # 1.5.19-compat
     ports:
-      - "4566:4566" # LocalStack Gateway
-      - "4510-4559:4510-4559" # external services port range
+      - '4566:4566'
     env_file:
-      - "compose/aws.env"
+      - '.env'
     environment:
-      DEBUG: ${DEBUG:-1}
-      LS_LOG: WARN # Localstack DEBUG Level
-      SERVICES: s3,sqs,sns,firehose
-      LOCALSTACK_HOST: 127.0.0.1
+      FLOCI_DEFAULT_REGION: eu-west-2
     volumes:
-      - "${TMPDIR:-/tmp}/localstack:/var/lib/localstack"
-      - ./compose/start-localstack.sh:/etc/localstack/init/ready.d/start-localstack.sh
-    healthcheck:
-      test: ["CMD", "curl", "localhost:4566"]
-      interval: 5s
-      start_period: 5s
-      retries: 3
+      - ./compose/floci/start.d:/etc/floci/init/start.d:ro
+    networks:
+      - cdp-tenant
+
+  redis:
+    image: redis@sha256:3ce533b2b057f74b235d1d8697ae08b1b6ff0a5e16827ea6a377b6365693c7ed # 7.2.3-alpine3.18
+    ports:
+      - '6379:6379'
     networks:
       - cdp-tenant
 
   mongodb:
-    image: mongo:6.0.13
+    image: mongo@sha256:4510cf3d7050003e958745adb25d2deb3fb907430716162d9cc1a92eda2a6047 # 7.0.28
     networks:
       - cdp-tenant
     ports:
-      - "27017:27017"
+      - '27017:27017'
     volumes:
+      - ./compose/mongo:/docker-entrypoint-initdb.d:ro
       - mongodb-data:/data
-    restart: always
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.hello().ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
-  service:
+  rpa-ai-guidance-hub-api:
     build:
       context: .
       target: development
     ports:
       - 8085:8085
     links:
-      - "localstack:localstack"
+      - "floci:floci"
       - "mongodb:mongodb"
     depends_on:
-      localstack:
+      floci:
         condition: service_healthy
       mongodb:
         condition: service_started
-    profiles:
-      - service
     env_file:
-      - "compose/aws.env"
-      - "compose/secrets.env"
+      - ".env"
     environment:
       PORT: ${PORT:-8085}
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://floci:4566}
+      # Not ${FLOCI_ENDPOINT_URL:-...}: compose interpolates that from ./.env,
+      # which holds the host-side value and would win over the default.
+      FLOCI_ENDPOINT_URL: http://floci:4566
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/}
       HOST: ${HOST:-0.0.0.0}
     develop:

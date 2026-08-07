@@ -1,47 +1,53 @@
 from logging import getLogger
 
-from fastapi import Depends
-from pymongo import AsyncMongoClient
-from pymongo.asynchronous.database import AsyncDatabase
+import fastapi
+import pymongo
 
-from app.common.tls import custom_ca_certs
-from app.config import config
+from app import config as app_config
+from app.common import tls
 
 logger = getLogger(__name__)
 
-client: AsyncMongoClient | None = None
-db: AsyncDatabase | None = None
+client: pymongo.AsyncMongoClient | None = None
+db: pymongo.asynchronous.database.AsyncDatabase | None = None
 
 
-async def get_mongo_client() -> AsyncMongoClient:
+async def get_mongo_client() -> pymongo.AsyncMongoClient:
     global client
     if client is None:
-        # Use the custom CA Certs from env vars if set.
-        # We can remove this once we migrate to mongo Atlas.
-        cert = custom_ca_certs.get(config.mongo_truststore)
+        config = app_config.get_config()
+        cert = tls.custom_ca_certs.get(config.mongo_truststore)
         if cert:
             logger.info(
                 "Creating MongoDB client with custom TLS cert %s",
                 config.mongo_truststore,
             )
-            client = AsyncMongoClient(config.mongo_uri, tlsCAFile=cert)
+            client = pymongo.AsyncMongoClient(
+                config.mongo_uri,
+                tlsCAFile=cert,
+                uuidRepresentation="standard",
+            )
         else:
             logger.info("Creating MongoDB client")
-            client = AsyncMongoClient(config.mongo_uri)
+            client = pymongo.AsyncMongoClient(
+                config.mongo_uri, uuidRepresentation="standard"
+            )
 
         logger.info("Testing MongoDB connection to %s", config.mongo_uri)
         await check_connection(client)
     return client
 
 
-async def get_db(client: AsyncMongoClient = Depends(get_mongo_client)) -> AsyncDatabase:
+async def get_db(
+    client: pymongo.AsyncMongoClient = fastapi.Depends(get_mongo_client),
+) -> pymongo.asynchronous.database.AsyncDatabase:
     global db
     if db is None:
-        db = client.get_database(config.mongo_database)
+        db = client.get_database(app_config.get_config().mongo_database)
     return db
 
 
-async def check_connection(client: AsyncMongoClient):
+async def check_connection(client: pymongo.AsyncMongoClient) -> None:
     database = await get_db(client)
     response = await database.command("ping")
     logger.info("MongoDB PING %s", response)

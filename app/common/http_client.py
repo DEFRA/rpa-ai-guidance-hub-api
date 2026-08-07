@@ -2,55 +2,33 @@ from logging import getLogger
 
 import httpx
 
-from app.common.tracing import ctx_trace_id
-from app.config import config
+from app import config as app_config
+from app.common import tracing
 
 logger = getLogger(__name__)
 
 
-async def async_hook_request_tracing(request):
-    trace_id = ctx_trace_id.get(None)
+async def async_hook_request_tracing(request: httpx.Request) -> None:
+    trace_id = tracing.ctx_trace_id.get(None)
     if trace_id:
-        request.headers[config.tracing_header] = trace_id
+        request.headers[app_config.get_config().tracing_header] = trace_id
 
 
-def hook_request_tracing(request):
-    trace_id = ctx_trace_id.get(None)
+def hook_request_tracing(request: httpx.Request) -> None:
+    trace_id = tracing.ctx_trace_id.get(None)
     if trace_id:
-        request.headers[config.tracing_header] = trace_id
+        request.headers[app_config.get_config().tracing_header] = trace_id
 
 
 def create_async_client(request_timeout: int = 30) -> httpx.AsyncClient:
-    """
-    Create an async HTTP client with configurable timeout.
-
-    Args:
-        request_timeout: Request timeout in seconds
-
-    Returns:
-        Configured httpx.AsyncClient instance
-    """
-    client_kwargs = {
-        "timeout": request_timeout,
-        "event_hooks": {"request": [async_hook_request_tracing]},
-    }
-
-    return httpx.AsyncClient(**client_kwargs)
+    return httpx.AsyncClient(
+        timeout=request_timeout,
+        event_hooks={"request": [async_hook_request_tracing]},
+    )
 
 
 def create_client(request_timeout: int = 30) -> httpx.Client:
-    """
-    Create a sync HTTP client with configurable timeout.
-
-    Args:
-        request_timeout: Request timeout in seconds
-
-    Returns:
-        Configured httpx.Client instance
-    """
-    client_kwargs = {
-        "timeout": request_timeout,
-        "event_hooks": {"request": [hook_request_tracing]},
-    }
-
-    return httpx.Client(**client_kwargs)
+    return httpx.Client(
+        timeout=request_timeout,
+        event_hooks={"request": [hook_request_tracing]},
+    )

@@ -1,0 +1,5 @@
+services:
+  rpa-ai-guidance-hub-api:
+    command: -Xfrozen_modules=off -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m app.entrypoints.fastapi
+    ports:
+      - 5678:5678
