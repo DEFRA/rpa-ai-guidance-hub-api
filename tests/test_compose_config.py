@@ -21,10 +21,11 @@ def service_environment():
 
 
 def test_floci_endpoint_is_pinned_to_the_floci_service():
-    """app/common/s3.py reads FLOCI_ENDPOINT_URL, so the container needs it set.
+    """FLOCI_ENDPOINT_URL addresses the local AWS emulator, so the container needs
+    it set explicitly.
 
-    Without an explicit override the value falls through from .env, pointing
-    boto3 at localhost:4566 inside the container and failing every S3 call.
+    Without an override the value falls through from .env, pointing any AWS client
+    at localhost:4566 inside the container rather than at the floci service.
     """
     endpoint = service_environment().get("FLOCI_ENDPOINT_URL")
 
