@@ -1,7 +1,7 @@
 [project]
-name = "cdp-python-backend-template"
+name = "rpa-ai-guidance-hub-api"
 version = "0.1.0"
-description = "CDP Python Backend Template"
+description = "rpa-ai-guidance-hub-api"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

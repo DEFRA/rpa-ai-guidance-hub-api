@@ -1,8 +1,8 @@
-# cdp-python-backend-template
+# rpa-ai-guidance-hub-api
 
 This is work-in-progress. See [To Do List](./TODO.md)
 
-- [cdp-python-backend-template](#cdp-python-backend-template)
+- [rpa-ai-guidance-hub-api](#rpa-ai-guidance-hub-api)
   - [Requirements](#requirements)
     - [Python](#python)
     - [Linting and Formatting](#linting-and-formatting)
