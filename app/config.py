@@ -51,7 +51,13 @@ def _parse_bedrock_model_config(v: str) -> BedrockModelConfig:
     guardrails = None
 
     if len(parts) > 2:
-        (guardrail_id, guardrail_version) = parts[2].split(":")
+        # A guardrail version is only ever digits or DRAFT, so it never contains
+        # a colon - the last one separates it from an id that may contain several.
+        (guardrail_id, separator, guardrail_version) = parts[2].rpartition(":")
+
+        if not separator:
+            msg = "guardrail must be in the format 'guardrail_id:guardrail_version'"
+            raise ValueError(msg)
 
         guardrails = BedrockGuardrailConfig(
             id=guardrail_id,
