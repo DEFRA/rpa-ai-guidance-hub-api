@@ -25,7 +25,7 @@ ARG PORT_DEBUG=8086
 ENV PORT=${PORT}
 EXPOSE ${PORT} ${PORT_DEBUG}
 
-CMD [ "-m", "app.main" ]
+CMD [ "/home/nonroot/.venv/bin/rpa-ai-guidance-hub-api" ]
 
 FROM defradigital/python:${PARENT_VERSION} AS production
 
@@ -34,8 +34,9 @@ ENV LOG_CONFIG="logging.json"
 
 USER root
 
-RUN apt update && \
-    apt install -y curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
 
 USER nonroot
 
@@ -56,4 +57,4 @@ ARG PORT
 ENV PORT=${PORT}
 EXPOSE ${PORT}
 
-CMD [ "-m", "app.main" ]
+CMD [ "/home/nonroot/.venv/bin/rpa-ai-guidance-hub-api" ]

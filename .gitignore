@@ -198,3 +198,6 @@ cython_debug/
 compose/secrets.env
 
 coverage*
+
+# Claude Code local config (not committed)
+.claude/
