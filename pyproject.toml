@@ -15,6 +15,7 @@ dependencies = [
     "pydantic-ai-slim[bedrock]==1.102.0",
     "pydantic-settings==2.14.1",
     "pymongo[aws,encryption,snappy,zstd]==4.17.0",
+    "python-docx==1.2.0",
     "uvicorn==0.48.0",
 ]
 
