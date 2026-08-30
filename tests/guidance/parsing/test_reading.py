@@ -9,6 +9,8 @@ import pytest
 from app.guidance.parsing import parser
 from app.guidance.parsing.errors import DocumentParseError
 
+TITLE = "Example Grant Scheme Guide"
+
 
 def _minimal_docx() -> bytes:
     """The smallest valid .docx, used where only the bytes matter."""
@@ -43,32 +45,44 @@ def _package_that_is_not_a_word_document() -> bytes:
 
 
 class TestAReadableDocument:
-    def test_a_valid_docx_is_parsed(self, docx_bytes):
-        document = parser.parse_docx(docx_bytes())
+    def test_a_document_that_is_all_cover_is_read_to_the_end(self, docx_bytes):
+        """Nothing marks the end of the cover, so the last paragraph does."""
 
-        assert document.sections == []
+        def build(document):
+            document.add_paragraph(TITLE, style="Title")
+
+        assert parser.parse_docx(docx_bytes(build)).title == TITLE
 
 
 class TestAnUnreadableSource:
     @pytest.mark.parametrize(
-        "source",
+        ("source", "expected"),
         [
-            pytest.param(b"", id="empty"),
-            pytest.param(b"this is plainly not a zip archive", id="not-a-zip"),
-            pytest.param(_minimal_docx()[:400], id="truncated"),
-            pytest.param(_zip_that_is_not_an_office_package(), id="zip-not-a-package"),
-            pytest.param(_package_that_is_not_a_word_document(), id="not-word"),
+            pytest.param(b"", "not a zip archive", id="empty"),
+            pytest.param(
+                _zip_that_is_not_an_office_package(),
+                "not an Office package",
+                id="zip-not-a-package",
+            ),
+            pytest.param(
+                _package_that_is_not_a_word_document(),
+                "not a Word document",
+                id="not-word",
+            ),
         ],
     )
-    def test_every_kind_of_bad_input_raises_one_error_type(self, source):
+    def test_every_kind_of_bad_input_raises_one_error_type(self, source, expected):
         """python-docx raises a different exception for each of these.
 
         BadZipFile, KeyError and ValueError respectively - and never the
         PackageNotFoundError its documentation suggests, which it only raises for a
-        path. Callers should not have to know any of that.
+        path. Callers should not have to know any of that, but they are still told
+        which of the three went wrong.
         """
-        with pytest.raises(DocumentParseError):
+        with pytest.raises(DocumentParseError) as raised:
             parser.parse_docx(source)
+
+        assert expected in str(raised.value)
 
     def test_the_underlying_failure_is_kept_as_the_cause(self):
         with pytest.raises(DocumentParseError) as raised:

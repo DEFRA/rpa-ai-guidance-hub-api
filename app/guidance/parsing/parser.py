@@ -183,9 +183,15 @@ def _is_toggle_on(element: Any) -> bool:
 
 
 def _style_name(paragraph: Paragraph) -> str:
-    """The paragraph's style name, lowercased, or "" when it has none."""
+    """The paragraph's style name, lowercased, or "" when it has none.
+
+    The two guards are not alike. python-docx annotates `style` as optional but
+    resolves an unset or unknown style id to the document's default, so it never
+    actually returns None - that guard is there for the type checker, and writing
+    it as an expression keeps an unreachable branch out of the coverage report.
+    `name` really can be None, for a style carrying no w:name element, which is
+    covered by a test.
+    """
     style = paragraph.style
-    if style is None:
-        return ""
-    name: str | None = style.name
+    name = style.name if style is not None else None
     return name.lower() if name else ""
