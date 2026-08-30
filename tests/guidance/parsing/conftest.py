@@ -8,6 +8,7 @@ import io
 
 import docx
 import pytest
+from docx.enum.style import WD_STYLE_TYPE
 
 
 @pytest.fixture
@@ -32,3 +33,20 @@ def docx_bytes():
         return buffer.getvalue()
 
     return build_docx
+
+
+@pytest.fixture
+def in_style():
+    """Return a helper adding a paragraph in a named style.
+
+    python-docx will only apply a style the template already defines, and the
+    styles worth testing against - a custom annex style, a heading-like name that
+    is not a heading - are exactly the ones it does not have.
+    """
+
+    def add_paragraph(document, text: str, style_name: str) -> None:
+        if all(style.name != style_name for style in document.styles):
+            document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        document.add_paragraph(text, style=style_name)
+
+    return add_paragraph

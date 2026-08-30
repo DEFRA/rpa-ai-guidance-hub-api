@@ -27,13 +27,6 @@ def _page_break(document) -> None:
     document.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
 
-def _in_style(document, text: str, style_name: str) -> None:
-    """Add a paragraph in a style, defining it first if the template lacks it."""
-    if all(style.name != style_name for style in document.styles):
-        document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
-    document.add_paragraph(text, style=style_name)
-
-
 class TestReconstructingTheCoverTitle:
     def test_title_styled_paragraphs_win_over_other_cover_text(self, docx_bytes):
         def build(document):
@@ -167,12 +160,12 @@ class TestWhereTheCoverEnds:
             pytest.param("Table of Contents Body", id="table-of-contents"),
         ],
     )
-    def test_a_table_of_contents_ends_the_cover(self, docx_bytes, style_name):
+    def test_a_table_of_contents_ends_the_cover(self, docx_bytes, in_style, style_name):
         """Word spells its navigation styles more than one way."""
 
         def build(document):
             document.add_paragraph(TITLE, style="Title")
-            _in_style(document, "1 Introduction ....... 3", style_name)
+            in_style(document, "1 Introduction ....... 3", style_name)
             document.add_paragraph(OVERLEAF, style="Title")
 
         assert parser.parse_docx(docx_bytes(build)).title == TITLE
@@ -187,12 +180,12 @@ class TestWhereTheCoverEnds:
 
         assert parser.parse_docx(docx_bytes(build)).title == TITLE
 
-    def test_an_appendix_heading_ends_the_cover(self, docx_bytes):
+    def test_an_appendix_heading_ends_the_cover(self, docx_bytes, in_style):
         """Word's own annex style is not a "Heading n", so it is matched by name."""
 
         def build(document):
             document.add_paragraph(TITLE, style="Title")
-            _in_style(document, "Appendix A", "Appendix Heading")
+            in_style(document, "Appendix A", "Appendix Heading")
             document.add_paragraph(OVERLEAF, style="Title")
 
         assert parser.parse_docx(docx_bytes(build)).title == TITLE

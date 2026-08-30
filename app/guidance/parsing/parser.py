@@ -1,9 +1,11 @@
-"""Read a Word (.docx) package into a ParsedDocument."""
+"""Read a Word (.docx) package into a MarkdownDocument."""
 
 from __future__ import annotations
 
 import io
+import re
 import zipfile
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import docx
@@ -22,9 +24,13 @@ _W_VAL = "w:val"
 # Styles that open the document's navigation, so the cover page has ended.
 _CONTENTS_STYLE_PREFIXES = ("toc", "contents", "table of contents")
 
-# Styles that open the body, so the cover page has ended. "Appendix" is included
-# because Word's own annex style is not a "Heading n" - see the heading feature.
-_BODY_STYLE_PREFIXES = ("heading", "appendix")
+# Word's own annex style is not a "Heading n", so it carries no level and has to be
+# matched by name - see the appendix feature.
+_APPENDIX_STYLE_PREFIX = "appendix"
+
+# Word numbers its heading styles from 1, and the level is the whole of the name
+# after the word: "Heading 2 Box" is a style in its own right, not a Heading 2.
+_HEADING_STYLE = re.compile(r"heading\s*([1-9]\d*)$")
 
 _TITLE_STYLE = "title"
 
@@ -40,7 +46,10 @@ def parse_docx(source: bytes) -> models.MarkdownDocument:
         DocumentParseError: if the bytes are not a readable Word document.
     """
     document = _open(source)
-    return models.MarkdownDocument(title=_extract_title(document))
+    return models.MarkdownDocument(
+        title=_extract_title(document),
+        sections=_extract_sections(document),
+    )
 
 
 def _open(source: bytes) -> docx.document.Document:
@@ -146,11 +155,14 @@ def _opens_body(paragraph: Paragraph) -> bool:
     """Whether this paragraph opens the navigation or the body, ending the cover.
 
     The heading check is what stops a document with no cover page break at all from
-    swallowing its opening heading into the title.
+    swallowing its opening heading into the title. It asks the same question that
+    opens a section, so the two rules cannot drift apart.
     """
     style = _style_name(paragraph)
-    return style.startswith(_CONTENTS_STYLE_PREFIXES) or style.startswith(
-        _BODY_STYLE_PREFIXES
+    return (
+        style.startswith(_CONTENTS_STYLE_PREFIXES)
+        or style.startswith(_APPENDIX_STYLE_PREFIX)
+        or _heading_level(paragraph) is not None
     )
 
 
@@ -169,6 +181,76 @@ def _ends_page(paragraph: Paragraph) -> bool:
         for run in paragraph.runs
         for break_element in run._r.findall(qn("w:br"))
     )
+
+
+@dataclass
+class _OpenSection:
+    """A section still open for children as the walk moves down the document.
+
+    `children` is how many sections have been opened directly beneath this one, and
+    so is the ordinal the next one takes. The stack's first frame stands for the
+    document itself, holding no section, so a top-level heading is counted and
+    parented by the same code as any other.
+    """
+
+    level: int = 0
+    section: models.MarkdownSection | None = None
+    children: int = 0
+
+
+def _extract_sections(document: docx.document.Document) -> list[models.MarkdownSection]:
+    """Turn the document's headings into a flat list of sections in document order.
+
+    Word does not put the number in the text: both real guides attach the numbering
+    to the heading *styles*, so Word generates "4.3.1.1" when it renders the page and
+    the paragraph itself says only "Split". The number is therefore derived here,
+    from nothing but each heading's level relative to the one before it.
+
+    Levels are read as relative, never absolute: a document that opens at Heading 2
+    still starts at 1, and a heading that skips a level nests one deep rather than
+    leaving a gap in the number.
+    """
+    sections: list[models.MarkdownSection] = []
+    # The document's own frame is never popped: it sits at level 0, and a heading's
+    # level is never lower than 1.
+    stack = [_OpenSection()]
+
+    for paragraph in document.paragraphs:
+        level = _heading_level(paragraph)
+        heading = paragraph.text.strip()
+
+        # A heading with nothing in it is a layout artefact - numbering it would put
+        # a section in the output that the document does not have.
+        if level is None or not heading:
+            continue
+
+        while stack[-1].level >= level:
+            stack.pop()
+
+        parent = stack[-1]
+        parent.children += 1
+        section = models.MarkdownSection(
+            heading=heading,
+            ordinal=parent.children,
+            parent=parent.section,
+        )
+        sections.append(section)
+        stack.append(_OpenSection(level=level, section=section))
+
+    return sections
+
+
+def _heading_level(paragraph: Paragraph) -> int | None:
+    """The level of a "Heading n" paragraph, or None if it is not one.
+
+    The level has to come from the style name because that is the only place it is
+    written: the outline level a document declares for a heading lives on the style
+    definition, not on the paragraph. A custom style whose name only begins like a
+    heading - "Heading Box", "Heading 2 Box" - names no level of its own and is
+    therefore body text.
+    """
+    match = _HEADING_STYLE.match(_style_name(paragraph))
+    return int(match[1]) if match else None
 
 
 def _is_toggle_on(element: Any) -> bool:
