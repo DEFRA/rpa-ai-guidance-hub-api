@@ -92,7 +92,9 @@ class TestAnUnreadableSource:
 
     def test_the_message_does_not_leak_the_stream_repr(self):
         """python-docx interpolates the BytesIO repr, which tells a caller nothing."""
+        source = _package_that_is_not_a_word_document()
+
         with pytest.raises(DocumentParseError) as raised:
-            parser.parse_docx(_package_that_is_not_a_word_document())
+            parser.parse_docx(source)
 
         assert "BytesIO" not in str(raised.value)
