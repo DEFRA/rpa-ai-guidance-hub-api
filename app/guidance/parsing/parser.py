@@ -6,20 +6,21 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import docx
 from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
 
-from app.guidance.parsing import models
+from app.guidance.parsing import inline, models
 from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing.ooxml import is_toggle_on
 
 if TYPE_CHECKING:
-    import docx.document
-    from docx.text.paragraph import Paragraph
+    from collections.abc import Iterator
 
-_W_VAL = "w:val"
+    import docx.document
 
 # Styles that open the document's navigation, so the cover page has ended.
 _CONTENTS_STYLE_PREFIXES = ("toc", "contents", "table of contents")
@@ -158,12 +159,16 @@ def _opens_body(paragraph: Paragraph) -> bool:
     swallowing its opening heading into the title. It asks the same question that
     opens a section, so the two rules cannot drift apart.
     """
-    style = _style_name(paragraph)
     return (
-        style.startswith(_CONTENTS_STYLE_PREFIXES)
-        or style.startswith(_APPENDIX_STYLE_PREFIX)
+        _is_contents(paragraph)
+        or _style_name(paragraph).startswith(_APPENDIX_STYLE_PREFIX)
         or _heading_level(paragraph) is not None
     )
+
+
+def _is_contents(paragraph: Paragraph) -> bool:
+    """Whether this paragraph is one of the document's contents entries."""
+    return _style_name(paragraph).startswith(_CONTENTS_STYLE_PREFIXES)
 
 
 def _starts_new_page(paragraph: Paragraph) -> bool:
@@ -171,7 +176,7 @@ def _starts_new_page(paragraph: Paragraph) -> bool:
     properties = paragraph._p.find(qn("w:pPr"))
     if properties is None:
         return False
-    return _is_toggle_on(properties.find(qn("w:pageBreakBefore")))
+    return is_toggle_on(properties.find(qn("w:pageBreakBefore")))
 
 
 def _ends_page(paragraph: Paragraph) -> bool:
@@ -209,19 +214,26 @@ def _extract_sections(document: docx.document.Document) -> list[models.MarkdownS
     Levels are read as relative, never absolute: a document that opens at Heading 2
     still starts at 1, and a heading that skips a level nests one deep rather than
     leaving a gap in the number.
+
+    Every other paragraph is content, and belongs to the section opened most recently
+    whatever its depth. Anything ahead of the first heading is not: in both real
+    guides everything there is the cover page and the contents - 25 and 30 blocks of
+    it, and not one line of body prose - and a contents page is regenerated from the
+    headings anyway.
     """
     sections: list[models.MarkdownSection] = []
     # The document's own frame is never popped: it sits at level 0, and a heading's
     # level is never lower than 1.
     stack = [_OpenSection()]
 
-    for paragraph in document.paragraphs:
+    for paragraph in _body_paragraphs(document):
         level = _heading_level(paragraph)
         heading = paragraph.text.strip()
 
         # A heading with nothing in it is a layout artefact - numbering it would put
         # a section in the output that the document does not have.
         if level is None or not heading:
+            _collect_content(sections, paragraph)
             continue
 
         while stack[-1].level >= level:
@@ -240,6 +252,39 @@ def _extract_sections(document: docx.document.Document) -> list[models.MarkdownS
     return sections
 
 
+def _body_paragraphs(document: docx.document.Document) -> Iterator[Paragraph]:
+    """The body's paragraphs, in document order.
+
+    `document.paragraphs` returns the same paragraphs today and would go on doing so.
+    The walk is written out here because the body holds the document's tables too,
+    and the paragraphs inside a table are reachable from nowhere else.
+    """
+    for element in document.element.body:
+        if element.tag == qn("w:p"):
+            yield Paragraph(element, document)
+
+
+def _collect_content(
+    sections: list[models.MarkdownSection], paragraph: Paragraph
+) -> None:
+    """File a body paragraph under the open section, where it says anything.
+
+    Contents entries are left out wherever they turn up. They sit ahead of every
+    heading in both real guides and so never reach here, but a document whose
+    contents page opens with a heading of its own would otherwise file its whole
+    table of contents as that section's prose.
+    """
+    if not sections or _is_contents(paragraph):
+        return
+
+    block = inline.paragraph_markdown(paragraph)
+    if not block:
+        return
+
+    section = sections[-1]
+    section.content = f"{section.content}\n\n{block}" if section.content else block
+
+
 def _heading_level(paragraph: Paragraph) -> int | None:
     """The level of a "Heading n" paragraph, or None if it is not one.
 
@@ -251,17 +296,6 @@ def _heading_level(paragraph: Paragraph) -> int | None:
     """
     match = _HEADING_STYLE.match(_style_name(paragraph))
     return int(match[1]) if match else None
-
-
-def _is_toggle_on(element: Any) -> bool:
-    """Whether an OOXML boolean toggle is present and not explicitly disabled.
-
-    Toggle properties are 'on' by their presence alone; they are turned off with
-    w:val="false" or w:val="0".
-    """
-    if element is None:
-        return False
-    return element.get(qn(_W_VAL)) not in ("false", "0")
 
 
 def _style_name(paragraph: Paragraph) -> str:

@@ -145,6 +145,65 @@ class TestWhatDoesNotOpenASection:
         assert _outline(docx_bytes(build)) == []
 
 
+class TestWhereContentGoes:
+    def test_a_paragraph_belongs_to_the_section_opened_most_recently(self, docx_bytes):
+        """Whatever its depth: prose under 1.1 is 1.1's, not section 1's."""
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            document.add_paragraph("Read this section first.")
+            document.add_heading("Eligibility", level=2)
+            document.add_paragraph("Apply before the deadline.")
+
+        sections = parser.parse_docx(docx_bytes(build)).sections
+
+        assert [section.content for section in sections] == [
+            "Read this section first.",
+            "Apply before the deadline.",
+        ]
+
+    def test_nothing_ahead_of_the_first_heading_becomes_content(self, docx_bytes):
+        """In both real guides everything there is the cover page and the contents.
+
+        25 and 30 blocks of it, and not one line of body prose - so it is left out
+        rather than filed under a section it does not belong to.
+        """
+
+        def build(document):
+            document.add_paragraph("Example Grant Scheme Guide", style="Title")
+            document.add_paragraph("Printed on recycled paper.")
+            document.add_heading("Applying", level=1)
+            document.add_paragraph("Apply before the deadline.")
+
+        document = parser.parse_docx(docx_bytes(build))
+
+        assert document.sections[0].content == "Apply before the deadline."
+        assert "recycled" not in document.markdown()
+
+    def test_a_contents_entry_after_a_heading_is_still_not_content(
+        self, docx_bytes, in_style
+    ):
+        """Word regenerates a contents page, so its entries are never prose.
+
+        They sit ahead of every heading in both real guides and so never reach the
+        content walk at all, but a contents page opening with a heading of its own
+        would otherwise file all 23 entries as that section's text.
+        """
+
+        def build(document):
+            document.add_heading("Contents", level=1)
+            in_style(document, "1 Applying ....... 3", "TOC 1")
+            document.add_heading("Applying", level=1)
+            document.add_paragraph("Apply before the deadline.")
+
+        sections = parser.parse_docx(docx_bytes(build)).sections
+
+        assert [section.content for section in sections] == [
+            "",
+            "Apply before the deadline.",
+        ]
+
+
 class TestRenderingTheSections:
     def test_a_section_is_headed_by_its_number_at_its_own_depth(self, docx_bytes):
         """The hash count follows the parent chain, so a skipped level stays sane."""
