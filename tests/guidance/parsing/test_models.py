@@ -1,5 +1,7 @@
 """The Markdown document model: derived numbering, template filling, assembly."""
 
+import pytest
+
 from app.guidance.parsing import models
 
 
@@ -53,6 +55,33 @@ class TestImagePrefixes:
 
         assert "(s3/1_img_1.png)" in section.markdown("s3/")
         assert "(local/1_img_1.png)" in section.markdown("local/")
+
+
+class TestAppendixNumbering:
+    def test_an_appendix_heading_carries_no_number(self):
+        """The author already wrote the designation: "A Annex A" reads as a mistake.
+
+        The letter is still the section's number, and still what a cross-reference
+        to it resolves to - it is simply not printed twice.
+        """
+        annex = models.MarkdownSection(heading="Annex A - Case types", appendix=True)
+        section = models.MarkdownSection(heading="Applying")
+
+        assert annex.markdown().startswith("## Annex A - Case types")
+        assert section.markdown().startswith("## 1 Applying")
+
+    @pytest.mark.parametrize(
+        ("ordinal", "expected"),
+        [(1, "A"), (26, "Z"), (27, "AA"), (28, "AB"), (52, "AZ"), (53, "BA")],
+    )
+    def test_the_alphabet_runs_on_rather_than_off_the_end(self, ordinal, expected):
+        """Counting up from "A" would label the 27th appendix "[".
+
+        Bijective base-26: there is no zero digit, so Z is followed by AA.
+        """
+        annex = models.MarkdownSection(heading="Annex", ordinal=ordinal, appendix=True)
+
+        assert annex.number == expected
 
 
 class TestCrossReferences:

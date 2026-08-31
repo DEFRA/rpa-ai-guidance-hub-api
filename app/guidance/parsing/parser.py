@@ -25,9 +25,14 @@ if TYPE_CHECKING:
 # Styles that open the document's navigation, so the cover page has ended.
 _CONTENTS_STYLE_PREFIXES = ("toc", "contents", "table of contents")
 
-# Word's own annex style is not a "Heading n", so it carries no level and has to be
-# matched by name - see the appendix feature.
-_APPENDIX_STYLE_PREFIX = "appendix"
+# Word's own annex styles are not "Heading n", so they carry no level and have to be
+# matched by name. Neither guide spells it "annex" or "schedule", but a template that
+# did would mean exactly the same thing.
+_APPENDIX_STYLE_PREFIXES = ("appendix", "annex", "schedule")
+
+# An appendix is a top-level section. CS's contents pulls the style in with
+# TOC \o "1-4" \h \z \t "Appendix,1" - the document declaring the level itself.
+_APPENDIX_LEVEL = 1
 
 # Word numbers its heading styles from 1, and the level is the whole of the name
 # after the word: "Heading 2 Box" is a style in its own right, not a Heading 2.
@@ -163,7 +168,7 @@ def _opens_body(paragraph: Paragraph) -> bool:
     """
     return (
         _is_contents(paragraph)
-        or _style_name(paragraph).startswith(_APPENDIX_STYLE_PREFIX)
+        or _is_appendix(paragraph)
         or _heading_level(paragraph) is not None
     )
 
@@ -203,6 +208,7 @@ class _OpenSection:
     level: int = 0
     section: models.MarkdownSection | None = None
     children: int = 0
+    appendices: int = 0
 
 
 def _extract_sections(
@@ -217,7 +223,8 @@ def _extract_sections(
 
     Levels are read as relative, never absolute: a document that opens at Heading 2
     still starts at 1, and a heading that skips a level nests one deep rather than
-    leaving a gap in the number.
+    leaving a gap in the number. An appendix is the exception that proves it: its
+    style declares a top level outright, and it is lettered rather than numbered.
 
     Every other paragraph is content, and belongs to the section opened most recently
     whatever its depth. Anything ahead of the first heading is not: in both real
@@ -228,9 +235,8 @@ def _extract_sections(
     The bookmarks a cross-reference can point at are collected on the way past. One
     is claimed only where it marks the start of a section, that being the whole of
     what a number can be derived for: 71 of the 72 body cross-references in the two
-    real guides land on a heading, and the odd one out - along with the two on an
-    annex that is not yet a section - is better left as the raw name Word wrote than
-    sent confidently to the wrong place.
+    real guides land on a heading or an annex, and the odd one out is better left as
+    the raw name Word wrote than sent confidently to the wrong place.
     """
     sections: list[models.MarkdownSection] = []
     bookmarks: dict[str, models.MarkdownSection] = {}
@@ -239,7 +245,8 @@ def _extract_sections(
     stack = [_OpenSection()]
 
     for paragraph, opened_ahead_of_it in _body_items(document):
-        level = _heading_level(paragraph)
+        appendix = _is_appendix(paragraph)
+        level = _APPENDIX_LEVEL if appendix else _heading_level(paragraph)
         heading = paragraph.text.strip()
 
         # A heading with nothing in it is a layout artefact - numbering it would put
@@ -251,13 +258,7 @@ def _extract_sections(
         while stack[-1].level >= level:
             stack.pop()
 
-        parent = stack[-1]
-        parent.children += 1
-        section = models.MarkdownSection(
-            heading=heading,
-            ordinal=parent.children,
-            parent=parent.section,
-        )
+        section = _open_beneath(stack[-1], heading, appendix=appendix)
         sections.append(section)
         stack.append(_OpenSection(level=level, section=section))
 
@@ -265,6 +266,26 @@ def _extract_sections(
             bookmarks[name] = section
 
     return sections, bookmarks
+
+
+def _open_beneath(
+    parent: _OpenSection, heading: str, *, appendix: bool
+) -> models.MarkdownSection:
+    """Open a section beneath `parent`, taking the next ordinal of its own kind.
+
+    Appendices and numbered sections are counted apart, so an annex following
+    section 7 is A rather than 8, and a numbered heading after that annex is 8.
+    """
+    if appendix:
+        parent.appendices += 1
+        ordinal = parent.appendices
+    else:
+        parent.children += 1
+        ordinal = parent.children
+
+    return models.MarkdownSection(
+        heading=heading, ordinal=ordinal, parent=parent.section, appendix=appendix
+    )
 
 
 def _body_items(
@@ -315,6 +336,17 @@ def _collect_content(
 
     section = sections[-1]
     section.content = f"{section.content}\n\n{block}" if section.content else block
+
+
+def _is_appendix(paragraph: Paragraph) -> bool:
+    """Whether this paragraph opens an appendix, which only its style can say.
+
+    An annex style carries no outline level and is not a "Heading n", so there is
+    nothing else to read it from. Detection is by style alone, deliberately: a
+    "Heading n" whose text happens to read "Annex A" is already a section by the
+    rule below, and would gain a letter rather than an existence.
+    """
+    return _style_name(paragraph).startswith(_APPENDIX_STYLE_PREFIXES)
 
 
 def _heading_level(paragraph: Paragraph) -> int | None:

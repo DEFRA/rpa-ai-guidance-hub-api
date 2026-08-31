@@ -72,7 +72,7 @@ _URL_TRAILING = ".,;:!?)]}'\"’"
 # text would quietly leave the report instead of showing up as missing. These are
 # meant to describe what Word puts on the page, so they should only ever change
 # because a document does something new -- not because the parser did.
-_BODY_STYLES = ("heading", "appendix")
+_BODY_STYLES = ("heading", "appendix", "annex", "schedule")
 _CONTENTS_STYLES = ("toc", "contents", "table of contents")
 
 # A contents page whose heading is styled as an ordinary heading, and so is named

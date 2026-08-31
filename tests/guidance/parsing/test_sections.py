@@ -247,6 +247,113 @@ class TestRenderingTheSections:
         assert "### 1.1 Land parcels" in markdown
 
 
+class TestAppendices:
+    """An annex is a section Word gives no number and no outline level.
+
+    Both are carried by a paragraph style instead - CS names its own `Appendix`,
+    pulled into the contents by `TOC \\t "Appendix,1"` - so the style name is the
+    only thing that says an annex is starting. Left unrecognised, an annex is not a
+    section at all and its text is filed under whichever one was last open.
+    """
+
+    def test_an_annex_style_opens_a_section_and_takes_its_own_content(
+        self, docx_bytes, in_style
+    ):
+        """The defect this feature exists to fix, stated directly."""
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            document.add_paragraph("Apply before the deadline.")
+            in_style(document, "Annex A - Case types", "Appendix")
+            document.add_paragraph("The table lists the cases you may see.")
+
+        sections = parser.parse_docx(docx_bytes(build)).sections
+
+        assert [(s.number, s.heading) for s in sections] == [
+            ("1", "Applying"),
+            ("A", "Annex A - Case types"),
+        ]
+        assert sections[0].content == "Apply before the deadline."
+        assert sections[1].content == "The table lists the cases you may see."
+
+    def test_the_letter_comes_from_position_not_from_the_heading(
+        self, docx_bytes, in_style
+    ):
+        """The author's own designation is text, and can say anything at all."""
+
+        def build(document):
+            in_style(document, "Annex Z - Case types", "Appendix")
+            in_style(document, "Annex Q - Reject a claim", "Appendix")
+
+        assert _outline(docx_bytes(build)) == [
+            ("A", "Annex Z - Case types"),
+            ("B", "Annex Q - Reject a claim"),
+        ]
+
+    def test_annexes_and_numbered_sections_are_counted_apart(
+        self, docx_bytes, in_style
+    ):
+        """Neither count disturbs the other: an annex is not section 2."""
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            in_style(document, "Annex A - Case types", "Appendix")
+            document.add_heading("Assessing", level=1)
+
+        assert _outline(docx_bytes(build)) == [
+            ("1", "Applying"),
+            ("A", "Annex A - Case types"),
+            ("2", "Assessing"),
+        ]
+
+    def test_a_heading_under_an_annex_nests_beneath_its_letter(
+        self, docx_bytes, in_style
+    ):
+        """An annex is a top level section, so a deeper heading nests beneath it.
+
+        A Heading 1 after an annex is a sibling instead, and is numbered - which is
+        the case above, and the reason the two counts are kept apart.
+        """
+
+        def build(document):
+            in_style(document, "Annex A - Case types", "Appendix")
+            document.add_heading("Rejected claims", level=2)
+            document.add_heading("Evidence", level=3)
+
+        assert _outline(docx_bytes(build)) == [
+            ("A", "Annex A - Case types"),
+            ("A.1", "Rejected claims"),
+            ("A.1.1", "Evidence"),
+        ]
+
+    @pytest.mark.parametrize(
+        "style_name",
+        [
+            pytest.param("Appendix", id="appendix"),
+            pytest.param("Annex Heading", id="annex"),
+            pytest.param("Schedule Title", id="schedule"),
+        ],
+    )
+    def test_every_name_a_template_gives_the_style_is_recognised(
+        self, docx_bytes, in_style, style_name
+    ):
+        """One template's word for it is another's; all three mean an annex."""
+
+        def build(document):
+            in_style(document, "Case types", style_name)
+
+        assert _outline(docx_bytes(build)) == [("A", "Case types")]
+
+    def test_an_annex_with_no_text_is_not_a_section(self, docx_bytes, in_style):
+        """Spacing in an annex style is still spacing, as it is for a heading."""
+
+        def build(document):
+            in_style(document, "   ", "Appendix")
+            in_style(document, "Annex A - Case types", "Appendix")
+
+        assert _outline(docx_bytes(build)) == [("A", "Annex A - Case types")]
+
+
 class TestBookmarksACrossReferenceCanNameASectionBy:
     """Word writes a cross-reference as a bookmark name, which no renderer knows.
 
@@ -294,7 +401,7 @@ class TestBookmarksACrossReferenceCanNameASectionBy:
         assert bookmarks["_Toc178312"] is bookmarks["_Applying"]
 
     def test_a_bookmark_marking_no_section_start_is_not_claimed(self, docx_bytes):
-        """A bookmark on a list bullet or an annex has no number to be resolved to.
+        """A bookmark on a list bullet has no number it could be resolved to.
 
         Leaving it unclaimed keeps the raw name Word wrote, which is a link that
         goes nowhere rather than one that confidently goes to the wrong section.
@@ -341,3 +448,22 @@ class TestBookmarksACrossReferenceCanNameASectionBy:
         rendered = parser.parse_docx(docx_bytes(build)).markdown()
 
         assert "[Payment](#2)" in rendered
+
+    def test_a_cross_reference_to_an_annex_resolves_to_its_letter(
+        self, docx_bytes, in_style
+    ):
+        """The two annex links the PoC sent to the wrong section entirely.
+
+        Their bookmarks sit on an annex, so they resolve only once an annex is a
+        section - which is why they were left raw rather than guessed at.
+        """
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            _anchor_link(document.add_paragraph("See "), "Case types", "AnnexA")
+            in_style(document, "Annex A - Case types", "Appendix")
+            _bookmark_in(document.paragraphs[-1], "AnnexA")
+
+        rendered = parser.parse_docx(docx_bytes(build)).markdown()
+
+        assert "[Case types](#A)" in rendered

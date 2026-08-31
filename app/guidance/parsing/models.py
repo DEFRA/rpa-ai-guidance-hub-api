@@ -21,6 +21,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+def _letters(ordinal: int) -> str:
+    """The label for a 1-based appendix position: A, B, ... Z, AA, AB.
+
+    Bijective base-26, because the alphabet has no zero digit: the 26th appendix is
+    Z and the 27th is AA. Counting straight up from "A" instead would run off the
+    end of the alphabet and label the 27th "[".
+    """
+    label = ""
+    while ordinal:
+        ordinal, letter = divmod(ordinal - 1, 26)
+        label = chr(ord("A") + letter) + label
+    return label
+
+
 @dataclass(frozen=True)
 class Image:
     """An image extracted from a document.
@@ -46,6 +60,7 @@ class MarkdownSection:
     heading: str
     ordinal: int = 1
     parent: MarkdownSection | None = None
+    appendix: bool = False
     content: str = ""
     images: list[Image] = field(default_factory=list)
 
@@ -56,9 +71,14 @@ class MarkdownSection:
 
     @property
     def number(self) -> str:
-        """The derived section number, e.g. "3.1.2"."""
+        """The derived section number, e.g. "3.1.2", or "A" for an appendix.
+
+        An appendix is lettered by the same rule that numbers a section - its
+        position among its siblings - so its descendants read "A.1" and "A.1.1"
+        with nothing further to say.
+        """
         if self.parent is None:
-            return str(self.ordinal)
+            return _letters(self.ordinal) if self.appendix else str(self.ordinal)
         return f"{self.parent.number}.{self.ordinal}"
 
     def markdown(
@@ -66,9 +86,15 @@ class MarkdownSection:
         image_prefix: str = "",
         bookmarks: dict[str, MarkdownSection] | None = None,
     ) -> str:
-        """This section's own Markdown: its heading and content, not its children."""
+        """This section's own Markdown: its heading and content, not its children.
+
+        An appendix prints no number: the author already wrote the designation into
+        the heading, and "A Annex A" reads as a mistake. The letter is still the
+        section's number, and is what a cross-reference to it resolves to.
+        """
         hashes = "#" * (self.depth + 1)
-        lines = [f"{hashes} {self.number} {self.heading}", ""]
+        title = self.heading if self.appendix else f"{self.number} {self.heading}"
+        lines = [f"{hashes} {title}", ""]
 
         content = self._resolved_content(image_prefix, bookmarks or {})
         if content:
