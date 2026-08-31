@@ -13,7 +13,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
-from app.guidance.parsing import inline, lists, models, tables
+from app.guidance.parsing import inline, lists, models, tables, textboxes
 from app.guidance.parsing.errors import DocumentParseError
 from app.guidance.parsing.ooxml import is_toggle_on
 
@@ -261,6 +261,11 @@ def _extract_sections(
             _append_block(sections, tables.table_markdown(element, document))
             continue
 
+        if element.tag == textboxes.TEXT_BOX:
+            _close_list(sections, open_list)
+            _append_block(sections, textboxes.markdown(element, document))
+            continue
+
         paragraph = Paragraph(element, document)
         appendix = _is_appendix(paragraph)
         level = _APPENDIX_LEVEL if appendix else _heading_level(paragraph)
@@ -330,6 +335,14 @@ def _body_items(
         elif element.tag in _BODY_BLOCKS:
             yield element, opened
             opened = []
+            if element.tag == qn("w:p"):
+                # A text box is a block of the page that Word wrote inside a run
+                # rather than beside it, so no walk of the body's own children can
+                # reach it. Yielding it straight after the paragraph it hangs from is
+                # what files it under the section that paragraph belongs to. It
+                # claims no bookmarks: the ones opened here were the paragraph's.
+                for box in textboxes.anchored_in(element):
+                    yield box, []
 
 
 def _bookmark_names(element: Any) -> list[str]:

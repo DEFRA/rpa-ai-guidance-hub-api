@@ -18,6 +18,10 @@ nine of the real ones have. Everything else becomes a GFM pipe table, whose rows
 cannot contain a newline - so a cell's blocks are joined with <br> instead, and its
 pipes are escaped, both of which are about the row surviving rather than about how
 the text reads.
+
+`callout` is public because a one-cell table is not the only box Word draws: a text
+box holds the same thing, and `parser` renders one through here rather than growing a
+third copy of the paragraphs-to-blocks walk.
 """
 
 from __future__ import annotations
@@ -62,7 +66,7 @@ def table_markdown(table: Any, parent: Any) -> str:
         return ""
 
     if len(rows) == 1 and len(rows[0].findall(qn("w:tc"))) == 1:
-        return _callout(rows[0].findall(qn("w:tc"))[0], parent)
+        return callout(rows[0].findall(qn("w:tc"))[0], parent)
 
     header, *body = rows
     lines = [_row(header, columns, parent), _delimiter(columns)]
@@ -70,16 +74,20 @@ def table_markdown(table: Any, parent: Any) -> str:
     return "\n".join(lines)
 
 
-def _callout(cell: Any, parent: Any) -> str:
-    """A one-cell table as a blockquote, which is what Word uses one for.
+def callout(container: Any, parent: Any) -> str:
+    """The paragraphs of a box Word drew, as a blockquote.
 
-    Its paragraphs are kept as paragraphs. All nine callouts in the two real guides
-    have more than one, and reading the cell as a single string is what put them on
-    one line - or, once a blockquote marker was in front of it, broke out of the
+    `container` is anything whose own w:p children are its blocks - the w:tc of a
+    one-cell table, or the w:txbxContent of a text box. Word draws a box either way
+    and means the same thing by it, so they render the same way.
+
+    The paragraphs are kept as paragraphs. All nine callouts in the two real guides
+    have more than one, and reading the container as a single string is what put them
+    on one line - or, once a blockquote marker was in front of it, broke out of the
     quote at the first newline.
     """
     quoted: list[str] = []
-    for block in _cell_blocks(cell, parent):
+    for block in _own_blocks(container, parent):
         if quoted:
             quoted.append(">")
         quoted.extend(f"> {line}" for line in block.split("\n"))
@@ -144,26 +152,27 @@ def _cell_markdown(cell: Any | None, parent: Any) -> str:
     if cell is None:
         return ""
 
-    blocks = _CELL_BREAK.join(_cell_blocks(cell, parent))
+    blocks = _CELL_BREAK.join(_own_blocks(cell, parent))
     return _ROW_BREAK.sub(_CELL_BREAK, blocks).replace("|", _ESCAPED_PIPE)
 
 
-def _cell_blocks(cell: Any, parent: Any) -> list[str]:
-    """A cell's own paragraphs as Markdown blocks, in order.
+def _own_blocks(container: Any, parent: Any) -> list[str]:
+    """A container's own paragraphs as Markdown blocks, in order.
 
     Consecutive numbered paragraphs are gathered into one list block, as they are in
     the body. The gathering is written out again here rather than shared with
     parser.py's: the two agree on nothing but `lists`' own two functions, and already
     disagree on what closes a run and on how the blocks that come out are joined.
 
-    Only the cell's own paragraphs are read. A table nested inside a cell is left
-    alone - there are none in either real guide, and one would need a table's shape
-    inside a cell that cannot hold a line break.
+    Only the container's own paragraphs are read, which is what "own" is doing in the
+    name. A table nested inside a cell is left alone - there are none in either real
+    guide, and one would need a table's shape inside a cell that cannot hold a line
+    break. A text box nested inside a text box is left alone for the same reason.
     """
     blocks: list[str] = []
     run: list[tuple[lists.ListItem, str]] = []
 
-    for element in cell.findall(qn("w:p")):
+    for element in container.findall(qn("w:p")):
         paragraph = Paragraph(element, parent)
         markdown = inline.paragraph_markdown(paragraph)
 
