@@ -52,6 +52,39 @@ def _hyperlink(paragraph, *texts: str, url: str = "", anchor: str = "") -> list:
     return runs
 
 
+def _fld_char(paragraph, char_type: str) -> None:
+    """Append a run holding one field boundary."""
+    element = OxmlElement("w:fldChar")
+    element.set(qn("w:fldCharType"), char_type)
+    paragraph.add_run()._r.append(element)
+
+
+def _instr_text(paragraph, text: str) -> None:
+    """Append a run holding part of a field's instruction."""
+    element = OxmlElement("w:instrText")
+    element.text = text
+    paragraph.add_run()._r.append(element)
+
+
+def _field(
+    paragraph, *instructions: str, result: str | None = None, closed: bool = True
+) -> None:
+    """Append a Word field: begin, instruction, separate, result, end.
+
+    One run per instruction string, as Word splits a long instruction. Passing no
+    result leaves out the separate too, which is a field Word never rendered;
+    `closed=False` leaves out the end, which is a paragraph Word stopped mid-field.
+    """
+    _fld_char(paragraph, "begin")
+    for instruction in instructions:
+        _instr_text(paragraph, instruction)
+    if result is not None:
+        _fld_char(paragraph, "separate")
+        paragraph.add_run(result)
+    if closed:
+        _fld_char(paragraph, "end")
+
+
 def _break(run, break_type: str | None = None) -> None:
     """Add a w:br to a run, of the given type or of none at all."""
     element = OxmlElement("w:br")
@@ -223,6 +256,36 @@ class TestHyperlinks:
             "[Guidance page](https://example.org/guidance)"
         )
 
+    def test_adjacent_links_to_the_same_target_are_one_link(self, docx_bytes):
+        """Word writes a phrase broken by an edit as two w:hyperlink siblings.
+
+        The target is a mark like any other, so the rule that merges adjacent runs
+        wearing the same marks already makes these one link. Without it the reader
+        is shown the same destination twice in a row, mid-phrase.
+        """
+
+        def build(document):
+            paragraph = document.add_paragraph()
+            _hyperlink(paragraph, "Basic ", url="https://example.org/guidance")
+            _hyperlink(paragraph, "navigation", url="https://example.org/guidance")
+
+        assert _content(docx_bytes, build) == (
+            "[Basic navigation](https://example.org/guidance)"
+        )
+
+    def test_adjacent_links_to_different_targets_stay_apart(self, docx_bytes):
+        """The guard on merging: a shared target is what makes two links one."""
+
+        def build(document):
+            paragraph = document.add_paragraph()
+            _hyperlink(paragraph, "Claim form", url="https://example.org/claim")
+            _hyperlink(paragraph, "Payment dates", url="https://example.org/payment")
+
+        assert _content(docx_bytes, build) == (
+            "[Claim form](https://example.org/claim)"
+            "[Payment dates](https://example.org/payment)"
+        )
+
     def test_a_bookmark_is_kept_exactly_as_word_wrote_it(self, docx_bytes):
         """Resolving one to a section is a separate question the PoC got wrong."""
 
@@ -295,6 +358,91 @@ class TestHyperlinks:
             _hyperlink(document.add_paragraph(), "Guidance")
 
         assert _content(docx_bytes, build) == "Guidance"
+
+
+class TestFieldLinks:
+    """Word's older HYPERLINK field, which writes a link without a w:hyperlink.
+
+    Six of these across the two real guides reached the page as unlinked text: the
+    address is in the field's instruction, and an instruction is not w:t.
+    """
+
+    def test_a_field_hyperlink_is_a_link(self, docx_bytes):
+        def build(document):
+            _field(
+                document.add_paragraph(),
+                ' HYPERLINK "https://example.org/claim" ',
+                result="Claim form",
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Claim form](https://example.org/claim)"
+        )
+
+    def test_an_instruction_split_across_runs_is_one_target(self, docx_bytes):
+        """Word breaks a long instruction wherever it likes, mid-address included."""
+
+        def build(document):
+            _field(
+                document.add_paragraph(),
+                " HYPERLINK ",
+                '"https://example.org/',
+                'claim" ',
+                result="Claim form",
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Claim form](https://example.org/claim)"
+        )
+
+    def test_a_field_word_never_rendered_says_nothing(self, docx_bytes):
+        """With no separate there is no result, and the instruction is not text."""
+
+        def build(document):
+            paragraph = document.add_paragraph("See the guidance. ")
+            _field(paragraph, ' HYPERLINK "https://example.org/claim" ')
+
+        assert _content(docx_bytes, build) == "See the guidance."
+
+    def test_a_field_hyperlink_with_no_text_is_not_a_link(self, docx_bytes):
+        """An empty link renders as `[]()`, which is a defect on the page."""
+
+        def build(document):
+            paragraph = document.add_paragraph("See the guidance. ")
+            _field(paragraph, ' HYPERLINK "https://example.org/claim" ', result="   ")
+
+        assert _content(docx_bytes, build) == "See the guidance."
+
+    def test_a_field_left_open_still_puts_its_text_on_the_page(self, docx_bytes):
+        """Word ends a paragraph between a field's text and its end boundary.
+
+        It does so once in one of the two real guides, and waiting for an end that
+        never comes drops the words along with the link.
+        """
+
+        def build(document):
+            _field(
+                document.add_paragraph(),
+                ' HYPERLINK "https://example.org/claim" ',
+                result="Claim form",
+                closed=False,
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Claim form](https://example.org/claim)"
+        )
+
+    def test_a_field_that_is_not_a_link_is_left_as_its_text(self, docx_bytes):
+        """A page number is what PAGEREF renders; the bookmark it read is not text."""
+
+        def build(document):
+            _field(
+                document.add_paragraph(),
+                " PAGEREF _Ref17831 \\h ",
+                result="12",
+            )
+
+        assert _content(docx_bytes, build) == "12"
 
 
 class TestTabsAndBreaks:

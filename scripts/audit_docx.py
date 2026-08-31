@@ -27,7 +27,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import docx
 from docx.oxml.ns import qn
@@ -56,6 +56,9 @@ _WORD = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*")
 _MD_LINK = re.compile(r"!?\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
 
 _WHITESPACE_RUN = re.compile(r"\s+")
+
+# A link field's instruction, e.g. `HYPERLINK "https://example.org/a"`.
+_HYPERLINK_FIELD = re.compile(r'HYPERLINK\s+"([^"]*)"', re.IGNORECASE)
 
 # Trailing characters a URL can pick up from the prose around it.
 _URL_TRAILING = ".,;:!?)]}'\"’"
@@ -194,27 +197,89 @@ def rendered_text(paragraph: Paragraph) -> str:
     without a space -- Word splits a single word across runs freely -- while a tab
     or a line break separates.
     """
+    return element_text(paragraph._p)
+
+
+def element_text(element: Any) -> str:
+    """The text this element and everything beneath it puts on the page."""
     parts: list[str] = []
-    for element in paragraph._p.iter():
-        if element.tag == qn("w:t"):
-            parts.append(element.text or "")
-        elif element.tag in (qn("w:tab"), qn("w:br"), qn("w:cr")):
+    for node in element.iter():
+        if node.tag == qn("w:t"):
+            parts.append(node.text or "")
+        elif node.tag in (qn("w:tab"), qn("w:br"), qn("w:cr")):
             parts.append(" ")
     return "".join(parts)
 
 
 def hyperlink_urls(paragraph: Paragraph) -> Iterator[str]:
-    """The targets of this paragraph's external hyperlinks.
+    """The targets of this paragraph's external hyperlinks, in both forms.
 
-    A link's address lives in the relationships part, not in the text, so it is
-    invisible to any amount of reading the paragraph. Links to a bookmark inside the
-    document carry `w:anchor` and no relationship, and are not URLs.
+    A link's address lives in the relationships part or in a field's instruction,
+    never in the text, so it is invisible to any amount of reading the paragraph.
+    Links to a bookmark inside the document carry `w:anchor` and no relationship,
+    and are not URLs. A link Word renders no text for puts nothing on the page, so
+    it is not counted as one.
+
+    The field walk deliberately repeats the parser's rather than sharing it: this
+    side of the audit is the oracle, and a fault the two held in common would
+    cancel itself out of the score.
     """
     relationships = paragraph.part.rels
     for link in paragraph._p.iter(qn("w:hyperlink")):
         relationship_id = link.get(qn("r:id"))
-        if relationship_id and relationship_id in relationships:
+        if relationship_id in relationships and element_text(link).strip():
             yield relationships[relationship_id].target_ref
+
+    yield from field_hyperlink_urls(paragraph)
+
+
+def field_hyperlink_urls(paragraph: Paragraph) -> Iterator[str]:
+    """The targets of this paragraph's legacy HYPERLINK fields.
+
+    A field is a run sequence: a fldChar begin, the runs spelling the instruction,
+    a separate, the runs Word rendered from it, and an end. The end is not always
+    written -- one of the two real guides stops a paragraph mid-field -- so a field
+    still open when the runs are exhausted counts as much as a closed one.
+    """
+    target = ""
+    instruction = ""
+    rendered = ""
+    showing_result = False
+
+    for run in paragraph._p.iter(qn("w:r")):
+        boundary = fld_char_type(run)
+        if boundary == "begin":
+            target, instruction, rendered, showing_result = "", "", "", False
+        elif boundary == "separate":
+            target = hyperlink_field_target(instruction)
+            showing_result = True
+        elif boundary == "end":
+            if target and rendered.strip():
+                yield target
+            target, rendered = "", ""
+        elif showing_result:
+            rendered += element_text(run)
+        else:
+            instruction += "".join(
+                element.text or "" for element in run.iter(qn("w:instrText"))
+            )
+
+    if target and rendered.strip():
+        yield target
+
+
+def fld_char_type(run: Any) -> str:
+    """Which end of a field this run marks, or "" for an ordinary run."""
+    element = run.find(qn("w:fldChar"))
+    if element is None:
+        return ""
+    return str(element.get(qn("w:fldCharType")) or "")
+
+
+def hyperlink_field_target(instruction: str) -> str:
+    """The address a HYPERLINK field points at, or "" for any other field."""
+    match = _HYPERLINK_FIELD.match(instruction.strip())
+    return match.group(1) if match else ""
 
 
 def cell_paragraphs(table: Table) -> Iterator[Paragraph]:
