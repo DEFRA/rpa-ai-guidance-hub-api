@@ -8,34 +8,48 @@ Each case is parsed through a document with a heading, because content only reac
 the output as a section's content.
 """
 
+from collections.abc import Callable
+
 import pytest
+from docx.document import Document
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml.ns import qn
 from docx.oxml.shared import OxmlElement
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
 
 from app.guidance.parsing import parser
 
 HEADING = "Applying"
 
+# The `docx_bytes` fixture's contract, which its docstring otherwise states only in
+# prose: a test hands it a callable that populates a document and gets the .docx
+# bytes back. Naming it here is also what stops an editor inferring these helpers'
+# parameters structurally and guessing wrong.
+Build = Callable[[Document], None]
+DocxBytes = Callable[[Build], bytes]
 
-def _content(docx_bytes, build) -> str:
+
+def _content(docx_bytes: DocxBytes, build: Build) -> str:
     """The Markdown of the one section `build` writes its paragraphs into."""
 
-    def with_heading(document):
+    def with_heading(document: Document) -> None:
         document.add_heading(HEADING, level=1)
         build(document)
 
     return parser.parse_docx(docx_bytes(with_heading)).sections[0].content
 
 
-def _colour(run, value: str) -> None:
+def _colour(run: Run, value: str) -> None:
     """Colour a run by raw w:val, including values python-docx will not write."""
     element = OxmlElement("w:color")
     element.set(qn("w:val"), value)
     run._r.get_or_add_rPr().append(element)
 
 
-def _hyperlink(paragraph, *texts: str, url: str = "", anchor: str = "") -> list:
+def _hyperlink(
+    paragraph: Paragraph, *texts: str, url: str = "", anchor: str = ""
+) -> list[Run]:
     """Append a w:hyperlink holding one run per text, as Word splits anchor text."""
     link = OxmlElement("w:hyperlink")
     if url:
@@ -52,14 +66,14 @@ def _hyperlink(paragraph, *texts: str, url: str = "", anchor: str = "") -> list:
     return runs
 
 
-def _fld_char(paragraph, char_type: str) -> None:
+def _fld_char(paragraph: Paragraph, char_type: str) -> None:
     """Append a run holding one field boundary."""
     element = OxmlElement("w:fldChar")
     element.set(qn("w:fldCharType"), char_type)
     paragraph.add_run()._r.append(element)
 
 
-def _instr_text(paragraph, text: str) -> None:
+def _instr_text(paragraph: Paragraph, text: str) -> None:
     """Append a run holding part of a field's instruction."""
     element = OxmlElement("w:instrText")
     element.text = text
@@ -67,7 +81,10 @@ def _instr_text(paragraph, text: str) -> None:
 
 
 def _field(
-    paragraph, *instructions: str, result: str | None = None, closed: bool = True
+    paragraph: Paragraph,
+    *instructions: str,
+    result: str | None = None,
+    closed: bool = True,
 ) -> None:
     """Append a Word field: begin, instruction, separate, result, end.
 
@@ -85,7 +102,7 @@ def _field(
         _fld_char(paragraph, "end")
 
 
-def _break(run, break_type: str | None = None) -> None:
+def _break(run: Run, break_type: str | None = None) -> None:
     """Add a w:br to a run, of the given type or of none at all."""
     element = OxmlElement("w:br")
     if break_type is not None:
@@ -487,3 +504,119 @@ class TestTabsAndBreaks:
             paragraph.add_run("the deadline.")
 
         assert _content(docx_bytes, build) == "Apply before the deadline."
+
+
+class TestEscapingWhatTheAuthorTyped:
+    """Text that happens to look like syntax has to be written so it says itself.
+
+    The rule is the editor's own serialiser, character for character, so the
+    Markdown the parser writes is already the Markdown the editor would save and
+    the round trip has nothing left to change.
+    """
+
+    @pytest.mark.parametrize(
+        ("typed", "written"),
+        [
+            pytest.param("<CS Claim Revenue>", "&lt;CS Claim Revenue&gt;", id="angles"),
+            pytest.param(
+                "Rural Payments & Land", "Rural Payments &amp; Land", id="amp"
+            ),
+        ],
+    )
+    def test_a_placeholder_is_not_handed_to_the_renderer_as_a_tag(
+        self, docx_bytes, typed, written
+    ):
+        """23 runs across the two real guides read as HTML tags without this."""
+
+        def build(document):
+            document.add_paragraph().add_run(typed)
+
+        assert _content(docx_bytes, build) == written
+
+    def test_the_ampersand_is_encoded_before_the_angle_brackets(self, docx_bytes):
+        """The other order gives `&amp;lt;`, which is the escape shown to the reader."""
+
+        def build(document):
+            document.add_paragraph().add_run("<a & b>")
+
+        assert _content(docx_bytes, build) == "&lt;a &amp; b&gt;"
+
+    @pytest.mark.parametrize(
+        "character",
+        [
+            pytest.param("\\", id="backslash"),
+            pytest.param("`", id="backtick"),
+            pytest.param("*", id="asterisk"),
+            pytest.param("_", id="underscore"),
+            pytest.param("[", id="open-bracket"),
+            pytest.param("]", id="close-bracket"),
+            pytest.param("~", id="tilde"),
+        ],
+    )
+    def test_each_syntax_character_is_written_as_itself(self, docx_bytes, character):
+        """All seven unconditionally: which one would parse as syntax depends on
+        where it sits, and over-escaping renders the same."""
+
+        def build(document):
+            document.add_paragraph().add_run(f"Field{character}name")
+
+        assert _content(docx_bytes, build) == f"Field\\{character}name"
+
+    def test_a_backslash_is_escaped_once_and_not_again_by_its_own_rule(
+        self, docx_bytes
+    ):
+        """Escaping the escape character last would double every backslash added."""
+
+        def build(document):
+            document.add_paragraph().add_run("a\\b*c")
+
+        assert _content(docx_bytes, build) == "a\\\\b\\*c"
+
+    def test_an_asterisk_in_the_text_no_longer_opens_emphasis(self, docx_bytes):
+        """The six asterisks of CS's filename rule, where `*[Title]*` disappeared."""
+
+        def build(document):
+            document.add_paragraph().add_run("[SBI]*[Title]*[Scheme Year]")
+
+        assert _content(docx_bytes, build) == (
+            "\\[SBI\\]\\*\\[Title\\]\\*\\[Scheme Year\\]"
+        )
+
+    def test_a_links_text_is_escaped_and_its_destination_is_not(self, docx_bytes):
+        """The destination is an address, not prose: an escape in it breaks the link."""
+
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(),
+                "Form_2 [draft]",
+                url="https://example.org/a_b~c",
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Form\\_2 \\[draft\\]](https://example.org/a_b~c)"
+        )
+
+    def test_the_markers_the_parser_writes_are_not_escaped(self, docx_bytes):
+        """The rule sees the author's text only; every marker is added after it."""
+
+        def build(document):
+            paragraph = document.add_paragraph()
+            paragraph.add_run("Note_1").bold = True
+            paragraph.add_run(" ")
+            _colour(paragraph.add_run("[urgent]"), "FF0000")
+
+        assert _content(docx_bytes, build) == (
+            '**Note\\_1** <span style="color: #FF0000">\\[urgent\\]</span>'
+        )
+
+    def test_a_hard_line_break_is_still_a_break_and_not_an_escaped_backslash(
+        self, docx_bytes
+    ):
+        """The break's own backslash is written after the escape and stays one."""
+
+        def build(document):
+            run = document.add_paragraph().add_run("Team_A")
+            _break(run)
+            run.add_text("Team_B")
+
+        assert _content(docx_bytes, build) == "Team\\_A\\\nTeam\\_B"

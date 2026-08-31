@@ -27,6 +27,15 @@ the author reached for, and that is the part worth carrying.
 A link is not always an element. Word's older HYPERLINK field writes the address as
 an instruction between field boundaries, with the text rendered from it following,
 and six of those across the two real guides reached the page as unlinked text.
+
+Text the author typed is escaped, so that text which happens to look like syntax is
+read as text. Word says nothing about the difference: "<CS Claim Revenue>" is a
+placeholder for a reader and a tag to a renderer, and "[SBI]*[Title]*" loses its
+asterisks to emphasis. The escape is unconditional rather than asking which asterisk
+would have opened emphasis - that question has a different answer in every position,
+while over-escaping renders identically - and it is character-for-character the
+function the editor applies, so what the parser writes is already what the editor
+would save.
 """
 
 from __future__ import annotations
@@ -69,6 +78,12 @@ _NEEDS_BRACKETS = re.compile(r"[\s()]")
 # it across several instrText runs, so it is matched once they are reassembled.
 _HYPERLINK_INSTRUCTION = re.compile(r'HYPERLINK\s+"([^"]*)"', re.IGNORECASE)
 
+# What the editor's serialiser does to a text node, taken from it exactly: first
+# encodeHtmlEntities, then escapeMarkdownSyntax. The ampersand is replaced *first*
+# and this is load-bearing - the other way round, "<" would become "&amp;lt;".
+_HTML_ENTITIES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+_MARKDOWN_SYNTAX = re.compile(r"([\\`*_\[\]~])")
+
 
 class _FieldBoundary(StrEnum):
     """The three positions a fldChar marks, spelled as Word spells them."""
@@ -78,7 +93,13 @@ class _FieldBoundary(StrEnum):
     END = "end"
 
 
-_FIELD_BOUNDARIES = {boundary.value: boundary for boundary in _FieldBoundary}
+# What Word writes is a value, not a member, and this turns one into the other -
+# through .get(), so a value that is no boundary at all needs no branch of its own.
+# Built from __members__ because an enum class is iterable only through its
+# metaclass, which static analysis routinely fails to see; it is the same sequence.
+_FIELD_BOUNDARIES = {
+    boundary.value: boundary for boundary in _FieldBoundary.__members__.values()
+}
 
 
 @dataclass(frozen=True)
@@ -340,7 +361,20 @@ def _render_span(marks: _Marks, text: str) -> str:
 
     leading = text[: len(text) - len(text.lstrip())]
     trailing = text[len(text.rstrip()) :]
-    return f"{leading}{_marked_up(core, marks)}{trailing}"
+    return f"{leading}{_marked_up(_escaped(core), marks)}{trailing}"
+
+
+def _escaped(text: str) -> str:
+    """Document text, written so that it says itself and not syntax.
+
+    This is the only place the parser sees text the author typed rather than markup
+    it generated itself, which is what lets the rule be unconditional: the markers,
+    the brackets around a link and its destination are all added after this point,
+    and the space around the span was hoisted out before it.
+    """
+    for character, entity in _HTML_ENTITIES:
+        text = text.replace(character, entity)
+    return _MARKDOWN_SYNTAX.sub(r"\\\1", text)
 
 
 def _marked_up(text: str, marks: _Marks) -> str:

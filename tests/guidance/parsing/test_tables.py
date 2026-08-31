@@ -234,6 +234,19 @@ class TestWhatACellHolds:
 
         assert _table_content(docx_bytes, build).endswith("| Withdrawal \\| reject |")
 
+    def test_the_pipe_rule_and_the_text_rule_compose(self, docx_bytes):
+        """The pipe is a property of the row and the rest a property of the text, so
+        each is escaped where it is known about and neither undoes the other."""
+
+        def build(document):
+            table = document.add_table(rows=2, cols=1)
+            table.cell(0, 0).text = "Case name"
+            table.cell(1, 0).text = "<Claim ID> | [draft]"
+
+        assert _table_content(docx_bytes, build).endswith(
+            "| &lt;Claim ID&gt; \\| \\[draft\\] |"
+        )
+
 
 class TestCallouts:
     def test_a_one_cell_table_is_a_blockquote(self, docx_bytes):
