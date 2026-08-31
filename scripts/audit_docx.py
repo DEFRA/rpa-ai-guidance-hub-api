@@ -22,6 +22,7 @@ repository, which resolves paths and audits several documents at once.
 from __future__ import annotations
 
 import argparse
+import html
 import re
 import sys
 from collections import Counter
@@ -53,7 +54,24 @@ _URL = re.compile(r"(?:https?://|www\.)[^\s<>\"'\]\)}]+", re.IGNORECASE)
 _WORD = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*")
 
 # Markdown link and image syntax: the display text is rendered, the target is a URL.
-_MD_LINK = re.compile(r"!?\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
+# The target is wrapped in <> when it holds whitespace or a bracket and written bare
+# otherwise. That is CommonMark, and it is also exactly what the parser's own
+# `_destination` writes; reading only the bare form stopped one SharePoint address at
+# the "(" in its filename and scored an address the Markdown states in full as lost.
+_MD_LINK = re.compile(r"!?\[([^\]]*)\]\((?:<([^>]+)>|([^)\s]+))[^)]*\)")
+
+# The inline HTML the parser writes where Markdown has no marker of its own: <u>,
+# <sup>, <sub>, <span style="...">, and <br> for a line break inside a table row.
+# The tag name is letters and digits, so an angle-wrapped link destination -- which
+# has a colon straight after its scheme -- is not mistaken for a tag.
+_LINE_BREAK_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_HTML_TAG = re.compile(r"</?[a-z][a-z0-9]*(?:\s[^>]*)?/?>", re.IGNORECASE)
+
+# Markup compatibility, which python-docx's namespace map does not carry.
+_MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
+_ALTERNATE_CONTENT = f"{_MC}AlternateContent"
+_CHOICE = f"{_MC}Choice"
+_FALLBACK = f"{_MC}Fallback"
 
 _WHITESPACE_RUN = re.compile(r"\s+")
 
@@ -203,12 +221,52 @@ def rendered_text(paragraph: Paragraph) -> str:
 def element_text(element: Any) -> str:
     """The text this element and everything beneath it puts on the page."""
     parts: list[str] = []
-    for node in element.iter():
+    for node in rendered_nodes(element):
         if node.tag == qn("w:t"):
             parts.append(node.text or "")
         elif node.tag in (qn("w:tab"), qn("w:br"), qn("w:cr")):
             parts.append(" ")
     return "".join(parts)
+
+
+def rendered_nodes(element: Any) -> Iterator[Any]:
+    """`element` and everything beneath it that reaches the page, in reading order.
+
+    A plain `element.iter()` would do, were it not for `mc:AlternateContent`: that
+    holds one copy of the same content per consumer that might read it, and Word
+    prints exactly one of them. One text box written twice over, as DrawingML in
+    `mc:Choice` and as VML in `mc:Fallback`, is 85 words of a real guide credited to
+    a document that says them once -- and, because the audit is the oracle, 85 words
+    the parser is then reported as having lost.
+
+    This is the third defect of the family, after the `id(cell._tc)` reuse fixed in
+    `c15122f` and the merged cells before it: text Word writes once being read more
+    than once. Look here first when a section scores low with nothing visibly wrong
+    in the Markdown.
+    """
+    pending = [element]
+    while pending:
+        node = pending.pop()
+        yield node
+        pending.extend(reversed(rendered_children(node)))
+
+
+def rendered_children(element: Any) -> list[Any]:
+    """The children a reader sees: one branch of an alternate, all of anything else.
+
+    The first `mc:Choice` is what Word takes when it understands the markup the
+    branch requires, which for a modern document it does; `mc:Fallback` is what it
+    falls back to and is the answer only when there is no choice at all. Evaluating
+    `mc:Requires` properly would need a table of every namespace we can render, and
+    neither guide holds an alternate with more than one choice.
+    """
+    if element.tag != _ALTERNATE_CONTENT:
+        return list(element)
+
+    branch = element.find(_CHOICE)
+    if branch is None:
+        branch = element.find(_FALLBACK)
+    return [] if branch is None else [branch]
 
 
 def hyperlink_urls(paragraph: Paragraph) -> Iterator[str]:
@@ -381,18 +439,41 @@ def markdown_sections(document: models.MarkdownDocument) -> list[Section]:
 def markdown_bag(markdown: str) -> Bag:
     """Reduce Markdown to the symbols it renders as.
 
-    A link contributes both halves: its display text is words on the page and its
-    target is a URL. The remaining syntax needs no stripping -- `#`, `*`, `|` and
-    the rest are punctuation, which the word pattern never matches.
+    Both sides of the audit have to be counted as a reader sees them, so this side
+    is rendered rather than read. A link contributes both halves: its display text
+    is words on the page and its target is a URL. Then the inline HTML resolves --
+    see `rendered_markdown`.
+
+    Markdown's own markers need no stripping: `#`, `*`, `|`, the backslash of an
+    escape and the rest are punctuation, which the word pattern never matches. That
+    was once the whole story, and it stopped being so when the parser began writing
+    tags for the marks Markdown cannot spell.
     """
     bag = Bag()
 
     def unlink(match: re.Match[str]) -> str:
-        bag.add_url(match.group(2))
+        bag.add_url(match.group(2) or match.group(3))
         return f" {match.group(1)} "
 
-    bag.add_text(_MD_LINK.sub(unlink, markdown))
+    bag.add_text(rendered_markdown(_MD_LINK.sub(unlink, markdown)))
     return bag
+
+
+def rendered_markdown(markdown: str) -> str:
+    """Markdown with its inline HTML resolved: tags gone, entities decoded.
+
+    A `<br>` is a line break and separates the words either side of it, which is
+    exactly what `element_text` does with a `w:br`, so the two sides agree by
+    construction. Every other tag closes up, and that is the point of doing this at
+    all: Word prints "16th" as one word however the "th" is drawn, and reading
+    `16<sup>th</sup>` as written yields "16" and "th" and matches neither.
+
+    The tags go *before* the entities are decoded, and the order is load-bearing:
+    the other way round, "&lt;Name and date&gt;" decodes to "<Name and date>" and is
+    then eaten as a tag, losing three words the document prints. It is the same trap
+    the parser carries in the other direction, where "&" has to be encoded first.
+    """
+    return html.unescape(_HTML_TAG.sub("", _LINE_BREAK_TAG.sub(" ", markdown)))
 
 
 def total_bag(sections: list[Section]) -> Bag:
