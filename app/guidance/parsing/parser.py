@@ -13,7 +13,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
-from app.guidance.parsing import inline, models
+from app.guidance.parsing import inline, lists, models
 from app.guidance.parsing.errors import DocumentParseError
 from app.guidance.parsing.ooxml import is_toggle_on
 
@@ -232,6 +232,10 @@ def _extract_sections(
     it, and not one line of body prose - and a contents page is regenerated from the
     headings anyway.
 
+    Consecutive list items are the one kind of content that is not one paragraph to
+    one block: a run of them is held open and rendered together, because what makes
+    a Markdown list is the items standing next to each other.
+
     The bookmarks a cross-reference can point at are collected on the way past. One
     is claimed only where it marks the start of a section, that being the whole of
     what a number can be derived for: 71 of the 72 body cross-references in the two
@@ -240,6 +244,7 @@ def _extract_sections(
     """
     sections: list[models.MarkdownSection] = []
     bookmarks: dict[str, models.MarkdownSection] = {}
+    open_list: list[tuple[lists.ListItem, str]] = []
     # The document's own frame is never popped: it sits at level 0, and a heading's
     # level is never lower than 1.
     stack = [_OpenSection()]
@@ -252,8 +257,10 @@ def _extract_sections(
         # A heading with nothing in it is a layout artefact - numbering it would put
         # a section in the output that the document does not have.
         if level is None or not heading:
-            _collect_content(sections, paragraph)
+            _collect_body(sections, open_list, paragraph)
             continue
+
+        _close_list(sections, open_list)
 
         while stack[-1].level >= level:
             stack.pop()
@@ -265,6 +272,7 @@ def _extract_sections(
         for name in opened_ahead_of_it + _bookmark_names(paragraph._p):
             bookmarks[name] = section
 
+    _close_list(sections, open_list)
     return sections, bookmarks
 
 
@@ -317,21 +325,62 @@ def _bookmark_names(element: Any) -> list[str]:
     return [name for start in starts if (name := start.get(qn("w:name")))]
 
 
-def _collect_content(
-    sections: list[models.MarkdownSection], paragraph: Paragraph
+def _collect_body(
+    sections: list[models.MarkdownSection],
+    open_list: list[tuple[lists.ListItem, str]],
+    paragraph: Paragraph,
 ) -> None:
-    """File a body paragraph under the open section, where it says anything.
+    """Take one paragraph of the body: another item of the open list run, or prose.
 
-    Contents entries are left out wherever they turn up. They sit ahead of every
-    heading in both real guides and so never reach here, but a document whose
-    contents page opens with a heading of its own would otherwise file its whole
-    table of contents as that section's prose.
+    The list question is asked here rather than at the top of the walk, and that
+    ordering is the whole of the guard on it: both real guides attach numbering to
+    their heading styles as well, so a rule reading numbering alone would make a
+    bullet of all 46 of their headings. By the time a paragraph arrives here it is
+    already not a heading.
+
+    Contents entries are left out wherever they turn up, and are not list items
+    however a document numbers them. They sit ahead of every heading in both real
+    guides and so never reach here, but a document whose contents page opens with a
+    heading of its own would otherwise file its whole table of contents as prose.
     """
-    if not sections or _is_contents(paragraph):
+    if _is_contents(paragraph):
+        _close_list(sections, open_list)
         return
 
-    block = inline.paragraph_markdown(paragraph)
-    if not block:
+    item = lists.list_item(paragraph)
+    if item is not None:
+        open_list.append((item, inline.paragraph_markdown(paragraph)))
+        return
+
+    _close_list(sections, open_list)
+    _append_block(sections, inline.paragraph_markdown(paragraph))
+
+
+def _close_list(
+    sections: list[models.MarkdownSection],
+    open_list: list[tuple[lists.ListItem, str]],
+) -> None:
+    """File the open run of list items as one block, and open a fresh run.
+
+    A run is closed by anything that is not a list item - a heading, a paragraph,
+    or the end of the document - so it always lands in the section it started in.
+    """
+    if not open_list:
+        return
+
+    block = lists.render(open_list)
+    open_list.clear()
+    _append_block(sections, block)
+
+
+def _append_block(sections: list[models.MarkdownSection], block: str) -> None:
+    """Add one finished block of Markdown to the open section, where there is one.
+
+    Anything ahead of the first heading has no section to belong to and is dropped:
+    in both real guides that is the cover page and the contents, and not one line of
+    body prose.
+    """
+    if not sections or not block:
         return
 
     section = sections[-1]
