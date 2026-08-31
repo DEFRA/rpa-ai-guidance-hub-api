@@ -283,20 +283,21 @@ def hyperlink_field_target(instruction: str) -> str:
 
 
 def cell_paragraphs(table: Table) -> Iterator[Paragraph]:
-    """Every paragraph inside a table, row by row, each cell visited once.
+    """Every paragraph inside a table, in document order, each cell visited once.
 
-    A merged cell is returned once per grid position it spans, so walking the rows
-    naively would count its text as many times as it is wide -- text the document
-    prints once, scored as several. Cells are tracked by their underlying element
-    so each contributes its words a single time.
+    Word writes every cell exactly once however it is merged, so the cell elements
+    answer directly the question that de-duplicating a grid can only approximate:
+    `table.rows` hands back a merged cell once per grid position it spans, and text
+    the document prints once would otherwise be scored as several.
+
+    Do not put the grid walk back behind a set of `id(cell._tc)`. Those proxies are
+    built on demand and released immediately, so CPython reuses their addresses and
+    a cell never seen before collides with a freed one and is skipped -- silently,
+    and differently on each run.
     """
-    seen: set[int] = set()
-    for row in table.rows:
-        for cell in row.cells:
-            if id(cell._tc) in seen:
-                continue
-            seen.add(id(cell._tc))
-            yield from cell.paragraphs
+    for cell in table._tbl.iter(qn("w:tc")):
+        for paragraph in cell.findall(qn("w:p")):
+            yield Paragraph(paragraph, table)
 
 
 def style_name(paragraph: Paragraph) -> str:

@@ -10,8 +10,37 @@ headings do not descend one tidy level at a time.
 """
 
 import pytest
+from docx.oxml.ns import qn
+from docx.oxml.shared import OxmlElement
 
 from app.guidance.parsing import parser
+
+
+def _bookmark_start(name: str):
+    """A w:bookmarkStart element, as Word opens a bookmark."""
+    element = OxmlElement("w:bookmarkStart")
+    element.set(qn("w:id"), "1")
+    element.set(qn("w:name"), name)
+    return element
+
+
+def _bookmark_in(paragraph, *names: str) -> None:
+    """Open bookmarks inside a paragraph, where Word usually writes them."""
+    for name in names:
+        paragraph._p.append(_bookmark_start(name))
+
+
+def _bookmark_before(paragraph, name: str) -> None:
+    """Open a bookmark at body level, as a sibling just ahead of a paragraph."""
+    paragraph._p.addprevious(_bookmark_start(name))
+
+
+def _anchor_link(paragraph, text: str, anchor: str) -> None:
+    """Append a link to a bookmark inside the document."""
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("w:anchor"), anchor)
+    link.append(paragraph.add_run(text)._r)
+    paragraph._p.append(link)
 
 
 def _outline(source: bytes) -> list[tuple[str, str]]:
@@ -216,3 +245,99 @@ class TestRenderingTheSections:
 
         assert "## 1 Applying" in markdown
         assert "### 1.1 Land parcels" in markdown
+
+
+class TestBookmarksACrossReferenceCanNameASectionBy:
+    """Word writes a cross-reference as a bookmark name, which no renderer knows.
+
+    The map from name to section exists only while the .docx is open, so if the
+    parser does not build it nothing downstream can. A name is claimed only where
+    it marks the start of a section, that being the whole of what has a number.
+    """
+
+    def test_a_bookmark_on_a_heading_names_that_section(self, docx_bytes):
+        def build(document):
+            document.add_heading("Applying", level=1)
+            _bookmark_in(document.paragraphs[-1], "_Applying")
+
+        bookmarks = parser.parse_docx(docx_bytes(build)).bookmarks
+
+        assert bookmarks["_Applying"].number == "1"
+
+    def test_a_bookmark_opened_ahead_of_a_heading_names_the_section_it_opens(
+        self, docx_bytes
+    ):
+        """Word writes a bookmark wrapping a heading as a sibling before it.
+
+        Attributing it to the paragraph already walked would name the section it
+        sits after, which is the one the reader is being sent away from.
+        """
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            document.add_heading("Eligibility", level=2)
+            _bookmark_before(document.paragraphs[-1], "_Eligibility")
+
+        bookmarks = parser.parse_docx(docx_bytes(build)).bookmarks
+
+        assert bookmarks["_Eligibility"].number == "1.1"
+
+    def test_every_name_on_one_heading_names_it(self, docx_bytes):
+        """Word keeps its own _Toc bookmark beside the author's on ~20 headings."""
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            _bookmark_in(document.paragraphs[-1], "_Toc178312", "_Applying")
+
+        bookmarks = parser.parse_docx(docx_bytes(build)).bookmarks
+
+        assert bookmarks["_Toc178312"] is bookmarks["_Applying"]
+
+    def test_a_bookmark_marking_no_section_start_is_not_claimed(self, docx_bytes):
+        """A bookmark on a list bullet or an annex has no number to be resolved to.
+
+        Leaving it unclaimed keeps the raw name Word wrote, which is a link that
+        goes nowhere rather than one that confidently goes to the wrong section.
+        """
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            document.add_paragraph("Send the form before the deadline.")
+            _bookmark_in(document.paragraphs[-1], "_Deadline")
+
+        bookmarks = parser.parse_docx(docx_bytes(build)).bookmarks
+
+        assert "_Deadline" not in bookmarks
+
+    def test_a_name_the_next_paragraph_does_not_claim_is_dropped(self, docx_bytes):
+        """A bookmark ahead of ordinary prose marks that prose, not a later heading.
+
+        Carrying it on would send the cross-reference to whichever section happened
+        to start next, which is the wrong-section defect in another disguise.
+        """
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            _bookmark_before(document.add_paragraph("Send the form."), "_Deadline")
+            document.add_heading("Payment", level=1)
+
+        bookmarks = parser.parse_docx(docx_bytes(build)).bookmarks
+
+        assert "_Deadline" not in bookmarks
+
+    def test_a_cross_reference_renders_as_the_number_of_its_section(self, docx_bytes):
+        """Forward references are why this is resolved at render time and not sooner.
+
+        The section a link points at does not exist yet when the link is parsed, and
+        its number is not final until the whole document has been walked.
+        """
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            _anchor_link(document.add_paragraph("Continue to "), "Payment", "_Payment")
+            document.add_heading("Payment", level=1)
+            _bookmark_in(document.paragraphs[-1], "_Payment")
+
+        rendered = parser.parse_docx(docx_bytes(build)).markdown()
+
+        assert "[Payment](#2)" in rendered

@@ -55,6 +55,38 @@ class TestImagePrefixes:
         assert "(local/1_img_1.png)" in section.markdown("local/")
 
 
+class TestCrossReferences:
+    """Word writes a cross-reference as a bookmark name; a renderer knows none.
+
+    Resolving it is late-bound for the same reason an image prefix is: a link may
+    point at a section not yet parsed, and no number is final until the walk ends.
+    """
+
+    def test_a_section_rendered_on_its_own_keeps_the_raw_bookmark(self):
+        """A section knows its own number and no other section's."""
+        section = models.MarkdownSection(
+            heading="Applying", content="Continue to [Payment](#_Payment)."
+        )
+
+        assert "[Payment](#_Payment)" in section.markdown()
+
+    def test_prose_matching_a_bookmark_is_left_alone(self):
+        """Only a link target is rewritten, never the document's own words."""
+        payment = models.MarkdownSection(heading="Payment", ordinal=4)
+        section = models.MarkdownSection(
+            heading="Applying",
+            content="The tag #_Payment is not a link.\n\n[Payment](#_Payment)",
+        )
+        document = models.MarkdownDocument(
+            sections=[section], bookmarks={"_Payment": payment}
+        )
+
+        rendered = document.markdown()
+
+        assert "The tag #_Payment is not a link." in rendered
+        assert "[Payment](#4)" in rendered
+
+
 class TestDocumentMarkdown:
     def test_sections_render_one_heading_level_below_their_depth(self):
         parent = models.MarkdownSection(heading="Eligibility", ordinal=3)

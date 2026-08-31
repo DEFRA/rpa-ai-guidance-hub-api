@@ -6,7 +6,7 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import docx
 from docx.opc.exceptions import PackageNotFoundError
@@ -47,9 +47,11 @@ def parse_docx(source: bytes) -> models.MarkdownDocument:
         DocumentParseError: if the bytes are not a readable Word document.
     """
     document = _open(source)
+    sections, bookmarks = _extract_sections(document)
     return models.MarkdownDocument(
         title=_extract_title(document),
-        sections=_extract_sections(document),
+        sections=sections,
+        bookmarks=bookmarks,
     )
 
 
@@ -203,7 +205,9 @@ class _OpenSection:
     children: int = 0
 
 
-def _extract_sections(document: docx.document.Document) -> list[models.MarkdownSection]:
+def _extract_sections(
+    document: docx.document.Document,
+) -> tuple[list[models.MarkdownSection], dict[str, models.MarkdownSection]]:
     """Turn the document's headings into a flat list of sections in document order.
 
     Word does not put the number in the text: both real guides attach the numbering
@@ -220,13 +224,21 @@ def _extract_sections(document: docx.document.Document) -> list[models.MarkdownS
     guides everything there is the cover page and the contents - 25 and 30 blocks of
     it, and not one line of body prose - and a contents page is regenerated from the
     headings anyway.
+
+    The bookmarks a cross-reference can point at are collected on the way past. One
+    is claimed only where it marks the start of a section, that being the whole of
+    what a number can be derived for: 71 of the 72 body cross-references in the two
+    real guides land on a heading, and the odd one out - along with the two on an
+    annex that is not yet a section - is better left as the raw name Word wrote than
+    sent confidently to the wrong place.
     """
     sections: list[models.MarkdownSection] = []
+    bookmarks: dict[str, models.MarkdownSection] = {}
     # The document's own frame is never popped: it sits at level 0, and a heading's
     # level is never lower than 1.
     stack = [_OpenSection()]
 
-    for paragraph in _body_paragraphs(document):
+    for paragraph, opened_ahead_of_it in _body_items(document):
         level = _heading_level(paragraph)
         heading = paragraph.text.strip()
 
@@ -249,19 +261,39 @@ def _extract_sections(document: docx.document.Document) -> list[models.MarkdownS
         sections.append(section)
         stack.append(_OpenSection(level=level, section=section))
 
-    return sections
+        for name in opened_ahead_of_it + _bookmark_names(paragraph._p):
+            bookmarks[name] = section
+
+    return sections, bookmarks
 
 
-def _body_paragraphs(document: docx.document.Document) -> Iterator[Paragraph]:
-    """The body's paragraphs, in document order.
+def _body_items(
+    document: docx.document.Document,
+) -> Iterator[tuple[Paragraph, list[str]]]:
+    """The body's paragraphs in document order, each with the bookmarks ahead of it.
 
     `document.paragraphs` returns the same paragraphs today and would go on doing so.
     The walk is written out here because the body holds the document's tables too,
     and the paragraphs inside a table are reachable from nowhere else.
+
+    It also carries the bookmark names opened between one paragraph and the next: a
+    w:bookmarkStart marking a heading sits either inside that heading's paragraph or
+    as a sibling just ahead of it, and a walk seeing only paragraphs would miss half
+    of them. Names not claimed by the paragraph that follows are dropped with it.
     """
+    opened: list[str] = []
     for element in document.element.body:
-        if element.tag == qn("w:p"):
-            yield Paragraph(element, document)
+        if element.tag == qn("w:bookmarkStart"):
+            opened.extend(_bookmark_names(element))
+        elif element.tag == qn("w:p"):
+            yield Paragraph(element, document), opened
+            opened = []
+
+
+def _bookmark_names(element: Any) -> list[str]:
+    """Every bookmark name opened by this element or anything beneath it."""
+    starts = element.iter(qn("w:bookmarkStart"))
+    return [name for start in starts if (name := start.get(qn("w:name")))]
 
 
 def _collect_content(
