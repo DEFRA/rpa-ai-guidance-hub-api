@@ -13,7 +13,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
-from app.guidance.parsing import inline, lists, models
+from app.guidance.parsing import inline, lists, models, tables
 from app.guidance.parsing.errors import DocumentParseError
 from app.guidance.parsing.ooxml import is_toggle_on
 
@@ -37,6 +37,10 @@ _APPENDIX_LEVEL = 1
 # Word numbers its heading styles from 1, and the level is the whole of the name
 # after the word: "Heading 2 Box" is a style in its own right, not a Heading 2.
 _HEADING_STYLE = re.compile(r"heading\s*([1-9]\d*)$")
+
+# The blocks of a document body. Anything else there - a bookmark, a section break,
+# a proofing mark - says nothing the output carries.
+_BODY_BLOCKS = (qn("w:p"), qn("w:tbl"))
 
 _TITLE_STYLE = "title"
 
@@ -234,7 +238,9 @@ def _extract_sections(
 
     Consecutive list items are the one kind of content that is not one paragraph to
     one block: a run of them is held open and rendered together, because what makes
-    a Markdown list is the items standing next to each other.
+    a Markdown list is the items standing next to each other. A table is the other:
+    it is a block of the body in its own right, and closes any run open when it
+    arrives.
 
     The bookmarks a cross-reference can point at are collected on the way past. One
     is claimed only where it marks the start of a section, that being the whole of
@@ -249,7 +255,13 @@ def _extract_sections(
     # level is never lower than 1.
     stack = [_OpenSection()]
 
-    for paragraph, opened_ahead_of_it in _body_items(document):
+    for element, opened_ahead_of_it in _body_items(document):
+        if element.tag == qn("w:tbl"):
+            _close_list(sections, open_list)
+            _append_block(sections, tables.table_markdown(element, document))
+            continue
+
+        paragraph = Paragraph(element, document)
         appendix = _is_appendix(paragraph)
         level = _APPENDIX_LEVEL if appendix else _heading_level(paragraph)
         heading = paragraph.text.strip()
@@ -298,24 +310,25 @@ def _open_beneath(
 
 def _body_items(
     document: docx.document.Document,
-) -> Iterator[tuple[Paragraph, list[str]]]:
-    """The body's paragraphs in document order, each with the bookmarks ahead of it.
+) -> Iterator[tuple[Any, list[str]]]:
+    """The body's blocks in document order, each with the bookmarks ahead of it.
 
-    `document.paragraphs` returns the same paragraphs today and would go on doing so.
-    The walk is written out here because the body holds the document's tables too,
-    and the paragraphs inside a table are reachable from nowhere else.
+    Elements are yielded as Word wrote them rather than as python-docx proxies, so
+    that deciding what a block is stays with the caller and this walk has only the
+    one job. `document.paragraphs` would return today's paragraphs and go on doing
+    so, but it cannot see a table, and a table is a block of the body like any other.
 
-    It also carries the bookmark names opened between one paragraph and the next: a
+    The walk also carries the bookmark names opened between one block and the next: a
     w:bookmarkStart marking a heading sits either inside that heading's paragraph or
     as a sibling just ahead of it, and a walk seeing only paragraphs would miss half
-    of them. Names not claimed by the paragraph that follows are dropped with it.
+    of them. Names not claimed by the block that follows are dropped with it.
     """
     opened: list[str] = []
     for element in document.element.body:
         if element.tag == qn("w:bookmarkStart"):
             opened.extend(_bookmark_names(element))
-        elif element.tag == qn("w:p"):
-            yield Paragraph(element, document), opened
+        elif element.tag in _BODY_BLOCKS:
+            yield element, opened
             opened = []
 
 
