@@ -231,31 +231,6 @@ class TestTheMarksARunCarries:
 
         assert _content(docx_bytes, build) == "***<u>Overdue</u>***"
 
-    def test_a_colour_the_author_reached_for_is_kept(self, docx_bytes):
-        """Red marks a mandatory field in both real guides, and says something."""
-
-        def build(document):
-            _colour(document.add_paragraph().add_run("Mandatory"), "FF0000")
-
-        assert _content(docx_bytes, build) == (
-            '<span style="color: #FF0000">Mandatory</span>'
-        )
-
-    @pytest.mark.parametrize(
-        "value",
-        [
-            pytest.param("000000", id="black"),
-            pytest.param("auto", id="auto"),
-        ],
-    )
-    def test_the_default_text_colour_is_not_a_colour(self, docx_bytes, value):
-        """Word spells the default colour out, on four fifths of the coloured runs."""
-
-        def build(document):
-            _colour(document.add_paragraph().add_run("Ordinary"), value)
-
-        assert _content(docx_bytes, build) == "Ordinary"
-
 
 class TestHyperlinks:
     def test_a_link_split_across_runs_is_one_link(self, docx_bytes):
@@ -323,10 +298,43 @@ class TestHyperlinks:
             "[Claim form](<https://example.org/a b(1)>)"
         )
 
+    def test_a_target_whose_brackets_balance_is_left_bare(self, docx_bytes):
+        """CommonMark reads a balanced pair as part of the destination, and an
+        address carrying brackets at all - a filename in a path - balances them. The
+        editor writes such a target bare, so wrapping it here would have the first
+        save rewrite the link, and any table holding it re-measured and re-padded."""
+
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(),
+                "Claim form",
+                url="https://example.org/a(1).pdf",
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Claim form](https://example.org/a(1).pdf)"
+        )
+
+    def test_a_target_whose_brackets_do_not_balance_is_bracketed(self, docx_bytes):
+        """A close with no open ends the destination where it sits, taking the rest
+        of the address out of the link with it."""
+
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(), "Claim form", url="https://example.org/a)b"
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Claim form](<https://example.org/a)b>)"
+        )
+
     def test_the_styling_word_paints_on_a_link_is_not_repeated_in_the_text(
         self, docx_bytes
     ):
-        """Every hyperlink is underlined and blue by style, so neither says anything."""
+        """Every hyperlink is underlined and blue by style, so neither says anything.
+
+        Dropping the colour here is also what keeps a coloured span and a link from
+        ever nesting, which nothing reading the span's brackets back could unpick."""
 
         def build(document):
             runs = _hyperlink(
@@ -605,9 +613,7 @@ class TestEscapingWhatTheAuthorTyped:
             paragraph.add_run(" ")
             _colour(paragraph.add_run("[urgent]"), "FF0000")
 
-        assert _content(docx_bytes, build) == (
-            '**Note\\_1** <span style="color: #FF0000">\\[urgent\\]</span>'
-        )
+        assert _content(docx_bytes, build) == ("**Note\\_1** [\\[urgent\\]]{.red}")
 
     def test_a_hard_line_break_is_still_a_break_and_not_an_escaped_backslash(
         self, docx_bytes

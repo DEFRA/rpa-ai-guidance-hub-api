@@ -17,11 +17,11 @@ module's work, and two rules do most of it:
 Bold, italic and strikethrough are written as Markdown. Underline, superscript and
 subscript have no Markdown, so they are written as the HTML that Markdown allows.
 
-Colour is kept only where it says something. Word writes the default text colour out
-explicitly rather than leaving it unsaid, so most coloured runs say only "000000" or
-"auto"; most of the remainder is the blue Word paints on a hyperlink, which the output
-already renders as a link. What is left is a colour the author reached for, and that is
-the part worth carrying.
+Colour has no Markdown either and is deliberately *not* written as HTML - `colours`
+owns both what it means and how it is spelled. It is kept only where it says
+something: Word writes the default text colour out explicitly rather than leaving it
+unsaid, and paints its own blue on every hyperlink, which the output already renders
+as a link. What is left is a colour the author reached for.
 
 A link is not always an element. Word's older HYPERLINK field writes the address as
 an instruction between field boundaries, with the text rendered from it following,
@@ -47,15 +47,11 @@ from typing import TYPE_CHECKING, Any
 
 from docx.oxml.ns import qn
 
-from app.guidance.parsing import images
+from app.guidance.parsing import colours, images
 from app.guidance.parsing.ooxml import W_VAL, is_toggle_on
 
 if TYPE_CHECKING:
     from docx.text.paragraph import Paragraph
-
-# The default text colour, written out rather than left unsaid. Word spells hex in
-# upper case and "auto" in lower, so both are compared folded.
-_UNCOLOURED = ("", "AUTO", "000000")
 
 # Markdown has no tab stop, and a line that opens with one is a code block, so a tab
 # is spent as the separator it is.
@@ -70,9 +66,10 @@ _SOFT_BREAK_TYPES = (None, "textWrapping")
 
 _VERTICAL_TAGS = {"superscript": "sup", "subscript": "sub"}
 
-# Whitespace ends a Markdown link destination and a bracket closes it, so a target
-# carrying either has to be wrapped in <>. Everything else reads better bare.
-_NEEDS_BRACKETS = re.compile(r"[\s()]")
+# Whitespace ends a bare Markdown link destination, so a target carrying any has to
+# be wrapped in <>. Parentheses do not: CommonMark allows them bare while they
+# balance, which the addresses that carry them - a filename in a path - always do.
+_HAS_WHITESPACE = re.compile(r"\s")
 
 # A link field's instruction, e.g. `HYPERLINK "https://example.org/a"`. Word may split
 # it across several instrText runs, so it is matched once they are reassembled.
@@ -352,11 +349,13 @@ def _vertical_tag(element: Any) -> str:
 
 
 def _colour(element: Any) -> str:
-    """The run's colour, or "" where it is only the default one spelled out."""
-    if element is None:
-        return ""
-    value = element.get(qn(W_VAL)) or ""
-    return "" if value.upper() in _UNCOLOURED else value
+    """The name of the run's colour, or "" where it wears none worth carrying.
+
+    A name rather than the hex Word wrote, so that marks comparing equal are runs an
+    author meant alike: two shades of the same intent merge into one span instead of
+    breaking a phrase in half at a colour boundary nobody can see.
+    """
+    return "" if element is None else colours.name_for(element.get(qn(W_VAL)))
 
 
 def _render_line(runs: list[_Run]) -> str:
@@ -408,7 +407,12 @@ def _escaped(text: str) -> str:
 
 
 def _marked_up(text: str, marks: _Marks) -> str:
-    """Wrap text in its markers, innermost first."""
+    """Wrap text in its markers, innermost first.
+
+    Colour goes on last of the marks, so that what a coloured span holds is the
+    marked-up Markdown rather than the bare text: the editor re-tokenises a span's
+    contents, so emphasis inside one is emphasis again when it is read back.
+    """
     if marks.vertical:
         text = f"<{marks.vertical}>{text}</{marks.vertical}>"
     if marks.strikethrough:
@@ -420,12 +424,35 @@ def _marked_up(text: str, marks: _Marks) -> str:
     if marks.bold:
         text = f"**{text}**"
     if marks.colour:
-        text = f'<span style="color: #{marks.colour}">{text}</span>'
+        text = colours.marked_up(text, marks.colour)
     if marks.link:
         text = f"[{text}]({_destination(marks.link)})"
     return text
 
 
 def _destination(target: str) -> str:
-    """A link target, wrapped in <> only where bare would not parse."""
-    return f"<{target}>" if _NEEDS_BRACKETS.search(target) else target
+    """A link target, wrapped in <> only where bare would not parse.
+
+    Wrapping every target holding a parenthesis would be the easier rule and is the
+    wrong one, because the editor writes a balanced target bare: a document written
+    the cautious way is rewritten by the first save, and a table holding such a link
+    is re-measured and re-padded whole. Asking the real question - would this be
+    misread bare? - agrees with the editor without conceding anything, since the
+    targets it declines to wrap are exactly the ones that do not need it.
+    """
+    return f"<{target}>" if _needs_brackets(target) else target
+
+
+def _needs_brackets(target: str) -> bool:
+    """Whether a bare destination would be read as something other than itself."""
+    if _HAS_WHITESPACE.search(target):
+        return True
+
+    depth = 0
+    for character in target:
+        depth += (character == "(") - (character == ")")
+        if depth < 0:
+            # A close before its open ends the destination early, taking the rest
+            # of the address out of the link with it.
+            return True
+    return depth != 0

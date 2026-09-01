@@ -100,6 +100,19 @@ class TestTheGrid:
             "| Withdrawal | Close the case |"
         )
 
+    def test_whitespace_inside_a_cell_is_collapsed(self, docx_bytes):
+        """The editor collapses it on every cell it writes, so a cell left as Word
+        spelled it would come back changed by the first save."""
+
+        def build(document):
+            table = document.add_table(rows=2, cols=1)
+            table.cell(0, 0).text = "Case  name"
+            table.cell(1, 0).text = "  Withdrawal  "
+
+        assert _table_content(docx_bytes, build) == (
+            "| Case name |\n| --- |\n| Withdrawal |"
+        )
+
     def test_a_spanned_cell_fills_one_column_and_leaves_the_rest_empty(
         self, docx_bytes
     ):

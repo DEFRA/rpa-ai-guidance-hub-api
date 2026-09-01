@@ -253,8 +253,9 @@ class TestNesting:
         )
 
     def test_a_bullet_interrupting_an_ordered_list_starts_a_new_one(self, opened):
-        """The one format switch measured in the two real guides. What the ordered
-        list had counted to says nothing about the bullets that follow it."""
+        """What the ordered list had counted to says nothing about the bullets that
+        follow it, and a blank line is what says so: a change of kind at the
+        outermost depth is a second list, and the editor writes one there."""
 
         def build(document):
             document.add_paragraph("Open the register", style="List Number")
@@ -262,11 +263,39 @@ class TestNesting:
             document.add_paragraph("Read the status", style="List Number")
 
         assert _content(opened(build)) == (
-            "1. Open the register\n- Filter by reference\n1. Read the status"
+            "1. Open the register\n\n- Filter by reference\n\n1. Read the status"
+        )
+
+    def test_a_change_of_kind_deeper_in_is_not_parted(self, opened):
+        """A blank line inside a list makes it loose, so the editor writes none for
+        a nested change however plainly it is a second list."""
+
+        def build(document):
+            num_id = _list_definition(document, "bullet", "bullet")
+            other = _list_definition(document, "bullet", "decimal")
+            _numbered(document.add_paragraph("Open the register"), num_id, level=0)
+            _numbered(document.add_paragraph("Filter by reference"), num_id, level=1)
+            _numbered(document.add_paragraph("Note the outcome"), other, level=1)
+
+        assert _content(opened(build)) == (
+            "- Open the register\n  - Filter by reference\n  1. Note the outcome"
         )
 
 
 class TestClosingTheRun:
+    def test_an_empty_paragraph_does_not_close_the_run(self, opened):
+        """Word spaces its lists with empty paragraphs. Closing on one splits a
+        single list into two blocks, and the blank line between them makes it a
+        *loose* list - which the editor rewrites as the one tight list it always
+        was, so the converted document would be changed by its first save."""
+
+        def build(document):
+            document.add_paragraph("Open the register", style="List Number")
+            document.add_paragraph("")
+            document.add_paragraph("Read the status", style="List Number")
+
+        assert _content(opened(build)) == ("1. Open the register\n2. Read the status")
+
     def test_a_paragraph_closes_the_run_and_the_next_starts_again(self, opened):
         def build(document):
             document.add_paragraph("Open the register", style="List Number")

@@ -54,18 +54,28 @@ _URL = re.compile(r"(?:https?://|www\.)[^\s<>\"'\]\)}]+", re.IGNORECASE)
 _WORD = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*")
 
 # Markdown link and image syntax: the display text is rendered, the target is a URL.
-# The target is wrapped in <> when it holds whitespace or a bracket and written bare
-# otherwise. That is CommonMark, and it is also exactly what the parser's own
-# `_destination` writes; reading only the bare form stopped one SharePoint address at
-# the "(" in its filename and scored an address the Markdown states in full as lost.
-_MD_LINK = re.compile(r"!?\[([^\]]*)\]\((?:<([^>]+)>|([^)\s]+))[^)]*\)")
+# The target is wrapped in <> only where bare would not parse - whitespace, or brackets
+# that do not balance - and written bare otherwise. That is CommonMark, and it is also
+# exactly what the parser's own `_destination` writes.
+#
+# The bare form therefore has to allow a balanced pair, which a filename in a path
+# routinely carries. Reading it as "anything but a bracket" stops such an address at
+# the "(" in its filename and scores an address the Markdown states in full as lost.
+_BARE_TARGET = r"(?:[^()\s]|\([^()\s]*\))+"
+_MD_LINK = re.compile(rf"!?\[([^\]]*)\]\((?:<([^>]+)>|({_BARE_TARGET}))[^)]*\)")
 
 # The inline HTML the parser writes where Markdown has no marker of its own: <u>,
-# <sup>, <sub>, <span style="...">, and <br> for a line break inside a table row.
-# The tag name is letters and digits, so an angle-wrapped link destination -- which
-# has a colon straight after its scheme -- is not mistaken for a tag.
+# <sup>, <sub>, and <br> for a line break inside a table row. The tag name is letters
+# and digits, so an angle-wrapped link destination -- which has a colon straight after
+# its scheme -- is not mistaken for a tag.
 _LINE_BREAK_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _HTML_TAG = re.compile(r"</?[a-z][a-z0-9]*(?:\s[^>]*)?/?>", re.IGNORECASE)
+
+# The attribute on a bracketed span, i.e. the `{.red}` of `[text]{.red}`. The span's
+# text is words the document prints and is counted; the class naming its colour is
+# markup, and left in it would score "red" as a word the page does not say. The
+# brackets themselves need no stripping, being punctuation the word pattern skips.
+_SPAN_ATTRIBUTE = re.compile(r"\{\.[a-z]+\}")
 
 # Markup compatibility, which python-docx's namespace map does not carry.
 _MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
@@ -441,8 +451,8 @@ def markdown_bag(markdown: str) -> Bag:
 
     Both sides of the audit have to be counted as a reader sees them, so this side
     is rendered rather than read. A link contributes both halves: its display text
-    is words on the page and its target is a URL. Then the inline HTML resolves --
-    see `rendered_markdown`.
+    is words on the page and its target is a URL. Then the markup that is not words
+    resolves -- see `rendered_markdown`.
 
     Markdown's own markers need no stripping: `#`, `*`, `|`, the backslash of an
     escape and the rest are punctuation, which the word pattern never matches. That
@@ -460,7 +470,7 @@ def markdown_bag(markdown: str) -> Bag:
 
 
 def rendered_markdown(markdown: str) -> str:
-    """Markdown with its inline HTML resolved: tags gone, entities decoded.
+    """Markdown reduced to what it prints: markup gone, entities decoded.
 
     A `<br>` is a line break and separates the words either side of it, which is
     exactly what `element_text` does with a `w:br`, so the two sides agree by
@@ -473,7 +483,10 @@ def rendered_markdown(markdown: str) -> str:
     then eaten as a tag, losing three words the document prints. It is the same trap
     the parser carries in the other direction, where "&" has to be encoded first.
     """
-    return html.unescape(_HTML_TAG.sub("", _LINE_BREAK_TAG.sub(" ", markdown)))
+    without_markup = _SPAN_ATTRIBUTE.sub(
+        "", _HTML_TAG.sub("", _LINE_BREAK_TAG.sub(" ", markdown))
+    )
+    return html.unescape(without_markup)
 
 
 def total_bag(sections: list[Section]) -> Bag:

@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.guidance.parsing import alignment
+
 
 def _letters(ordinal: int) -> str:
     """The label for a 1-based appendix position: A, B, ... Z, AA, AB.
@@ -98,7 +100,7 @@ class MarkdownSection:
 
         content = self._resolved_content(image_prefix, bookmarks or {})
         if content:
-            lines.extend((content, ""))
+            lines.extend((alignment.aligned(content), ""))
 
         return "\n".join(lines)
 
@@ -126,6 +128,10 @@ class MarkdownSection:
         for name, section in bookmarks.items():
             content = content.replace(f"](#{name})", f"](#{section.number})")
         return content
+
+    # Tables are aligned by `markdown` rather than here, and only once every hole
+    # above is filled: a cell's width is not known until its cross-references and
+    # image paths are the ones the document will actually carry.
 
 
 @dataclass

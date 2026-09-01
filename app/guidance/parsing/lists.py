@@ -76,7 +76,13 @@ def list_item(paragraph: Paragraph) -> ListItem | None:
 
 
 def render(items: Sequence[tuple[ListItem, str]]) -> str:
-    """One contiguous run of items, each with its own Markdown, as a single block.
+    """One contiguous run of items, each with its own Markdown, as a block.
+
+    A run is not always one list: changing from bullets to numbers starts another,
+    and where that happens at the outermost depth the two are parted by a blank
+    line. That is what the editor writes, and matching it is what stops a converted
+    document being rewritten by the first save. A blank line is *not* written for a
+    change deeper in, because there it would make the list containing it loose.
 
     An item saying nothing is left out rather than bulleted, exactly as an empty
     paragraph is, and does not spend an ordinal on the way past.
@@ -88,7 +94,10 @@ def render(items: Sequence[tuple[ListItem, str]]) -> str:
         if not markdown:
             continue
 
-        depth = _depth_for(stack, item)
+        depth, opened_a_list = _depth_for(stack, item)
+        if opened_a_list and len(stack) == 1 and lines:
+            lines.append("")
+
         marker = depth.next_marker()
         item_markdown = _hanging(markdown, depth.content_column)
         lines.append(f"{depth.indent}{marker}{item_markdown}")
@@ -126,12 +135,16 @@ class _OpenLevel:
         return marker
 
 
-def _depth_for(stack: list[_OpenLevel], item: ListItem) -> _OpenLevel:
-    """The depth this item belongs to, opening one where the item goes deeper.
+def _depth_for(stack: list[_OpenLevel], item: ListItem) -> tuple[_OpenLevel, bool]:
+    """The depth this item belongs to, and whether it starts a list of its own.
 
     A depth opened again after being closed starts counting from one, while the
     depth returned to carries on - which is what numbers a list 1, 2, 3 rather than
     1, 1, 1 when a sub-list interrupts it.
+
+    Going deeper opens a nested list, which the caller does not part with a blank
+    line; only a change of kind at a depth already open does, and saying which
+    happened is why the answer is a pair.
     """
     while stack and stack[-1].level > item.level:
         stack.pop()
@@ -143,11 +156,12 @@ def _depth_for(stack: list[_OpenLevel], item: ListItem) -> _OpenLevel:
         if depth.ordered != item.ordered:
             depth.ordered = item.ordered
             depth.count = 0
-        return depth
+            return depth, True
+        return depth, False
 
     indent = stack[-1].content_column if stack else ""
     stack.append(_OpenLevel(level=item.level, ordered=item.ordered, indent=indent))
-    return stack[-1]
+    return stack[-1], False
 
 
 def _hanging(markdown: str, content_column: str) -> str:

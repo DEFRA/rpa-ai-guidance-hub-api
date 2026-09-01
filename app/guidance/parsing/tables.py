@@ -19,6 +19,14 @@ cannot contain a newline - so a cell's blocks are joined with <br> instead, and 
 pipes are escaped, both of which are about the row surviving rather than about how
 the text reads.
 
+A pipe table is written in the editor's own canonical form: cells padded out to the
+width of their column, and the delimiter run as wide as the column it sits under. That
+is cosmetic to a reader and load-bearing to everything else. The editor rewrites every
+table it saves into this shape, so a table written any other way comes back changed by
+the first save a person makes - which buries the losses actually worth looking at in a
+diff of realigned pipes, and means stored content churns the first time anyone opens
+it. Writing what a save would write makes the conversion a fixed point.
+
 `callout` is public because a one-cell table is not the only box Word draws: a text
 box holds the same thing, and `parser` renders one through here rather than growing a
 third copy of the paragraphs-to-blocks walk.
@@ -43,10 +51,16 @@ _MERGE_ORIGIN = "restart"
 
 # Anything a pipe row cannot contain. A hard line break arrives as a backslash and a
 # newline, and the backslash goes with it: it marks a break there is no longer room
-# for. Block joins produce the rest.
-_ROW_BREAK = re.compile(r"\\?\n")
+# for. Block joins produce the rest. The whitespace either side goes too, because the
+# editor's serialiser takes it and a cell has to be written the way that would write
+# it - see `_cell_markdown`.
+_ROW_BREAK = re.compile(r"[ \t]*\\?\n[ \t]*")
+
+# Runs of whitespace inside a cell, which the editor collapses to one space.
+_RUN_OF_SPACE = re.compile(r"\s+")
 
 _CELL_BREAK = "<br>"
+
 
 # A pipe ends a cell wherever it appears, so a pipe the document means as text has to
 # say so. This is not the escaping feature: an unescaped pipe adds a column, where an
@@ -68,9 +82,9 @@ def table_markdown(table: Any, parent: Any) -> str:
     if len(rows) == 1 and len(rows[0].findall(qn("w:tc"))) == 1:
         return callout(rows[0].findall(qn("w:tc"))[0], parent)
 
-    header, *body = rows
-    lines = [_row(header, columns, parent), _delimiter(columns)]
-    lines.extend(_row(row, columns, parent) for row in body)
+    header, *body = (_row_cells(row, columns, parent) for row in rows)
+    lines = [_row(header), _delimiter(len(header))]
+    lines.extend(_row(cells) for cells in body)
     return "\n".join(lines)
 
 
@@ -94,15 +108,24 @@ def callout(container: Any, parent: Any) -> str:
     return "\n".join(quoted)
 
 
-def _row(row: Any, columns: int, parent: Any) -> str:
-    """One row as a pipe row, holding exactly as many columns as the grid declares."""
+def _row_cells(row: Any, columns: int, parent: Any) -> list[str]:
+    """One row's cells, exactly as many as the grid declares."""
     cells = list(_columns_of(row))[:columns]
     cells += [None] * (columns - len(cells))
-    return "| " + " | ".join(_cell_markdown(cell, parent) for cell in cells) + " |"
+    return [_cell_markdown(cell, parent) for cell in cells]
+
+
+def _row(cells: list[str]) -> str:
+    """One row as a pipe row."""
+    return "| " + " | ".join(cells) + " |"
 
 
 def _delimiter(columns: int) -> str:
-    """The row under the header, which is what makes a pipe table a table."""
+    """The row under the header, which is what makes a pipe table a table.
+
+    Written at the shortest run GFM accepts. `alignment` widens it to the column it
+    sits under once the document is rendered and the widths can be known.
+    """
     return "| " + " | ".join(["---"] * columns) + " |"
 
 
@@ -147,12 +170,19 @@ def _cell_markdown(cell: Any | None, parent: Any) -> str:
     Everything that would have been a line of its own - a second paragraph, a list
     item, a hard break - becomes a <br>, because a newline anywhere in a row ends the
     row and orphans what follows it.
+
+    The whitespace is then collapsed, which is the one place this module normalises
+    text rather than carrying it. The editor's serialiser does it to every cell it
+    writes, so a cell left as Word spelled it would come back changed by the first
+    save; doing it here means the converted document already *is* what a save would
+    store. See `table_markdown` for why that matters beyond tidiness.
     """
     if cell is None:
         return ""
 
     blocks = _CELL_BREAK.join(_own_blocks(cell, parent))
-    return _ROW_BREAK.sub(_CELL_BREAK, blocks).replace("|", _ESCAPED_PIPE)
+    collapsed = _RUN_OF_SPACE.sub(" ", _ROW_BREAK.sub(_CELL_BREAK, blocks)).strip()
+    return collapsed.replace("|", _ESCAPED_PIPE)
 
 
 def _own_blocks(container: Any, parent: Any) -> list[str]:

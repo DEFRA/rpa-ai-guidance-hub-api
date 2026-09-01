@@ -374,12 +374,20 @@ def _collect_body(
         return
 
     item = lists.list_item(paragraph)
+    markdown = inline.paragraph_markdown(paragraph)
     if item is not None:
-        open_list.append((item, inline.paragraph_markdown(paragraph)))
+        open_list.append((item, markdown))
+        return
+
+    # A paragraph saying nothing changes nothing, and that includes not closing the
+    # run. Word spaces its lists with empty paragraphs, and closing on one splits a
+    # single list into two blocks: the blank line between them makes it a *loose*
+    # list, which the editor rewrites as the one tight list it always was.
+    if not markdown:
         return
 
     _close_list(sections, open_list)
-    _append_block(sections, inline.paragraph_markdown(paragraph))
+    _append_block(sections, markdown)
 
 
 def _close_list(
