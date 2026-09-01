@@ -1,9 +1,8 @@
 """Reach the boxes Word draws inside a run rather than beside it.
 
 A text box is not a block of the body. It hangs off a w:drawing on a run, so a walk
-of the body's own children cannot see it however carefully it looks - which is why
-85 words of a real guide, a whole case-note template, were absent from the Markdown
-with nothing in the output to say so.
+of the body's own children cannot see it however carefully it looks, and its contents
+go missing with nothing in the output to say they were ever there.
 
 Two things have to be got right to read one. The first is finding it at all, which is
 what `anchored_in` is for. The second is reading it exactly once: Word writes one copy
@@ -40,9 +39,9 @@ _FALLBACK = f"{_MC}Fallback"
 def anchored_in(paragraph: Any) -> Iterator[Any]:
     """Every text box this paragraph anchors, taking one alternate branch.
 
-    Reading both branches of an mc:AlternateContent would say a box's contents twice:
-    the one in the CS guide is 85 words written out as DrawingML and again as VML, and
-    taking the pair would put both copies in the Markdown.
+    Reading both branches of an mc:AlternateContent says a box's contents twice: the
+    same shape is written out as DrawingML under one branch and as VML under the
+    other, and taking the pair puts both copies in the Markdown.
 
     The conversion audit walks its own copy of this rule rather than importing this
     one, and that is deliberate - it is the oracle, and a fault the two held in common
@@ -79,9 +78,10 @@ def _drawn_children(element: Any) -> list[Any]:
 
     The first mc:Choice is what Word takes when it understands the markup that branch
     requires, which for a document it has just written it does; mc:Fallback is the
-    answer only when there is no choice at all. Evaluating mc:Requires properly would
-    need a table of every namespace we can render, and neither real guide holds an
-    alternate offering more than one choice.
+    answer only when there is no choice at all. Where an alternate offers several
+    choices the first is still taken: picking properly would mean evaluating
+    mc:Requires against a table of every namespace we can render, which is a great
+    deal of machinery for a distinction Word itself rarely draws.
     """
     if element.tag != _ALTERNATE_CONTENT:
         return list(element)

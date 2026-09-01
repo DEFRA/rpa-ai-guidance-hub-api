@@ -3,25 +3,25 @@
 Word does not write a list as a structure. It writes each item as an ordinary
 paragraph carrying a w:numPr - a numId naming the list and an ilvl naming the depth -
 and generates the bullet or the digit when it renders the page. Neither is in the
-text, so an ordered list arrives with its ordinals missing entirely: one real guide
-has a thirteen-step list whose own steps say "go to step 8" and "go to step 13".
+text, so an ordered list arrives with its ordinals missing entirely - which matters
+for a numbered list whose own items refer the reader back to a step by its number.
 
 What makes a paragraph a list item is therefore numbering being in effect on it, and
-nothing else. Not its style's name: 64 items across the two real guides are styled
-plain "Normal", and a name list - which is what the PoC used - could never have found
-them. The rule reads a numId from the paragraph's own properties, else from the ones
+nothing else. Not its style's name: an author can bullet a paragraph styled plain
+"Normal", so a list of style names finds only the items that happen to be styled as
+lists. The rule reads a numId from the paragraph's own properties, else from the ones
 its style declares, with numId="0" meaning that numbering has been taken *off* this
-paragraph and winning over the style; that is what keeps 47 deliberately un-bulleted
-lead-in lines as prose.
+paragraph and winning over the style - which is how a deliberately un-bulleted lead-in
+line stays prose.
 
-The rule is only safe because of where it is asked. Both real guides attach numbering
-to their *heading* styles too - 21 headings in one, 25 in the other - so parser.py
-asks the heading question first and never reaches here with one.
+The rule is only safe because of where it is asked. A document may attach numbering to
+its *heading* styles as well, so parser.py asks the heading question first and never
+reaches here with one.
 
 Levels are read relatively, exactly as headings are: a run opening at ilvl 1 still
 starts at the top, and a jump from ilvl 0 to ilvl 2 nests one deep rather than two.
-Word's own indentation cannot be the signal instead - one numId and ilvl appears at
-360, 568 and 993 twips in the same document, depending on what the author dragged.
+Word's own indentation cannot be the signal instead: the same numId and ilvl can be
+indented differently in different places, according to whatever the author dragged.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 _NUMBERING_REMOVED = "0"
 
 # The one format that is not a number. Word defines lowerLetter and lowerRoman as
-# well, and neither real guide uses either; Markdown has only the two kinds anyway.
+# well, but Markdown has only the two kinds, so every other format is an ordered list.
 _BULLET_FORMAT = "bullet"
 
 _BULLET_MARKER = "-"

@@ -2,15 +2,15 @@
 
 Word writes a table as a grid of cells, and a cell as a little document of its own:
 paragraphs, with all the runs, hyperlinks and numbering any other paragraph has. So a
-cell is rendered by the same machinery as body prose rather than by reading its text,
-which is the whole of what recovers the 30 hyperlinks and the run formatting the PoC
-lost inside tables, along with the 12 list items sitting in cells.
+cell is rendered by the same machinery as body prose rather than by reading its text.
+Reading it as text instead is what silently drops every hyperlink, every mark and every
+list marker a cell holds.
 
 python-docx's own `row.cells` must not be used here, nor `cell.text`. `row.cells`
 expands the grid: it hands back the same w:tc once per column a gridSpan covers, and
 the cell above for every vertical-merge continuation, so a merged cell arrives as
-several identical ones - 17 duplicated cells in one real guide. The walk below reads
-w:tr and w:tc directly, where Word writes each cell exactly once.
+several identical ones and its text is emitted once per grid position it covers. The
+walk below reads w:tr and w:tc directly, where Word writes each cell exactly once.
 
 Two shapes come out of it. A table of one cell is not a table at all: Word uses it as
 a callout box, and it becomes a blockquote, which can hold the several paragraphs all
@@ -81,10 +81,9 @@ def callout(container: Any, parent: Any) -> str:
     one-cell table, or the w:txbxContent of a text box. Word draws a box either way
     and means the same thing by it, so they render the same way.
 
-    The paragraphs are kept as paragraphs. All nine callouts in the two real guides
-    have more than one, and reading the container as a single string is what put them
-    on one line - or, once a blockquote marker was in front of it, broke out of the
-    quote at the first newline.
+    The paragraphs are kept as paragraphs. Reading the container as a single string
+    puts them all on one line - or, once a blockquote marker is in front of it, breaks
+    out of the quote at the first newline.
     """
     quoted: list[str] = []
     for block in _own_blocks(container, parent):

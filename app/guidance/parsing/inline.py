@@ -4,29 +4,28 @@ Word does not store a paragraph as text with formatting laid over it. It stores 
 sequence of runs, and starts a new one wherever anything at all changes - a proofing
 boundary, an edit, a language mark - so "Is your claim valid" arrives as two bold
 runs, "Is " and "your claim valid". Putting a paragraph back together is this
-module's work, and two rules do most of it. Both are corrections, measured against
-what the PoC produced from a real guide:
+module's work, and two rules do most of it:
 
 - Adjacent runs wearing the same marks are one span. A marker per run breaks one
   emphasised phrase into several, and where two of them meet, into "****".
 - A span's markers never wrap the space around it. Word keeps the trailing space
   inside the bold run, and "**Note: **Validation" is not emphasis under CommonMark
   at all - the reader is shown the asterisks - while an editor that tidies the space
-  outwards deletes it and welds "Note:" to the word after. 15 sites in one document.
-  Hoisting the space out here is what stops both.
+  outwards deletes it and welds "Note:" to the word after. Hoisting the space out
+  here is what stops both.
 
 Bold, italic and strikethrough are written as Markdown. Underline, superscript and
 subscript have no Markdown, so they are written as the HTML that Markdown allows.
 
 Colour is kept only where it says something. Word writes the default text colour out
-explicitly rather than leaving it unsaid, so four fifths of the coloured runs in the
-two real guides are "000000" or "auto"; most of the rest is the blue Word paints on
-a hyperlink, which the output already renders as a link. What is left is a colour
-the author reached for, and that is the part worth carrying.
+explicitly rather than leaving it unsaid, so most coloured runs say only "000000" or
+"auto"; most of the remainder is the blue Word paints on a hyperlink, which the output
+already renders as a link. What is left is a colour the author reached for, and that is
+the part worth carrying.
 
 A link is not always an element. Word's older HYPERLINK field writes the address as
 an instruction between field boundaries, with the text rendered from it following,
-and six of those across the two real guides reached the page as unlinked text.
+so a parser reading only w:hyperlink shows their text with no link on it.
 
 Text the author typed is escaped, so that text which happens to look like syntax is
 read as text. Word says nothing about the difference: "<CS Claim Revenue>" is a
@@ -48,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 from docx.oxml.ns import qn
 
+from app.guidance.parsing import images
 from app.guidance.parsing.ooxml import W_VAL, is_toggle_on
 
 if TYPE_CHECKING:
@@ -117,10 +117,17 @@ class _Marks:
 
 @dataclass(frozen=True)
 class _Run:
-    """A stretch of text and the marks it carries."""
+    """One piece of a line: a stretch of text and its marks, or a picture.
+
+    A picture is not text. It carries no marks - Word will happily leave bold or a
+    colour on the run it draws a picture in, which is formatting reaching a place
+    where it means nothing - and it is never escaped, since the `![]()` is markup
+    this parser generated rather than anything the author typed.
+    """
 
     text: str
     marks: _Marks
+    image: str = ""
 
 
 @dataclass
@@ -179,8 +186,7 @@ def _paragraph_lines(paragraph: Paragraph) -> list[list[_Run]]:
     It is also what makes a field legible, a field having no element of its own.
 
     A field still open when the paragraph ends is rendered anyway. Word does not
-    always write the end boundary - one of the two real guides stops a paragraph
-    between a field's text and its end - and dropping the field would take the
+    always write the end boundary, and dropping an unterminated field would take its
     words with it.
     """
     lines: list[list[_Run]] = [[]]
@@ -226,8 +232,17 @@ def _absorb_run(
 
 
 def _append_run(lines: list[list[_Run]], run: Any) -> None:
-    """Add one run's text to the line being built, opening a line at each break."""
+    """Add one run's content to the line being built, opening a line at each break.
+
+    Word gives a picture a run of its own, holding the drawing and no text, no tab
+    and no break, so the picture is the whole of what such a run has to say.
+    """
     marks = _marks_of(run)
+    embed = images.embedded_in(run)
+    if embed:
+        lines[-1].append(_Run("", marks, image=embed))
+        return
+
     for index, text in enumerate(_run_texts(run)):
         if index:
             lines.append([])
@@ -297,8 +312,8 @@ def _link_target(hyperlink: Any, paragraph: Paragraph) -> str:
     """Where a w:hyperlink points: an address outside the file, or a bookmark in it.
 
     A bookmark is kept exactly as Word wrote it. Resolving one to a section is a
-    separate question, and the PoC's attempt at it sent two annex links to the wrong
-    section - unresolved beats wrongly resolved.
+    separate question, answered where the whole document is known - and a name left
+    raw beats a link sent confidently to the wrong section.
     """
     relationship_id = hyperlink.get(qn("r:id"))
     if relationship_id in paragraph.part.rels:
@@ -345,12 +360,27 @@ def _colour(element: Any) -> str:
 
 
 def _render_line(runs: list[_Run]) -> str:
-    """One line of a paragraph: its runs merged into spans and marked up."""
-    spans = (
-        _render_span(marks, "".join(run.text for run in group))
-        for marks, group in groupby(runs, key=lambda run: run.marks)
-    )
-    return "".join(spans).strip()
+    """One line of a paragraph: its runs merged into spans and marked up.
+
+    Runs merge only where they are text and their marks agree, because Word splits a
+    word across runs wherever anything at all changes. A picture merges with nothing
+    and takes the marks of nothing: two pictures side by side are two pictures.
+    """
+    parts: list[str] = []
+    for (marks, is_image), group in groupby(runs, key=_span_key):
+        pieces = list(group)
+        if is_image:
+            parts.extend(images.placeholder(piece.image) for piece in pieces)
+            continue
+
+        parts.append(_render_span(marks, "".join(piece.text for piece in pieces)))
+
+    return "".join(parts).strip()
+
+
+def _span_key(run: _Run) -> tuple[_Marks, bool]:
+    """What decides whether two neighbouring runs render as one span."""
+    return run.marks, bool(run.image)
 
 
 def _render_span(marks: _Marks, text: str) -> str:

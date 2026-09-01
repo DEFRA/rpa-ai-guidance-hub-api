@@ -13,7 +13,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
-from app.guidance.parsing import inline, lists, models, tables, textboxes
+from app.guidance.parsing import images, inline, lists, models, tables, textboxes
 from app.guidance.parsing.errors import DocumentParseError
 from app.guidance.parsing.ooxml import is_toggle_on
 
@@ -57,6 +57,10 @@ def parse_docx(source: bytes) -> models.MarkdownDocument:
     """
     document = _open(source)
     sections, bookmarks = _extract_sections(document)
+    # Naming comes after the walk because only a finished section can say what its
+    # pictures should be called, and a picture in a block that never reached a
+    # section is dropped with the block rather than extracted and thrown away.
+    images.name_all(sections, document.part)
     return models.MarkdownDocument(
         title=_extract_title(document),
         sections=sections,
@@ -91,9 +95,8 @@ def _extract_title(document: docx.document.Document) -> str:
 
     The cover is read first and the document properties are only a fallback. Core
     properties are metadata that Word carries forward from whatever the file was
-    copied from, so they go stale silently while the cover is what a reader sees:
-    one real guide carried a "2024" title in its properties, printed no year on its
-    cover, and was the 2026 edition.
+    copied from, so they go stale silently - a properties title can name a year the
+    document was superseded from - while the cover is what a reader sees.
     """
     printed = _cover_title(document)
     if printed:
@@ -220,10 +223,10 @@ def _extract_sections(
 ) -> tuple[list[models.MarkdownSection], dict[str, models.MarkdownSection]]:
     """Turn the document's headings into a flat list of sections in document order.
 
-    Word does not put the number in the text: both real guides attach the numbering
-    to the heading *styles*, so Word generates "4.3.1.1" when it renders the page and
-    the paragraph itself says only "Split". The number is therefore derived here,
-    from nothing but each heading's level relative to the one before it.
+    Word does not put the number in the text. Numbering is attached to the heading
+    *styles*, so Word generates "4.3.1.1" when it renders the page while the paragraph
+    itself says only its title. The number is therefore derived here, from nothing but
+    each heading's level relative to the one before it.
 
     Levels are read as relative, never absolute: a document that opens at Heading 2
     still starts at 1, and a heading that skips a level nests one deep rather than
@@ -231,9 +234,8 @@ def _extract_sections(
     style declares a top level outright, and it is lettered rather than numbered.
 
     Every other paragraph is content, and belongs to the section opened most recently
-    whatever its depth. Anything ahead of the first heading is not: in both real
-    guides everything there is the cover page and the contents - 25 and 30 blocks of
-    it, and not one line of body prose - and a contents page is regenerated from the
+    whatever its depth. Anything ahead of the first heading is not: what sits there
+    is the cover page and the contents, and a contents page is regenerated from the
     headings anyway.
 
     Consecutive list items are the one kind of content that is not one paragraph to
@@ -244,9 +246,8 @@ def _extract_sections(
 
     The bookmarks a cross-reference can point at are collected on the way past. One
     is claimed only where it marks the start of a section, that being the whole of
-    what a number can be derived for: 71 of the 72 body cross-references in the two
-    real guides land on a heading or an annex, and the odd one out is better left as
-    the raw name Word wrote than sent confidently to the wrong place.
+    what a number can be derived for. A bookmark landing anywhere else is better left
+    as the raw name Word wrote than sent confidently to the wrong place.
     """
     sections: list[models.MarkdownSection] = []
     bookmarks: dict[str, models.MarkdownSection] = {}
@@ -359,10 +360,9 @@ def _collect_body(
     """Take one paragraph of the body: another item of the open list run, or prose.
 
     The list question is asked here rather than at the top of the walk, and that
-    ordering is the whole of the guard on it: both real guides attach numbering to
-    their heading styles as well, so a rule reading numbering alone would make a
-    bullet of all 46 of their headings. By the time a paragraph arrives here it is
-    already not a heading.
+    ordering is the whole of the guard on it: a document may attach numbering to its
+    heading styles as well, so a rule reading numbering alone would bullet every
+    heading in it. By the time a paragraph arrives here it is already not a heading.
 
     Contents entries are left out wherever they turn up, and are not list items
     however a document numbers them. They sit ahead of every heading in both real
@@ -402,9 +402,9 @@ def _close_list(
 def _append_block(sections: list[models.MarkdownSection], block: str) -> None:
     """Add one finished block of Markdown to the open section, where there is one.
 
-    Anything ahead of the first heading has no section to belong to and is dropped:
-    in both real guides that is the cover page and the contents, and not one line of
-    body prose.
+    Anything ahead of the first heading has no section to belong to and is dropped.
+    What sits there is the cover page and the contents, neither of which is content
+    the conversion is meant to carry.
     """
     if not sections or not block:
         return
