@@ -15,7 +15,7 @@ counting marks the Markdown wears that the document never asked for.
 
 The two sides read the same document through entirely separate code, and that is the
 point of the instrument rather than duplication to be tidied away: an audit sharing
-the parser\'s assumptions could not find a fault in them. Nothing below reads a rule
+the parser's assumptions could not find a fault in them. Nothing below reads a rule
 from ``app.guidance.parsing``, and neither should anything added to it.
 
 The cover page and the table of contents are excluded: the audit begins at the
@@ -24,8 +24,15 @@ first body heading, which is also where the parser's own sections begin.
 Nothing but python-docx and the parser is involved -- no configuration, database,
 S3 or Bedrock access -- so this runs against any document on disk.
 
+``--tiptap`` adds a third leg. The guidance editor's schema cannot model everything
+the parser can write, so a document is changed again the first time anyone opens and
+saves it; given that round trip's Markdown, the report scores it against the same
+Word side and says which marks survive being stored *and* edited. Producing it needs
+the UI repository, so the flag takes a file rather than making one -- the
+orchestrator's ``audit_doc.py`` is what assembles the leg.
+
 Usage:
-  uv run scripts/audit_docx.py <document.docx> [--missing] [--top N]
+  uv run scripts/audit_docx.py <document.docx> [--tiptap FILE] [--missing] [--top N]
 
 Called directly, or by ``scripts/audit_doc.py`` in the local-dev orchestrator
 repository, which resolves paths and audits several documents at once.
@@ -184,7 +191,7 @@ _OPEN_TAG = re.compile(r"<(u|sup|sub)>", re.IGNORECASE)
 
 # A line break: inside a row it separates the words either side of it just as a w:br
 # does, so the two sides agree on where a word ends by construction. It is also what
-# `tables` joins a cell\'s blocks with, a row having no room for a newline, so it is
+# `tables` joins a cell's blocks with, a row having no room for a newline, so it is
 # where a cell is split back into the blocks it was made of.
 _LINE_BREAK_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
@@ -236,6 +243,10 @@ _LABEL_WIDTH = 44
 # The six score columns after the label, and the widest feature name under them.
 _COLUMNS_WIDTH = 48
 _FEATURE_WIDTH = 16
+_KEPT_WIDTH = 8
+
+# Wide enough for "strikethrough:", the longest label a --missing line can open with.
+_MARK_LABEL_WIDTH = 15
 
 _DEFAULT_TOP = 12
 
@@ -983,7 +994,7 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
             continue
 
         # A line hanging under an item is the rest of that item: the parser indents
-        # an item\'s later lines to its own text column, and there they still wear
+        # an item's later lines to its own text column, and there they still wear
         # whatever the item wears.
         if item and line.startswith(" "):
             scan_line(bag, line, item)
@@ -998,31 +1009,28 @@ def scan_table(bag: Bag, rows: list[str], features: frozenset[str]) -> None:
     """Fold one pipe table into the bag, cell by cell.
 
     The delimiter row says the rows around it are a table and prints nothing itself.
+
+    A cell is scanned as one stretch of inline content, and there is no block markup
+    inside it to look for. `tables` joins a cell's blocks with <br> because a pipe row
+    cannot hold a newline, and what that produces is text: a hyphen at the start of a
+    <br> piece is a hyphen, not a bullet, because GFM has no list inside a cell.
+
+    Reading those hyphens as a list is a mistake the audit made until it was measured
+    against the editor - which reads the cell as GFM says to, finds no list, and was
+    then blamed for discarding one that was never written. An instrument must read
+    the Markdown the parser produced, never the intent behind it: a list inside a
+    table is lost at the conversion, and this side has to say so. The <br> itself
+    still separates the words either side of it - `scan_inline` sees to that.
     """
     for row in rows:
         if _DELIMITER_ROW.match(row):
             continue
         for cell in row_cells(row):
-            scan_cell(bag, cell, features | {TABLE})
-
-
-def scan_cell(bag: Bag, cell: str, features: frozenset[str]) -> None:
-    """One cell, whose blocks were joined with <br> to fit on a row that has no
-    room for a newline.
-
-    Splitting them apart again is what keeps a list inside a cell legible as one: its
-    markers are still there, just not at the start of a line any more.
-    """
-    for piece in _LINE_BREAK_TAG.split(cell):
-        marker = list_marker(piece)
-        if marker is None:
-            scan_line(bag, piece, features)
-        else:
-            scan_line(bag, piece[marker[1] :], features | marker[0])
+            scan_line(bag, cell, features | {TABLE})
 
 
 def row_cells(row: str) -> list[str]:
-    """A pipe row\'s cells, split on the pipes that end a cell and no others.
+    """A pipe row's cells, split on the pipes that end a cell and no others.
 
     A pipe the document means as text is written escaped, so the backslash before it
     is what says this one is content rather than a column boundary.
@@ -1249,7 +1257,7 @@ def tag_at(text: str, index: int) -> Span | None:
 def bracketed_at(text: str, index: int) -> Span | None:
     """The span a bracket opens - a link, an image or a colour - or None.
 
-    An image\'s target is a generated filename rather than an address, so it is not
+    An image's target is a generated filename rather than an address, so it is not
     counted as a URL: the Word side has no such name to match it with, and scoring it
     would be crediting the Markdown with something the document never said.
     """
@@ -1324,7 +1332,7 @@ class Row:
 
 
 def bags_by_key(sections: list[Section]) -> dict[str, Bag]:
-    """The sections\' bags, gathered under the heading each will be matched on."""
+    """The sections' bags, gathered under the heading each will be matched on."""
     by_key: dict[str, Bag] = {}
     for section in sections:
         by_key.setdefault(section.key, Bag())
@@ -1359,10 +1367,19 @@ def build_rows(source: list[Section], rendered: list[Section]) -> list[Row]:
 
 
 def percentage(coverage: Coverage | None) -> str:
-    """A coverage as a column entry, with nothing to cover shown as a dash."""
+    """A coverage as a column entry, with nothing to cover shown as a dash.
+
+    Only a whole coverage is allowed to print 100%. Rounding one symbol short of
+    complete up to 100% is how a real loss hides: 883 of 884 words is 99.89%, which
+    the format would otherwise round to a column that says nothing is wrong. The
+    same rounding at the bottom would report a section that converted nothing at all
+    as 0%, which is what it is, so only the top needs the guard.
+    """
     if coverage is None or coverage.fraction is None:
         return "-"
-    return f"{coverage.fraction * 100:.0f}%"
+    if coverage.covered < coverage.total:
+        return f"{min(coverage.fraction * 100, 99):.0f}%"
+    return "100%"
 
 
 def count(coverage: Coverage | None) -> str:
@@ -1385,10 +1402,17 @@ def report(
     source: list[Section],
     rendered: list[Section],
     whole: Bag,
+    editor: Bag | None,
     show_missing: bool,
     top: int,
 ) -> None:
-    """Print the section-by-section report for one document."""
+    """Print the section-by-section report for one document.
+
+    `editor` is the same document once more, after a trip through the guidance
+    editor's schema, or None where that leg was not asked for. It is scored against
+    the Word side like the parser's Markdown is, so the two read as what they are:
+    two legs of one pipeline, losing marks for entirely different reasons.
+    """
     print(f"\n{name}\n")
 
     if not source:
@@ -1431,6 +1455,18 @@ def report(
             cover(source_total.marks, whole.marks),
         )
     )
+    if editor is not None:
+        # The same three measurements after the editor has had the document, which is
+        # the state anything stored will actually be in: nobody reads the parser's
+        # output, they read what came back from the first save.
+        print(
+            format_row(
+                "after a TipTap save",
+                cover(source_total.words, editor.words),
+                cover(source_total.urls, editor.urls),
+                cover(source_total.marks, editor.marks),
+            )
+        )
 
     missing_count = sum(1 for row in rows if row.missing)
     print(
@@ -1438,14 +1474,16 @@ def report(
         f"{len(source) - missing_count} matched, {missing_count} missing"
     )
 
-    print_features(source_total, whole)
+    print_features(source_total, whole, editor)
 
     if show_missing:
         print_missing(source, rendered, top)
+        if editor is not None:
+            print_discarded(whole, editor, top)
 
 
 def sum_coverage(rows: list[Row], attribute: str) -> Coverage | None:
-    """Add the matched rows\' coverages together into one."""
+    """Add the matched rows' coverages together into one."""
     parts = [
         getattr(row, attribute) for row in rows if getattr(row, attribute) is not None
     ]
@@ -1458,8 +1496,8 @@ def sum_coverage(rows: list[Row], attribute: str) -> Coverage | None:
     )
 
 
-def print_features(source: Bag, rendered: Bag) -> None:
-    """Break the whole document\'s marks down by the feature each one is.
+def print_features(source: Bag, rendered: Bag, editor: Bag | None) -> None:
+    """Break the whole document's marks down by the feature each one is.
 
     Scored over the document rather than per section, because a feature is a property
     of the conversion and not of a section: a lost underline is the same fault
@@ -1471,29 +1509,53 @@ def print_features(source: Bag, rendered: Bag) -> None:
     bolds a whole paragraph because one run in it was bold covers every bold word
     there was and still gets that paragraph wrong, and this is the column it shows up
     in.
+
+    "kept" is the same measurement taken one leg further on, against the Markdown the
+    editor hands back rather than the Markdown the parser wrote. It shares its "word"
+    denominator with "covered" so the two read side by side, and the pair says which
+    repository a repair belongs in: a feature at 100% covered and 0% kept was written
+    correctly and then discarded by a schema that cannot model it.
     """
     scores = [
         (
             feature,
             cover(marks_of(source.marks, feature), marks_of(rendered.marks, feature)),
+            kept_coverage(source, editor, feature),
         )
         for feature in _FEATURES
     ]
-    used = [(feature, score) for feature, score in scores if score.total or score.extra]
+    used = [score for score in scores if score[1].total or score[1].extra]
 
     print("\n  Formatting features\n")
     if not used:
         print("  The document wears none of the marks the audit knows about.")
         return
 
-    rule = f"  {'-' * (_FEATURE_WIDTH + 25)}"
-    print(f"  {'feature':<{_FEATURE_WIDTH}}{'word':>8}{'covered':>9}{'spurious':>9}")
-    print(rule)
-    for feature, score in used:
+    # An absent column is an empty string, not a zero-width one: a format width
+    # narrower than what it is given pads nothing and truncates nothing, so a
+    # zero-width "kept" would print in full and run into the column beside it.
+    print(
+        f"  {'feature':<{_FEATURE_WIDTH}}{'word':>8}{'covered':>9}"
+        f"{kept_column('kept', editor)}{'spurious':>9}"
+    )
+    print(f"  {'-' * (_FEATURE_WIDTH + 25 + (0 if editor is None else _KEPT_WIDTH))}")
+    for feature, score, kept in used:
         print(
-            f"  {feature:<{_FEATURE_WIDTH}}{count(score):>8}"
-            f"{percentage(score):>9}{score.extra:>9,}"
+            f"  {feature:<{_FEATURE_WIDTH}}{count(score):>8}{percentage(score):>9}"
+            f"{kept_column(percentage(kept), editor)}{score.extra:>9,}"
         )
+
+
+def kept_column(entry: str, editor: Bag | None) -> str:
+    """One "kept" cell, or nothing at all where that leg was not asked for."""
+    return "" if editor is None else f"{entry:>{_KEPT_WIDTH}}"
+
+
+def kept_coverage(source: Bag, editor: Bag | None, feature: str) -> Coverage | None:
+    """How much of one Word feature survives the editor as well as the parser."""
+    if editor is None:
+        return None
+    return cover(marks_of(source.marks, feature), marks_of(editor.marks, feature))
 
 
 def print_missing(source: list[Section], rendered: list[Section], top: int) -> None:
@@ -1514,13 +1576,13 @@ def print_missing(source: list[Section], rendered: list[Section], top: int) -> N
         lost = True
         print(f"  {section.heading}")
         if lost_words:
-            print(f"    words: {listed(lost_words, top)}")
+            print(f"    {'words:':<{_MARK_LABEL_WIDTH}}{listed(lost_words, top)}")
         for url in sorted(lost_urls):
-            print(f"    url:   {section.bag.written(url)}")
+            print(f"    {'url:':<{_MARK_LABEL_WIDTH}}{section.bag.written(url)}")
         for feature in _FEATURES:
             words = marks_of(lost_marks, feature)
             if words:
-                print(f"    {feature + ':':<7}{listed(words, top)}")
+                print(f"    {feature + ':':<{_MARK_LABEL_WIDTH}}{listed(words, top)}")
         print()
 
     # Said outright, because a bare heading reads as a report that stopped short.
@@ -1534,13 +1596,42 @@ def listed(words: Counter[str], top: int) -> str:
     A picture has no word to name it, so the count stands in for one.
     """
     if list(words) == [_NO_WORD]:
-        return f"{words[_NO_WORD]} in this section"
+        return f"{words[_NO_WORD]}, none of which has words to name it"
 
     shown = ", ".join(
         f"{word} x{n}" if n > 1 else word for word, n in words.most_common(top)
     )
     remainder = len(words) - min(top, len(words))
     return f"{shown}, ... and {remainder} more" if remainder else shown
+
+
+def print_discarded(rendered: Bag, editor: Bag, top: int) -> None:
+    """List what the editor threw away that the parser had got right.
+
+    Scored against the parser's Markdown rather than against Word, because that is
+    the question this block answers: not "what did the pipeline lose" - the feature
+    table says that - but "what did the parser hand over that did not survive". A
+    mark the parser never wrote cannot be discarded by anything downstream, and
+    listing it here would send someone to the wrong repository.
+    """
+    print("\n  Discarded by the editor\n")
+
+    lost_words = rendered.words - editor.words
+    lost_urls = rendered.urls - editor.urls
+    lost_marks = rendered.marks - editor.marks
+
+    if lost_words:
+        print(f"    {'words:':<{_MARK_LABEL_WIDTH}}{listed(lost_words, top)}")
+    for url in sorted(lost_urls):
+        print(f"    {'url:':<{_MARK_LABEL_WIDTH}}{rendered.written(url)}")
+    for feature in _FEATURES:
+        words = marks_of(lost_marks, feature)
+        if words:
+            print(f"    {feature + ':':<{_MARK_LABEL_WIDTH}}{listed(words, top)}")
+
+    if not lost_words and not lost_urls and not lost_marks:
+        print("  Nothing: the editor gives back everything the parser wrote.")
+    print()
 
 
 def parse_args() -> argparse.Namespace:
@@ -1557,12 +1648,26 @@ def parse_args() -> argparse.Namespace:
         help="List the words, URLs and marks that never reached the Markdown.",
     )
     argument_parser.add_argument(
+        "--tiptap",
+        metavar="FILE",
+        help=(
+            "Markdown from a TipTap load/save round trip of this document, to score "
+            "as a third leg. Produced by the UI repository, so this is normally "
+            "reached as `uv run task audit <document.docx> --tiptap`."
+        ),
+    )
+    argument_parser.add_argument(
         "--top",
         type=int,
         default=_DEFAULT_TOP,
         help=f"How many missing words to list per section (default: {_DEFAULT_TOP}).",
     )
     return argument_parser.parse_args()
+
+
+def _read(path: str) -> str:
+    """The text of a file given on the command line."""
+    return Path(path).read_text(encoding="utf-8")
 
 
 def main() -> int:
@@ -1573,6 +1678,12 @@ def main() -> int:
         raw = source_path.read_bytes()
         document = parser.parse_docx(raw)
     except (OSError, DocumentParseError) as error:
+        print(f"{source_path.name}: {error}", file=sys.stderr)
+        return 1
+
+    try:
+        editor = None if args.tiptap is None else markdown_bag(_read(args.tiptap))
+    except OSError as error:
         print(f"{source_path.name}: {error}", file=sys.stderr)
         return 1
 
@@ -1589,6 +1700,7 @@ def main() -> int:
         word_side,
         markdown_side,
         whole,
+        editor,
         show_missing=args.missing,
         top=args.top,
     )
