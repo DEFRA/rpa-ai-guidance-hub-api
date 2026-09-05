@@ -1,0 +1,166 @@
+"""The Markdown document model: derived numbering, template filling, assembly."""
+
+import pytest
+
+from app.guidance.parsing import models
+
+
+def _image(name: str = "1_img_1.png") -> models.Image:
+    return models.Image(name=name, data=b"\x89PNG", content_type="image/png")
+
+
+class TestSectionNumbering:
+    def test_a_number_follows_its_parent_rather_than_being_stored(self):
+        """The point of deriving it: no stored number can disagree with the structure.
+
+        Renumbering a parent renumbers everything beneath it, however deep, with
+        nothing to keep in step by hand.
+        """
+        parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
+        child = models.MarkdownSection(
+            heading="Evidence required", ordinal=1, parent=parent
+        )
+        grandchild = models.MarkdownSection(heading="Appeals", ordinal=2, parent=child)
+
+        assert (child.number, grandchild.number) == ("3.1", "3.1.2")
+
+        parent.ordinal = 5
+
+        assert (child.number, grandchild.number) == ("5.1", "5.1.2")
+
+
+class TestImagePrefixes:
+    def test_prose_matching_an_image_name_is_left_alone(self):
+        """Only a link target is rewritten, never the document's own words."""
+        section = models.MarkdownSection(
+            heading="Evidence",
+            content="The file 1_img_1.png is attached.\n\n![x](1_img_1.png)",
+            images=[_image()],
+        )
+
+        rendered = section.markdown("images/")
+
+        assert "The file 1_img_1.png is attached." in rendered
+        assert "![x](images/1_img_1.png)" in rendered
+
+    def test_the_same_section_renders_for_more_than_one_destination(self):
+        """The content is a template, so one parse serves S3 and a local directory.
+
+        Rendering must therefore leave the template alone: the second call would
+        otherwise be prefixing an already-prefixed name.
+        """
+        section = models.MarkdownSection(
+            heading="Evidence", content="![x](1_img_1.png)", images=[_image()]
+        )
+
+        assert "(s3/1_img_1.png)" in section.markdown("s3/")
+        assert "(local/1_img_1.png)" in section.markdown("local/")
+
+
+class TestAppendixNumbering:
+    def test_an_appendix_heading_carries_no_number(self):
+        """The author already wrote the designation: "A Annex A" reads as a mistake.
+
+        The letter is still the section's number, and still what a cross-reference
+        to it resolves to - it is simply not printed twice.
+        """
+        annex = models.MarkdownSection(heading="Annex A - Case types", appendix=True)
+        section = models.MarkdownSection(heading="Applying")
+
+        assert annex.markdown().startswith("## Annex A - Case types")
+        assert section.markdown().startswith("## 1 Applying")
+
+    @pytest.mark.parametrize(
+        ("ordinal", "expected"),
+        [(1, "A"), (26, "Z"), (27, "AA"), (28, "AB"), (52, "AZ"), (53, "BA")],
+    )
+    def test_the_alphabet_runs_on_rather_than_off_the_end(self, ordinal, expected):
+        """Counting up from "A" would label the 27th appendix "[".
+
+        Bijective base-26: there is no zero digit, so Z is followed by AA.
+        """
+        annex = models.MarkdownSection(heading="Annex", ordinal=ordinal, appendix=True)
+
+        assert annex.number == expected
+
+
+class TestCrossReferences:
+    """Word writes a cross-reference as a bookmark name; a renderer knows none.
+
+    Resolving it is late-bound for the same reason an image prefix is: a link may
+    point at a section not yet parsed, and no number is final until the walk ends.
+    """
+
+    def test_a_section_rendered_on_its_own_keeps_the_raw_bookmark(self):
+        """A section knows its own number and no other section's."""
+        section = models.MarkdownSection(
+            heading="Applying", content="Continue to [Payment](#_Payment)."
+        )
+
+        assert "[Payment](#_Payment)" in section.markdown()
+
+    def test_prose_matching_a_bookmark_is_left_alone(self):
+        """Only a link target is rewritten, never the document's own words."""
+        payment = models.MarkdownSection(heading="Payment", ordinal=4)
+        section = models.MarkdownSection(
+            heading="Applying",
+            content="The tag #_Payment is not a link.\n\n[Payment](#_Payment)",
+        )
+        document = models.MarkdownDocument(
+            sections=[section], bookmarks={"_Payment": payment}
+        )
+
+        rendered = document.markdown()
+
+        assert "The tag #_Payment is not a link." in rendered
+        assert "[Payment](#4)" in rendered
+
+
+class TestDocumentMarkdown:
+    def test_sections_render_one_heading_level_below_their_depth(self):
+        parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
+        child = models.MarkdownSection(
+            heading="Evidence required", ordinal=1, parent=parent
+        )
+        document = models.MarkdownDocument(
+            title="Example Guide", sections=[parent, child]
+        )
+
+        rendered = document.markdown()
+
+        assert "## 3 Eligibility" in rendered
+        assert "### 3.1 Evidence required" in rendered
+
+    def test_the_document_is_the_ordered_concatenation_of_its_sections(self):
+        """One rendering path, not two: the document is a fold over the sections."""
+        first = models.MarkdownSection(heading="Introduction", ordinal=1)
+        second = models.MarkdownSection(heading="Payments", ordinal=2)
+        document = models.MarkdownDocument(
+            title="Example Guide", sections=[first, second]
+        )
+
+        rendered = document.markdown()
+
+        assert rendered.index("## 1 Introduction") < rendered.index("## 2 Payments")
+        assert first.markdown() in rendered
+        assert second.markdown() in rendered
+
+    def test_a_sections_content_follows_its_heading(self):
+        section = models.MarkdownSection(
+            heading="Introduction", content="This guide covers the process."
+        )
+        document = models.MarkdownDocument(title="Guide", sections=[section])
+
+        assert document.markdown() == (
+            "# Guide\n\n## 1 Introduction\n\nThis guide covers the process.\n"
+        )
+
+    def test_images_are_gathered_from_every_section_in_order(self):
+        first = models.MarkdownSection(heading="One", images=[_image("1_img_1.png")])
+        second = models.MarkdownSection(heading="Two", images=[_image("2_img_1.png")])
+        document = models.MarkdownDocument(sections=[first, second])
+
+        assert [image.name for image in document.images] == [
+            "1_img_1.png",
+            "2_img_1.png",
+        ]
