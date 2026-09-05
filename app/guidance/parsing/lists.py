@@ -97,8 +97,19 @@ def list_item(paragraph: Paragraph) -> ListItem | None:
     )
 
 
-def render(items: Sequence[tuple[ListItem, str]]) -> str:
+def is_deeper(item: ListItem, previous: ListItem) -> bool:
+    """Whether Word draws this item further right than that one by a real step."""
+    return item.indent > previous.indent + _SAME_COLUMN
+
+
+def render(items: Sequence[tuple[ListItem | None, str]]) -> str:
     """One contiguous run of items, each with its own Markdown, as a block.
+
+    An entry with no item is a block of prose that belongs to the item above it -
+    a lead-in that Word leaves unbulleted between an item and a sub-list of it. It
+    is indented into that item, which is the only place Markdown has for it: left in
+    the first column it would end the list, and the sub-list after it would reopen
+    at the margin with every item of it a level too shallow.
 
     A run is not always one list: changing from bullets to numbers starts another,
     and where that happens at the outermost depth the two are parted by a blank
@@ -114,6 +125,14 @@ def render(items: Sequence[tuple[ListItem, str]]) -> str:
 
     for item, markdown in items:
         if not markdown:
+            continue
+
+        if item is None:
+            # Nothing open for it to belong to means it is not a continuation at
+            # all, and the caller has already filed it as a block of its own.
+            if stack:
+                lines.append("")
+                lines.append(_continuation(markdown, stack[-1].content_column))
             continue
 
         depth, opened_a_list = _depth_for(stack, item)
@@ -192,6 +211,15 @@ def _depth_for(stack: list[_OpenLevel], item: ListItem) -> tuple[_OpenLevel, boo
     indent = stack[-1].content_column if stack else ""
     stack.append(_OpenLevel(left=item.indent, ordered=item.ordered, indent=indent))
     return stack[-1], False
+
+
+def _continuation(markdown: str, content_column: str) -> str:
+    """A block belonging to the item above it, indented into that item's text.
+
+    Every line of it, the first included - which is what parts it from `_hanging`,
+    where the first line follows a marker already standing in that column.
+    """
+    return content_column + markdown.replace("\n", f"\n{content_column}")
 
 
 def _hanging(markdown: str, content_column: str) -> str:

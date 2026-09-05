@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import docx
@@ -251,19 +251,19 @@ def _extract_sections(
     """
     sections: list[models.MarkdownSection] = []
     bookmarks: dict[str, models.MarkdownSection] = {}
-    open_list: list[tuple[lists.ListItem, str]] = []
+    run = _OpenRun()
     # The document's own frame is never popped: it sits at level 0, and a heading's
     # level is never lower than 1.
     stack = [_OpenSection()]
 
     for element, opened_ahead_of_it in _body_items(document):
         if element.tag == qn("w:tbl"):
-            _close_list(sections, open_list)
+            _close_list(sections, run)
             _append_block(sections, tables.table_markdown(element, document))
             continue
 
         if element.tag == textboxes.TEXT_BOX:
-            _close_list(sections, open_list)
+            _close_list(sections, run)
             _append_block(sections, textboxes.markdown(element, document))
             continue
 
@@ -275,10 +275,10 @@ def _extract_sections(
         # A heading with nothing in it is a layout artefact - numbering it would put
         # a section in the output that the document does not have.
         if level is None or not heading:
-            _collect_body(sections, open_list, paragraph)
+            _collect_body(sections, run, paragraph)
             continue
 
-        _close_list(sections, open_list)
+        _close_list(sections, run)
 
         while stack[-1].level >= level:
             stack.pop()
@@ -290,7 +290,7 @@ def _extract_sections(
         for name in opened_ahead_of_it + _bookmark_names(paragraph._p):
             bookmarks[name] = section
 
-    _close_list(sections, open_list)
+    _close_list(sections, run)
     return sections, bookmarks
 
 
@@ -352,9 +352,42 @@ def _bookmark_names(element: Any) -> list[str]:
     return [name for start in starts if (name := start.get(qn("w:name")))]
 
 
+@dataclass
+class _OpenRun:
+    """The run of list items being gathered, and the prose interrupting it.
+
+    Prose between two items is held rather than filed, because what it is depends on
+    the item that follows it. Where that item is drawn deeper than the one before,
+    the page is showing a sub-list with an unbulleted lead-in above it, and closing
+    the run at the prose would reopen the sub-list at the margin with every item of
+    it a level too shallow. Held, the prose becomes a block of the item it follows
+    and the sub-list nests inside that, which is the only shape Markdown has for it.
+
+    Where the next item is not deeper there is no such relationship to keep, so the
+    run closes as it always did and the prose is a block in its own right - which is
+    what it looks like on the page, and what keeps a list from swallowing every
+    paragraph that happens to sit between it and the next one.
+    """
+
+    items: list[tuple[lists.ListItem | None, str]] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
+
+    @property
+    def floor(self) -> lists.ListItem | None:
+        """The leftmost item of the run, which a new one is measured against.
+
+        The leftmost and not the latest, because it is the leftmost that Markdown
+        draws at the margin: a run reopened after prose starts there, so an item the
+        page draws further right than the run began is one a fresh run would put a
+        level too shallow - whether or not the item just before it was there too.
+        """
+        items = [item for item, _ in self.items if item is not None]
+        return min(items, key=lambda item: item.indent) if items else None
+
+
 def _collect_body(
     sections: list[models.MarkdownSection],
-    open_list: list[tuple[lists.ListItem, str]],
+    run: _OpenRun,
     paragraph: Paragraph,
 ) -> None:
     """Take one paragraph of the body: another item of the open list run, or prose.
@@ -370,13 +403,14 @@ def _collect_body(
     heading of its own would otherwise file its whole table of contents as prose.
     """
     if _is_contents(paragraph):
-        _close_list(sections, open_list)
+        _close_list(sections, run)
         return
 
     item = lists.list_item(paragraph)
     markdown = inline.paragraph_markdown(paragraph)
     if item is not None:
-        open_list.append((item, markdown))
+        _take_pending(sections, run, item)
+        run.items.append((item, markdown))
         return
 
     # A paragraph saying nothing changes nothing, and that includes not closing the
@@ -386,25 +420,44 @@ def _collect_body(
     if not markdown:
         return
 
-    _close_list(sections, open_list)
+    if run.items:
+        run.pending.append(markdown)
+        return
+
     _append_block(sections, markdown)
 
 
-def _close_list(
-    sections: list[models.MarkdownSection],
-    open_list: list[tuple[lists.ListItem, str]],
+def _take_pending(
+    sections: list[models.MarkdownSection], run: _OpenRun, item: lists.ListItem
 ) -> None:
-    """File the open run of list items as one block, and open a fresh run.
-
-    A run is closed by anything that is not a list item - a heading, a paragraph,
-    or the end of the document - so it always lands in the section it started in.
-    """
-    if not open_list:
+    """Settle the prose held since the last item, now that the next one is known."""
+    if not run.pending:
         return
 
-    block = lists.render(open_list)
-    open_list.clear()
-    _append_block(sections, block)
+    floor = run.floor
+    if floor is not None and lists.is_deeper(item, floor):
+        run.items.extend((None, block) for block in run.pending)
+        run.pending.clear()
+        return
+
+    _close_list(sections, run)
+
+
+def _close_list(sections: list[models.MarkdownSection], run: _OpenRun) -> None:
+    """File the open run of list items as one block, and open a fresh run.
+
+    A run is closed by anything that is not a list item and is not held for it - a
+    heading, a table, a paragraph the item after it did not claim, or the end of the
+    document - so it always lands in the section it started in. Prose held for an
+    item that never came is filed after the list, where it stands on the page.
+    """
+    if run.items:
+        _append_block(sections, lists.render(run.items))
+        run.items.clear()
+
+    for block in run.pending:
+        _append_block(sections, block)
+    run.pending.clear()
 
 
 def _append_block(sections: list[models.MarkdownSection], block: str) -> None:

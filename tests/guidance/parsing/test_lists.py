@@ -365,6 +365,78 @@ class TestClosingTheRun:
             "1. Open the register\n\nThen:\n\n1. Read the status"
         )
 
+    def test_prose_between_an_item_and_a_deeper_one_keeps_the_nesting(self, opened):
+        """Word leaves a lead-in unbulleted between an item and a sub-list of it and
+        goes on drawing the sub-list one level in - saying so three ways at once: an
+        ilvl of 1, the hollow bullet it reserves for a second level, and an indent a
+        step further right. Closing the run at the prose reopens the sub-list at the
+        margin, where every item of it reads a level too shallow.
+
+        The prose has to move into the item to keep that: at the first column it
+        would end the list, whatever the page does with it. It is the smaller of the
+        two losses, and the only shape Markdown has for the larger one."""
+
+        def build(document):
+            outer = _list_definition(document, "bullet")
+            inner = _list_definition(document, "bullet", step=_INDENT_STEP * 3)
+            _numbered(document.add_paragraph("If 'Yes',"), outer)
+            document.add_paragraph("Note: raise a case for every year.")
+            _numbered(document.add_paragraph("Open the register"), inner)
+            _numbered(document.add_paragraph("Read the status"), inner)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes',\n"
+            "\n"
+            "  Note: raise a case for every year.\n"
+            "  - Open the register\n"
+            "  - Read the status"
+        )
+
+    def test_prose_before_an_item_no_deeper_stays_a_block_of_its_own(self, opened):
+        """A question introducing the next list is not part of the bullet above it,
+        and a list that swallowed every paragraph standing between it and the next
+        one would be a worse document than the flat one. Only an item the page draws
+        further right than the run began claims the prose, because only then does
+        closing the run cost the page anything."""
+
+        def build(document):
+            num_id = _list_definition(document, "bullet")
+            _numbered(document.add_paragraph("If 'Yes',"), num_id)
+            document.add_paragraph("Are you sending an email?")
+            _numbered(document.add_paragraph("If 'No',"), num_id)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes',\n\nAre you sending an email?\n\n- If 'No',"
+        )
+
+    def test_prose_is_measured_against_where_the_run_began(self, opened):
+        """Not against the item just before it. A run reopened after prose starts at
+        the margin, so an item drawn further right than the run's own first item is
+        one a fresh run would put a level too shallow - whether or not the item
+        before it was already there. Measured against the neighbour instead, the
+        Markdown steps back out to the margin where the page holds its level, and
+        the audit reports a hundred and forty steps the page never took.
+
+        The prose lands in the column of the item it follows, which is the item it
+        belongs to - so here it is a second block of "Open the register", and the
+        item after it is that one's sibling rather than its child."""
+
+        def build(document):
+            outer = _list_definition(document, "bullet")
+            inner = _list_definition(document, "bullet", step=_INDENT_STEP * 3)
+            _numbered(document.add_paragraph("If 'Yes',"), outer)
+            _numbered(document.add_paragraph("Open the register"), inner)
+            document.add_paragraph("Note: raise a case for every year.")
+            _numbered(document.add_paragraph("Read the status"), inner)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes',\n"
+            "  - Open the register\n"
+            "\n"
+            "    Note: raise a case for every year.\n"
+            "  - Read the status"
+        )
+
     def test_a_heading_closes_the_run_into_the_section_it_opened_in(self, docx_bytes):
         def build(document):
             document.add_heading("Applying", level=1)

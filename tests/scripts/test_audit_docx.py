@@ -67,6 +67,19 @@ def _bulleted(paragraph: Paragraph) -> None:
     numbering.get_or_add_numId().set(qn("w:val"), "1")
 
 
+def _at_column(paragraph: Paragraph, left: int) -> None:
+    """Draw a paragraph at a given indent, the way dragging one in Word does."""
+    indent = paragraph._p.get_or_add_pPr().get_or_add_ind()
+    indent.set(qn("w:left"), str(left))
+
+
+def _item(document: Any, text: str, left: int) -> None:
+    """A bulleted paragraph drawn at a given column, which is one list item."""
+    paragraph = document.add_paragraph(text)
+    _bulleted(paragraph)
+    _at_column(paragraph, left)
+
+
 def _anchor(paragraph: Paragraph, box: Any, colour: str = "") -> None:
     """Hang a text box off a run of the paragraph, the way a drawing does.
 
@@ -122,7 +135,7 @@ class TestTextBoxMarks:
         _anchor(paragraph, _text_box(("Example: Parcel ABC 1234.", "")))
 
         section = audit_docx.Section("Amending the agreement")
-        audit_docx.absorb(section, paragraph)
+        audit_docx.absorb(section, paragraph, audit_docx.ListRun())
 
         assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST) == Counter(
             {"update": 1, "the": 1, "case": 1, "note": 1}
@@ -161,3 +174,193 @@ class TestContentsEntries:
         assert sections[0].bag.words == Counter(
             {"applying": 1, "before": 1, "the": 2, "entry": 2, "after": 1}
         )
+
+
+class TestListSteps:
+    """What one item did relative to the item before it.
+
+    Depth itself is not scored, and cannot be: Word measures a level in twips and
+    Markdown in columns, and both sides read depth relatively, so no absolute level
+    on one side names the same thing as a level on the other. The step between two
+    neighbouring items is the one statement each side can make in its own units, so
+    it is the one the two are compared on.
+    """
+
+    def test_an_item_drawn_past_the_one_before_it_steps_in(self):
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        _item(document, "Open the register", 1440)
+        _item(document, "Read the status", 1440)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
+            Counter({"open": 1, "the": 1, "register": 1})
+        )
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+
+    def test_an_item_drawn_back_towards_the_margin_steps_out(self):
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        _item(document, "Open the register", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT) == (
+            Counter({"if": 1, "no": 1})
+        )
+
+    def test_an_item_dragged_a_little_is_still_in_its_neighbour_column(self):
+        """Two lists pasted from different documents sit a few twips apart at the
+        same depth. Read as a step, every such pair would report a nesting the page
+        does not show, and the parser would be charged with flattening it."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 714)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT)
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+
+    def test_an_empty_paragraph_does_not_close_the_run(self):
+        """Word spaces its lists with empty paragraphs and the parser writes no line
+        for one, so a run closed here and not there puts the step on one side only -
+        and the mark is then charged to whichever side was still counting."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        document.add_paragraph("")
+        _item(document, "Open the register", 1440)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
+            Counter({"open": 1, "the": 1, "register": 1})
+        )
+
+    def test_the_markdown_side_reads_a_step_from_the_marker_column(self):
+        bag = audit_docx.markdown_bag("- If yes,\n  - Open the register\n- If no,")
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_INDENT) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_OUTDENT) == Counter(
+            {"if": 1, "no": 1}
+        )
+
+    def test_a_blank_line_does_not_close_the_markdown_run(self):
+        """A blank line inside a list makes it loose rather than ending it, which is
+        the same reason the Word side holds its run open across an empty paragraph."""
+        bag = audit_docx.markdown_bag("- If yes,\n\n  - Open the register")
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_INDENT) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+
+
+class TestKnownLimits:
+    """What the page shows that no Markdown could carry.
+
+    Held out of the marks and counted apart, because the score exists to point at a
+    difference somebody can go and fix. A loss the format makes unavoidable, left in
+    the coverage column, reads as a fault nobody can repair and sits beside the ones
+    that are real. `--missing` names each of these instead.
+    """
+
+    def test_a_list_in_a_table_cell_is_a_limit_rather_than_a_lost_mark(self):
+        """A GFM pipe row cannot hold a newline, so `tables` joins a cell's blocks
+        with <br> and its bullets become hyphens in the cell's text. No parser can
+        do otherwise, and three of the guides would carry the shortfall for ever."""
+        document = docx.Document()
+        table = document.add_table(rows=1, cols=2)
+        _bulleted(table.cell(0, 0).paragraphs[0])
+        table.cell(0, 0).paragraphs[0].add_run("Open the register")
+
+        section = audit_docx.Section("Working the case")
+        audit_docx.absorb(
+            section,
+            table.cell(0, 0).paragraphs[0],
+            audit_docx.ListRun(),
+            frozenset({audit_docx.TABLE}),
+        )
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST)
+        assert audit_docx.marks_of(section.bag.limits, audit_docx.IN_A_CELL) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+
+    def test_a_list_in_a_callout_is_not_a_limit(self):
+        """A box is a blockquote, and a blockquote holds blocks of its own - so a
+        list inside one survives, and a shortfall there is the parser's to answer
+        for. Only a pipe cell cannot carry it."""
+        document = docx.Document()
+        paragraph = document.add_paragraph("Open the register")
+        _bulleted(paragraph)
+
+        section = audit_docx.Section("Working the case")
+        audit_docx.absorb(
+            section, paragraph, audit_docx.ListRun(), frozenset({audit_docx.BOX})
+        )
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+        assert not section.bag.limits
+
+    def test_a_step_out_past_where_the_list_begins_is_a_limit(self):
+        """A Markdown list has no column to the left of its first item, so a run
+        opening indented and stepping back out cannot be drawn at all. The parser
+        starts every run at the margin, which is the only thing it can do."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "Open the register", 1440)
+        _item(document, "Read the status", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+        assert audit_docx.marks_of(
+            section.bag.limits, audit_docx.PAST_THE_START
+        ) == Counter({"if": 1, "no": 1})
+
+    def test_a_step_out_from_deeper_is_drawn_however_far_left_it_lands(self):
+        """It is the item being left that decides. Leaving one drawn deeper than the
+        run began, Markdown has an indent to bring back, and it draws the step even
+        where the item arriving is further left than the run's own first item -
+        because everything at or left of that is the margin, and the step from an
+        indent to the margin is a step. Read the other way round, the audit calls a
+        loss on eighty-eight marks the viewer plainly shows."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 926)
+        _item(document, "Open the register", 2203)
+        _item(document, "If no,", 643)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.LIST_OUTDENT
+        ) == Counter({"if": 1, "no": 1})
+        assert not section.bag.limits
+
+    def test_a_step_out_to_a_column_the_run_has_used_is_not_a_limit(self):
+        """The run has been there, so Markdown has a depth to step back to and the
+        parser is expected to draw it. This is the half that is still a fault."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        _item(document, "Open the register", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.LIST_OUTDENT
+        ) == Counter({"if": 1, "no": 1})
+        assert not section.bag.limits

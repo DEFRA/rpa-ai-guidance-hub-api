@@ -95,6 +95,8 @@ SUBSCRIPT = "subscript"
 LINK = "link"
 LIST = "list"
 NUMBERED = "numbered"
+LIST_INDENT = "list_indent"
+LIST_OUTDENT = "list_outdent"
 TABLE = "table"
 BOX = "box"
 IMAGE = "image"
@@ -118,10 +120,45 @@ _FEATURES = (
     LINK,
     LIST,
     NUMBERED,
+    LIST_INDENT,
+    LIST_OUTDENT,
     TABLE,
     BOX,
     IMAGE,
 )
+
+# What a document shows that Markdown has no way to carry, whatever the parser does.
+# These are counted apart from the marks rather than among them. A score is meant to
+# point at something a repair could put right, so a loss no conversion can avoid
+# would read there as a fault nobody can fix - and would sit in the same column as
+# the faults that are real, which is the one place it must not be. `--missing` names
+# each one in full, so it is reported rather than quietly dropped.
+IN_A_CELL = "a list inside a table cell"
+PAST_THE_START = "a step out past where its list begins"
+
+_LIMITS = (IN_A_CELL, PAST_THE_START)
+
+_WHY = {
+    IN_A_CELL: (
+        "a GFM pipe row cannot hold a newline, so `tables` joins the cell's blocks "
+        "with <br> and a bullet becomes a hyphen in the cell's text"
+    ),
+    PAST_THE_START: (
+        "a list item's marker indented under four spaces is a top-level item, so "
+        "Markdown has no column to the left of the one a list begins in"
+    ),
+}
+
+# The marks a pipe cell cannot carry. Everything else a run wears - bold, a link, a
+# colour - survives in a cell perfectly well.
+_LOST_IN_A_CELL = frozenset({LIST, NUMBERED, LIST_INDENT, LIST_OUTDENT})
+
+# How far one item can be drawn from the item before it and still be in its column,
+# in twips. Word steps a quarter of an inch when it demotes an item, so half of that
+# holds every nudge an author leaves behind by dragging one and is narrower than any
+# nesting they can have meant. Markdown needs no such allowance: a column there is a
+# column, so that side compares exactly.
+_NUDGE = 180
 
 # The mark a picture wears. A picture has no words, so it is counted under the empty
 # one - which no word pattern can produce, and so cannot collide with a real word.
@@ -178,6 +215,8 @@ _NOT_INHERITED_BY_A_BOX = frozenset(
         LINK,
         LIST,
         NUMBERED,
+        LIST_INDENT,
+        LIST_OUTDENT,
     }
 )
 
@@ -301,6 +340,11 @@ class Bag:
     urls: Counter[str] = field(default_factory=Counter)
     marks: Counter[tuple[str, str]] = field(default_factory=Counter)
 
+    # Marks the page wears that no Markdown could, keyed by the reason rather than
+    # by the feature: what a reader of the report needs is why it could not be
+    # carried, and one reason can account for several features at once.
+    limits: Counter[tuple[str, str]] = field(default_factory=Counter)
+
     # Normalised URL back to the way the document first wrote it. The counters are
     # keyed on the normalised form so the two sides agree, but a URL is only useful
     # in the report if it is quoted as the author typed it.
@@ -331,6 +375,11 @@ class Bag:
             for feature in features:
                 self.marks[feature, word] += 1
 
+    def add_limit(self, text: str, reason: str) -> None:
+        """Fold a stretch whose marks Markdown cannot carry in under that reason."""
+        for word in _WORD.findall(_URL.sub(" ", text).lower()):
+            self.limits[reason, word] += 1
+
     def add_image(self) -> None:
         """Fold one picture into the bag. A picture is a mark with no words."""
         self.marks[IMAGE, _NO_WORD] += 1
@@ -343,6 +392,7 @@ class Bag:
         self.words.update(other.words)
         self.urls.update(other.urls)
         self.marks.update(other.marks)
+        self.limits.update(other.limits)
         for key, url in other.forms.items():
             self.forms.setdefault(key, url)
         return self
@@ -619,6 +669,11 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
     """
     segments: list[tuple[frozenset[str], str]] = []
     field = OpenField()
+    # The paragraphs met below this one are the ones Word wrote inside a box it
+    # anchors, and they are a list of their own: the anchor's own place in a list is
+    # dropped on the way into the box, so there is nothing outside for the first of
+    # them to have stepped from.
+    boxed = ListRun(nudge=_NUDGE)
 
     pending = [
         (child, features, False) for child in reversed(rendered_children(paragraph._p))
@@ -640,7 +695,12 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
             active = (active - _NOT_INHERITED_BY_A_BOX) | {BOX}
             in_link = False
         elif tag == qn("w:p"):
-            active = active | list_features(Paragraph(element, paragraph))
+            boxed_paragraph = Paragraph(element, paragraph)
+            active = (
+                active
+                | list_features(boxed_paragraph)
+                | boxed.stepped(boxed_paragraph.text, item_column(boxed_paragraph))[0]
+            )
         elif tag == qn("w:r"):
             linked = in_link or bool(field.absorb(element))
             active = active | run_marks(element, in_link=linked)
@@ -764,6 +824,128 @@ def list_features(paragraph: Paragraph) -> frozenset[str]:
     return frozenset({LIST, NUMBERED})
 
 
+def item_column(paragraph: Paragraph) -> int | None:
+    """Where Word draws this item from the margin in twips, or None where it is none.
+
+    The paragraph's own indent first and the list definition's for the level second,
+    which is the order Word resolves one in: a definition indents every item of a
+    level together, and dragging one item overrides that for it alone. Neither saying
+    anything leaves the item at the margin, which is where Word then draws it.
+    """
+    num_id = numbering_value(paragraph, "w:numId")
+    if num_id is None or num_id == _NUMBERING_REMOVED:
+        return None
+
+    own = left_indent(paragraph._p.find(qn("w:pPr")))
+    if own is not None:
+        return own
+
+    level = int(numbering_value(paragraph, "w:ilvl") or 0)
+    declared = declared_levels(paragraph, num_id).get(level)
+    if declared is None:
+        return 0
+
+    return left_indent(declared.find(qn("w:pPr"))) or 0
+
+
+def left_indent(properties: Any) -> int | None:
+    """The left indent one set of paragraph properties sets, where it sets one."""
+    if properties is None:
+        return None
+
+    element = properties.find(qn("w:ind"))
+    if element is None:
+        return None
+
+    value = element.get(qn("w:left"))
+    return None if value is None else int(value)
+
+
+@dataclass
+class ListRun:
+    """Where the item before this one was drawn, as a run of items is walked.
+
+    Depth cannot be scored as a level. Word measures one in twips and Markdown in
+    columns, so the two never name the same number, and both sides read depth
+    relatively anyway - a run opening indented starts at the left - so an absolute
+    level would report a loss where that is working. What both *can* say in their own
+    units is what one item did relative to the one before it: stepped in, stepped
+    out, or stayed where it was.
+
+    Read from adjacent items alone and never from a stack of open depths, which is
+    the point. Counting how many depths an item closes would mean running the
+    parser's own rule here, and an instrument that shares the algorithm under test
+    cannot find a fault in it.
+
+    `nudge` is how far apart two items can be drawn and still be in one column,
+    which only the side measuring in twips needs.
+    """
+
+    nudge: int = 0
+    column: int | None = None
+    floor: int | None = None
+
+    def stepped(
+        self, text: str, column: int | None
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """What an item drawn at this column did, relative to the one before it.
+
+        A `column` of None is not an item at all and closes the run: whatever comes
+        next has nothing behind it to have moved from.
+
+        Text printing nothing is the exception, and holds the run open either way.
+        Word spaces its lists with empty paragraphs, CommonMark makes a list loose
+        rather than ending it at a blank line, and an item saying nothing is given
+        no Markdown line at all - so a run closed here and open there would put a
+        step at the seam on one side only, and charge the mark to whichever side
+        was still counting. A step is worn by words in any case, and text printing
+        none has none to wear it.
+
+        The answer is a pair: the step, and however much of it Markdown has no way
+        to draw.
+
+        `floor` is the leftmost column the run has reached, and it is the margin as
+        Markdown draws it: a list begins at its first item's column with nothing to
+        the left of it, so every item at or left of the floor is one depth there,
+        and the parser is right to start each run at the margin. A step *between*
+        two of those is therefore a step between two items Markdown draws in the
+        same place, and it is the one it cannot carry. It is the item being left
+        that decides, not the item arriving: leaving something drawn deeper than
+        the floor, Markdown has an indent to bring back however far left the step
+        lands.
+        """
+        if not text.strip():
+            return frozenset(), frozenset()
+
+        if column is None:
+            # A paragraph between two items does not end what the page shows as one
+            # list: Word goes on drawing the items after it at the level they were
+            # at, and a reader reads them there. Ending the run here would throw
+            # away the one thing the page says about how they sit - which is the
+            # whole of what this measures - so only a block of another kind closes
+            # it, and `close` is where that is said.
+            return frozenset(), frozenset()
+
+        previous, self.column = self.column, column
+        if previous is None:
+            self.floor = column
+            return frozenset(), frozenset()
+        if column > previous + self.nudge:
+            return frozenset({LIST_INDENT}), frozenset()
+        if previous > column + self.nudge:
+            step = frozenset({LIST_OUTDENT})
+            floor = column if self.floor is None else self.floor
+            self.floor = min(floor, column)
+            drawn = previous > floor + self.nudge
+            return (step, frozenset()) if drawn else (step, step)
+        return frozenset(), frozenset()
+
+    def close(self) -> None:
+        """End the run at a block that is not a paragraph: a table, a box, a heading."""
+        self.column = None
+        self.floor = None
+
+
 def numbering_value(paragraph: Paragraph, name: str) -> str | None:
     """One numbering property in effect on a paragraph: its own, else its style's.
 
@@ -799,10 +981,20 @@ def numbering_format(paragraph: Paragraph, num_id: str, level: int) -> str:
 
 
 def declared_formats(paragraph: Paragraph, num_id: str) -> dict[int, str]:
-    """The format the named list declares at each of its levels, as ilvl -> numFmt.
+    """The format the named list declares at each of its levels, as ilvl -> numFmt."""
+    return {
+        ilvl: value
+        for ilvl, level in declared_levels(paragraph, num_id).items()
+        for child in level.findall(qn("w:numFmt"))
+        if (value := child.get(qn(_W_VAL))) is not None
+    }
 
-    A w:num is only a reference: the levels, and so the formats, live on the
-    w:abstractNum it names.
+
+def declared_levels(paragraph: Paragraph, num_id: str) -> dict[int, Any]:
+    """What the named list declares at each of its levels, as ilvl -> w:lvl.
+
+    A w:num is only a reference: the levels, and so the format and the indent each
+    one is drawn with, live on the w:abstractNum it names.
     """
     numbering = numbering_element(paragraph)
     if numbering is None:
@@ -816,13 +1008,11 @@ def declared_formats(paragraph: Paragraph, num_id: str) -> dict[int, str]:
         if (value := child.get(qn(_W_VAL))) is not None
     }
     return {
-        int(ilvl): value
+        int(ilvl): level
         for definition in numbering.findall(qn("w:abstractNum"))
         if definition.get(qn("w:abstractNumId")) in wanted
         for level in definition.findall(qn("w:lvl"))
         if (ilvl := level.get(qn("w:ilvl"))) is not None
-        for child in level.findall(qn("w:numFmt"))
-        if (value := child.get(qn(_W_VAL))) is not None
     }
 
 
@@ -839,8 +1029,8 @@ def numbering_element(paragraph: Paragraph) -> Any:
     return None
 
 
-def cell_paragraphs(table: Table) -> Iterator[Paragraph]:
-    """Every paragraph inside a table, in document order, each cell visited once.
+def table_cells(table: Table) -> Iterator[list[Paragraph]]:
+    """The paragraphs of each cell of a table, in document order, each cell once.
 
     Word writes every cell exactly once however it is merged, so the cell elements
     answer directly the question that de-duplicating a grid can only approximate:
@@ -853,8 +1043,7 @@ def cell_paragraphs(table: Table) -> Iterator[Paragraph]:
     and differently on each run.
     """
     for cell in table._tbl.iter(qn("w:tc")):
-        for paragraph in cell.findall(qn("w:p")):
-            yield Paragraph(paragraph, table)
+        yield [Paragraph(paragraph, table) for paragraph in cell.findall(qn("w:p"))]
 
 
 def is_callout(table: Table) -> bool:
@@ -892,18 +1081,37 @@ def is_contents(paragraph: Paragraph) -> bool:
 
 
 def absorb(
-    section: Section, paragraph: Paragraph, features: frozenset[str] = frozenset()
+    section: Section,
+    paragraph: Paragraph,
+    run: ListRun,
+    features: frozenset[str] = frozenset(),
 ) -> None:
     """Add one paragraph's words, link targets and marks to a section.
 
     `features` is what the block around the paragraph already says about it, which
     only its container knows: the table or the box it sits in. What the paragraph
     itself says - the list it is an item of, the marks its runs wear - is read here.
+
+    `run` is the list the paragraph before it was an item of, which is the whole of
+    what says how deep this one sits: a step is a statement about two items, so it
+    cannot be read from either alone.
     """
-    section.bag.add_text(rendered_text(paragraph))
+    text = rendered_text(paragraph)
+    step, past_the_start = run.stepped(text, item_column(paragraph))
+    listed = list_features(paragraph) | step
+
+    section.bag.add_text(text)
     for url in hyperlink_urls(paragraph):
         section.bag.add_url(url)
-    mark_paragraph(section.bag, paragraph, features | list_features(paragraph))
+
+    if listed and TABLE in features:
+        section.bag.add_limit(text, IN_A_CELL)
+        listed -= _LOST_IN_A_CELL
+    elif past_the_start:
+        section.bag.add_limit(text, PAST_THE_START)
+        listed -= past_the_start
+
+    mark_paragraph(section.bag, paragraph, features | listed)
 
 
 def word_sections(document: docx.document.Document) -> list[Section]:
@@ -919,13 +1127,19 @@ def word_sections(document: docx.document.Document) -> list[Section]:
     """
     sections: list[Section] = []
     current: Section | None = None
+    run = ListRun(nudge=_NUDGE)
 
     for block in iter_blocks(document):
         if isinstance(block, Table):
+            run = ListRun(nudge=_NUDGE)
             if current is not None:
                 features = frozenset({BOX if is_callout(block) else TABLE})
-                for paragraph in cell_paragraphs(block):
-                    absorb(current, paragraph, features)
+                for cell in table_cells(block):
+                    # A cell is a list of its own however the cells around it are
+                    # written, so the run starts again at each one.
+                    cell_run = ListRun(nudge=_NUDGE)
+                    for paragraph in cell:
+                        absorb(current, paragraph, cell_run, features)
             continue
 
         if is_contents(block):
@@ -947,10 +1161,11 @@ def word_sections(document: docx.document.Document) -> list[Section]:
             current = Section(heading=block.text.strip())
             current.bag.add_text(current.heading)
             sections.append(current)
+            run = ListRun(nudge=_NUDGE)
             continue
 
         if current is not None:
-            absorb(current, block)
+            absorb(current, block, run)
 
     return sections
 
@@ -1005,6 +1220,7 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
     both real guides having no table inside a cell and no box inside a box.
     """
     item: frozenset[str] = frozenset()
+    run = ListRun()
     index = 0
 
     while index < len(lines):
@@ -1014,6 +1230,7 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
         if end > index:
             scan_table(bag, lines[index:end], features)
             index, item = end, frozenset()
+            run.close()
             continue
 
         if _QUOTE_MARKER.match(line):
@@ -1025,6 +1242,7 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
             ]
             scan_blocks(bag, quoted, features | {BOX})
             index, item = end, frozenset()
+            run.close()
             continue
 
         index += 1
@@ -1035,11 +1253,16 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
             # parser derives its own depth, so there is no level here to compare.
             bag.add_text(line[heading.end() :])
             item = frozenset()
+            run.close()
             continue
 
         marker = list_marker(line)
         if marker is not None:
-            item = features | marker[0]
+            # An item's own column is where its marker starts, which is also where
+            # the parser puts a child of it - so a nested item is the one drawn past
+            # the column of the item above it, exactly as it is on the Word side.
+            column = len(line) - len(line.lstrip())
+            item = features | marker[0] | run.stepped(line, column)[0]
             scan_line(bag, line[marker[1] :], item)
             continue
 
@@ -1051,6 +1274,7 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
             continue
 
         item = frozenset()
+        run.stepped(line, None)
         if line.strip():
             scan_line(bag, line, features)
 
@@ -1638,6 +1862,39 @@ def print_missing(source: list[Section], rendered: list[Section], top: int) -> N
     # Said outright, because a bare heading reads as a report that stopped short.
     if not lost:
         print("  Nothing: every word, URL and mark reached the Markdown.\n")
+
+    print_limits(source, top)
+
+
+def print_limits(sections: list[Section], top: int) -> None:
+    """List what the page shows that no Markdown could carry, and why.
+
+    These are held out of the scores above deliberately. The audit exists to point
+    at a difference between the page and what the viewer renders that somebody can
+    then go and fix, so a loss the format makes unavoidable does not belong in a
+    coverage column: there it reads as a fault nobody can repair, and it sits beside
+    the ones that are real, which is the one place it must not be.
+
+    Held out is not dropped. Each is counted and named here, with the reason, so
+    that the report says the whole truth about the document and the score above
+    means one thing only.
+    """
+    limits: Counter[tuple[str, str]] = Counter()
+    for section in sections:
+        limits.update(section.bag.limits)
+
+    print("\n  Known limits of the format\n")
+    if not limits:
+        print("  None: everything this document shows, Markdown can carry.\n")
+        return
+
+    for reason in _LIMITS:
+        words = marks_of(limits, reason)
+        if not words:
+            continue
+        print(f"    {reason} - {sum(words.values()):,} marks")
+        print(f"      {_WHY[reason]}")
+        print(f"      {listed(words, top)}\n")
 
 
 def listed(words: Counter[str], top: int) -> str:
