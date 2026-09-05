@@ -364,3 +364,54 @@ class TestKnownLimits:
             section.bag.marks, audit_docx.LIST_OUTDENT
         ) == Counter({"if": 1, "no": 1})
         assert not section.bag.limits
+
+
+class TestUncAddresses:
+    r"""One address, two spellings, and the escape that separates them.
+
+    Word writes `file:///\\host\share`; RFC 8089 writes `file://host/share`. They
+    name one file, so the audit folds them together - otherwise a parser that spells
+    an address correctly is scored as having lost it. What it must not fold is the
+    address a renderer actually follows: `\\` between brackets is one backslash to
+    CommonMark, so the characters written and the place they point are not the same
+    thing, and reading them raw is how a broken link scores as a whole one.
+    """
+
+    def test_the_two_spellings_of_one_address_are_one_url(self):
+        word = r"file:///\\server.example\share\Draft%20Letter"
+        markdown = "file://server.example/share/Draft%20Letter"
+
+        assert audit_docx.normalise_url(word) == audit_docx.normalise_url(markdown)
+
+    def test_an_address_naming_another_file_is_another_url(self):
+        word = r"file:///\\server.example\share\Draft%20Letter"
+
+        assert audit_docx.normalise_url(word) != audit_docx.normalise_url(
+            "file://server.example/share/Other%20Letter"
+        )
+
+    def test_the_canonical_spelling_matches_the_address_word_wrote(self):
+        """What the parser now writes, scored against what Word holds."""
+        word = r"file:///\\server.example\share\Draft%20Letter"
+        bag = audit_docx.markdown_bag(
+            "[Draft folder](file://server.example/share/Draft%20Letter)"
+        )
+
+        assert list(bag.urls) == [audit_docx.normalise_url(word)]
+
+    def test_a_destination_is_read_with_its_escapes_spent(self):
+        """The address is the one a reader is sent to, not the characters typed."""
+        bag = audit_docx.markdown_bag(
+            r"[Draft folder](file:///\\server.example\share\Draft%20Letter)"
+        )
+
+        assert list(bag.urls) == [r"file:///\server.example\share\draft%20letter"]
+
+    def test_a_destination_a_renderer_mangles_is_not_the_address_word_wrote(self):
+        """The loss the raw reading hid: one backslash short of the right server."""
+        word = r"file:///\\server.example\share\Draft%20Letter"
+        bag = audit_docx.markdown_bag(
+            r"[Draft folder](file:///\\server.example\share\Draft%20Letter)"
+        )
+
+        assert list(bag.urls) != [audit_docx.normalise_url(word)]

@@ -178,6 +178,10 @@ _HYPERLINK_FIELD = re.compile(r'HYPERLINK\s+"([^"]*)"', re.IGNORECASE)
 # Trailing characters a URL can pick up from the prose around it.
 _URL_TRAILING = ".,;:!?)]}'\"’"
 
+# What stands in front of a UNC address, in either spelling: Word's `file:` and its
+# slashes, or nothing at all where the address arrived bare.
+_FILE_PREFIX = re.compile(r"^(?:file:)?/*", re.IGNORECASE)
+
 # ---------------------------------------------------------------------------
 # What Word says about a mark
 # ---------------------------------------------------------------------------
@@ -272,6 +276,12 @@ _LINE_BREAK_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
 # routinely carries. Reading it as "anything but a bracket" stops such an address at
 # the "(" in its filename and scores an address the Markdown states in full as lost.
 _DESTINATION = re.compile(r"\((?:<([^>]*)>|((?:[^()\s]|\([^()\s]*\))*))[^)]*\)")
+
+# A backslash before ASCII punctuation is an escape here as anywhere else, so the
+# address a reader is sent to is not always the characters written between the
+# brackets. Taking them raw is how a destination a renderer will mangle scores as
+# though the Markdown had stated it whole.
+_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 
 # The attribute that makes a bracketed span a coloured one: the `{.red}` of
 # `[text]{.red}`. The name is the mark; the brackets are punctuation the word pattern
@@ -427,7 +437,21 @@ class Coverage:
 
 def normalise_url(url: str) -> str:
     """Reduce a URL to the form the Word and Markdown sides will both produce."""
-    return url.rstrip(_URL_TRAILING).rstrip("/").lower()
+    return unc_address(url.rstrip(_URL_TRAILING).rstrip("/")).lower()
+
+
+def unc_address(url: str) -> str:
+    r"""A UNC address under one spelling, whichever of the two it arrived in.
+
+    Word writes `file:///\\host\share` and RFC 8089 writes `file://host/share`, and
+    they name one file. Folding them together is a fact about what a UNC address is,
+    not a mirror of what the parser does with one: an address that points somewhere
+    else still counts here as somewhere else.
+    """
+    path = _FILE_PREFIX.sub("", url)
+    if not path.startswith("\\\\"):
+        return url
+    return "file://" + path.lstrip("\\").replace("\\", "/")
 
 
 def normalise_heading(heading: str) -> str:
@@ -1549,7 +1573,8 @@ def bracketed_at(text: str, index: int) -> Span | None:
     if destination:
         if image:
             return Span(inner, frozenset(), destination.end(), image=True)
-        target = destination.group(1) or destination.group(2) or ""
+        written = destination.group(1) or destination.group(2) or ""
+        target = _ESCAPE.sub(r"\1", written)
         return Span(inner, frozenset({LINK}), destination.end(), url=target)
 
     attribute = _SPAN_ATTRIBUTE.match(text, close + 1)

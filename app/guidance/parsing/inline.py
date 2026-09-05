@@ -1,4 +1,4 @@
-"""Turn a Word paragraph into the Markdown it says.
+r"""Turn a Word paragraph into the Markdown it says.
 
 Word does not store a paragraph as text with formatting laid over it. It stores a
 sequence of runs, and starts a new one wherever anything at all changes - a proofing
@@ -26,6 +26,14 @@ as a link. What is left is a colour the author reached for.
 A link is not always an element. Word's older HYPERLINK field writes the address as
 an instruction between field boundaries, with the text rendered from it following,
 so a parser reading only w:hyperlink shows their text with no link on it.
+
+A link's address is rewritten only where Word's spelling of it would not survive
+being read. CommonMark takes a backslash in a destination as an escape, so the
+`\\host` of Word's `file:///\\host\share` reaches a renderer as `\host` - a server
+name that is not one - and the link is broken before any editor sees it. A UNC or
+drive address is therefore written the way RFC 8089 writes it, `file://host/share`,
+and a backslash anywhere else is percent-encoded as the %5C it stands for. Nothing
+else about an address is touched: one that reads as itself is left as Word wrote it.
 
 Text the author typed is escaped, so that text which happens to look like syntax is
 read as text. Word says nothing about the difference: "<CS Claim Revenue>" is a
@@ -70,6 +78,12 @@ _VERTICAL_TAGS = {"superscript": "sup", "subscript": "sub"}
 # be wrapped in <>. Parentheses do not: CommonMark allows them bare while they
 # balance, which the addresses that carry them - a filename in a path - always do.
 _HAS_WHITESPACE = re.compile(r"\s")
+
+# Word spells a UNC address `file:///\\host\share` and a local one `file:///C:\dir`,
+# both with the separator CommonMark reserves for escapes. `file:` is stripped before
+# either is recognised, so the same rule reads an address that arrives without it.
+_FILE_SCHEME = re.compile(r"^file:/*", re.IGNORECASE)
+_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 
 # A link field's instruction, e.g. `HYPERLINK "https://example.org/a"`. Word may split
 # it across several instrText runs, so it is matched once they are reassembled.
@@ -335,8 +349,31 @@ def _link_marks(marks: _Marks, target: str) -> _Marks:
 
     Underline and colour are dropped, because Word paints both on every hyperlink by
     style - whatever they were meant to say, the link itself now says it.
+
+    Every address the parser writes reaches the page through here, which is why the
+    spelling is settled here rather than at each of the ways one can arrive: a path
+    that got past it would be a link the reader cannot follow.
     """
-    return replace(marks, underline=False, colour="", link=target)
+    return replace(marks, underline=False, colour="", link=_canonical_target(target))
+
+
+def _canonical_target(target: str) -> str:
+    r"""An address spelled so that a renderer follows it where Word pointed it.
+
+    A backslash before punctuation is an escape, so `\\host` is read as `\host` and
+    the address names a server that does not exist. UNC and drive paths have a
+    spelling that needs no backslash at all; any other address keeps its own shape
+    and spends the escape that would be eaten.
+    """
+    if "\\" not in target:
+        return target
+
+    path = _FILE_SCHEME.sub("", target)
+    if path.startswith("\\\\"):
+        return "file://" + path.lstrip("\\").replace("\\", "/")
+    if _DRIVE.match(path):
+        return "file:///" + path.replace("\\", "/")
+    return target.replace("\\", "%5C")
 
 
 def _link_target(hyperlink: Any, paragraph: Paragraph) -> str:

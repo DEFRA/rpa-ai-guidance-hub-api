@@ -385,6 +385,81 @@ class TestHyperlinks:
         assert _content(docx_bytes, build) == "Guidance"
 
 
+class TestAddressesWordSpellsItsOwnWay:
+    r"""A backslash in a destination is an escape, so Word's spelling has to change.
+
+    Word writes a UNC address `file:///\\host\share`, which a renderer reads as
+    `file:///\host\share` - a server name that is not one. The address is written
+    instead the way RFC 8089 writes it, and the link survives being read.
+    """
+
+    def test_a_unc_address_is_written_the_way_a_renderer_reads_it(self, docx_bytes):
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(),
+                "Draft folder",
+                url=r"file:///\\server.example\share\Draft%20Letter",
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Draft folder](file://server.example/share/Draft%20Letter)"
+        )
+
+    def test_a_unc_address_arriving_without_a_scheme_is_still_one(self, docx_bytes):
+        """Word writes the bare path too, and it is the same address."""
+
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(),
+                "Draft folder",
+                url=r"\\server.example\share\Draft%20Letter",
+            )
+
+        assert _content(docx_bytes, build) == (
+            "[Draft folder](file://server.example/share/Draft%20Letter)"
+        )
+
+    def test_a_drive_path_keeps_its_letter_and_loses_its_separators(self, docx_bytes):
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(), "Local copy", url=r"file:///C:\dir\form.docx"
+            )
+
+        assert _content(docx_bytes, build) == ("[Local copy](file:///C:/dir/form.docx)")
+
+    def test_a_backslash_anywhere_else_is_spent_rather_than_eaten(self, docx_bytes):
+        """No address has a spelling to fall back on, so the escape is paid instead.
+
+        %5C is what the backslash stands for, and is the one form that reaches the
+        far side as the character the document wrote.
+        """
+
+        def build(document):
+            _hyperlink(
+                document.add_paragraph(), "Report", url=r"https://example.org/a\b"
+            )
+
+        assert _content(docx_bytes, build) == ("[Report](https://example.org/a%5Cb)")
+
+    def test_an_address_that_reads_as_itself_is_left_exactly_as_word_wrote_it(
+        self, docx_bytes
+    ):
+        """The rewrite is for addresses a renderer would mangle, and no others."""
+
+        def build(document):
+            paragraph = document.add_paragraph()
+            _hyperlink(
+                paragraph, "Folder", url="file://server.example/share/Draft%20Letter"
+            )
+            paragraph.add_run(" and ")
+            _hyperlink(paragraph, "page", url="https://example.org/a_b~c")
+
+        assert _content(docx_bytes, build) == (
+            "[Folder](file://server.example/share/Draft%20Letter)"
+            " and [page](https://example.org/a_b~c)"
+        )
+
+
 class TestFieldLinks:
     """Word's older HYPERLINK field, which writes a link without a w:hyperlink.
 
