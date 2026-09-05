@@ -227,6 +227,20 @@ _NOT_INHERITED_BY_A_BOX = frozenset(
 # Elements that separate the text either side of them without printing a word.
 _SEPARATORS = (qn("w:tab"), qn("w:br"), qn("w:cr"))
 
+# The far edge of a box, which a pre-order walk has no element of its own to meet:
+# `w:txbxContent` stands for the near edge and nothing stands for the other, so
+# `rendered_children` hands back a `BoxEdge` wearing this tag after a box's children.
+_BOX_EDGE = "box-edge"
+
+# Everything that separates the text either side of it without saying a word: the ways
+# Word breaks a line, and the two edges of a box. The edges matter because a floating
+# box is tethered wherever Word please - usually the head of the paragraph, whatever
+# part of the page it is drawn over - so without them a box welds its text onto the
+# prose it was tethered in front of, and `Numbers 1 to 7 above` is read as the single
+# word `71numbers`: a word the page never says, and the parser then charged with
+# having lost it.
+_BREAKS = (*_SEPARATORS, _TEXT_BOX, _BOX_EDGE)
+
 _VERTICAL_MARKS = {"superscript": SUPERSCRIPT, "subscript": SUBSCRIPT}
 
 # Word paints its Hyperlink style over both of these, so on a link they are the
@@ -502,8 +516,8 @@ def rendered_text(paragraph: Paragraph) -> str:
     is printed: text inside a hyperlink or a text box is included, while a tracked
     deletion (`w:delText`) and a field's instructions (`w:instrText`) are other
     elements entirely and so are left out by construction. Adjacent `w:t` runs join
-    without a space -- Word splits a single word across runs freely -- while a tab
-    or a line break separates.
+    without a space -- Word splits a single word across runs freely -- while a tab, a
+    line break or either edge of a box separates.
     """
     return element_text(paragraph._p)
 
@@ -514,7 +528,7 @@ def element_text(element: Any) -> str:
     for node in rendered_nodes(element):
         if node.tag == qn("w:t"):
             parts.append(node.text or "")
-        elif node.tag in (qn("w:tab"), qn("w:br"), qn("w:cr")):
+        elif node.tag in _BREAKS:
             parts.append(" ")
     return "".join(parts)
 
@@ -541,6 +555,15 @@ def rendered_nodes(element: Any) -> Iterator[Any]:
         pending.extend(reversed(rendered_children(node)))
 
 
+class BoxEdge:
+    """A stand-in for where a box ends, printing nothing and holding nothing."""
+
+    tag = _BOX_EDGE
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(())
+
+
 def rendered_children(element: Any) -> list[Any]:
     """The children a reader sees: one branch of an alternate, all of anything else.
 
@@ -549,7 +572,14 @@ def rendered_children(element: Any) -> list[Any]:
     falls back to and is the answer only when there is no choice at all. Evaluating
     `mc:Requires` properly would need a table of every namespace we can render, and
     neither guide holds an alternate with more than one choice.
+
+    A box's children end with a `BoxEdge`, which is the whole of how the walk above
+    is told that the box is over: a pre-order walk meets a node before its contents
+    and never again after them.
     """
+    if element.tag == _TEXT_BOX:
+        return [*element, BoxEdge()]
+
     if element.tag != _ALTERNATE_CONTENT:
         return list(element)
 
@@ -709,9 +739,8 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
         if tag == qn("w:t"):
             segments.append((active, element.text or ""))
             continue
-        if tag in _SEPARATORS:
+        if tag in _BREAKS:
             segments.append((active, " "))
-            continue
 
         if tag == qn("w:hyperlink"):
             in_link = True

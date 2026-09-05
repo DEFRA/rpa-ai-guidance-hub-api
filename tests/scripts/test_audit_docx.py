@@ -144,6 +144,53 @@ class TestTextBoxMarks:
             {"example": 1, "parcel": 1, "abc": 1, "1234": 1}
         )
 
+    def test_a_box_does_not_weld_its_text_onto_the_prose_it_is_tethered_to(self):
+        """A floating box has no place in the line, only a paragraph it hangs off.
+
+        Word draws such a box wherever its coordinates say and tethers it at the head
+        of a paragraph however far from there it lands. Read as though it were a run,
+        its text runs into the first word of the prose, and the page is credited with
+        a word it never says - which, this side being the oracle, is a word the
+        parser is charged with having lost.
+        """
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        _anchor(paragraph, _text_box(("4", "")))
+        _anchor(paragraph, _text_box(("9", "")))
+        paragraph.add_run("Steps to above are drawn on the plan.")
+
+        bag = audit_docx.Bag()
+        bag.add_text(audit_docx.rendered_text(paragraph))
+
+        assert bag.words == Counter(
+            {
+                "4": 1,
+                "9": 1,
+                "steps": 1,
+                "to": 1,
+                "above": 1,
+                "are": 1,
+                "drawn": 1,
+                "on": 1,
+                "the": 1,
+                "plan": 1,
+            }
+        )
+
+    def test_two_boxes_in_a_row_are_two_stories_rather_than_one_word(self):
+        """Each box is its own story, and neither edge of one is a place to read on."""
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        _anchor(paragraph, _text_box(("4", "")))
+        _anchor(paragraph, _text_box(("9", "")))
+
+        bag = audit_docx.Bag()
+        audit_docx.mark_paragraph(bag, paragraph, frozenset())
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.BOX) == Counter(
+            {"4": 1, "9": 1}
+        )
+
 
 class TestContentsEntries:
     def test_a_stray_contents_entry_does_not_end_the_section(self):
