@@ -151,6 +151,16 @@ _W_VAL = "w:val"
 # one-cell table. Both are boxes to a reader, so both are BOX.
 _TEXT_BOX = qn("w:txbxContent")
 
+# The marks a run wears, as opposed to the block its text sits in. They are dropped
+# on the way into a text box, because a box is a story of its own: the run holding
+# the drawing carries run properties for the anchor character and Word applies none
+# of them to the text inside. Carried down, one red anchor paints a whole case note
+# red on this side and nowhere else - and, this side being the oracle, the parser is
+# reported as having lost fifty marks the page never drew.
+_WORN_BY_A_RUN = frozenset(
+    {BOLD, ITALIC, UNDERLINE, STRIKETHROUGH, SUPERSCRIPT, SUBSCRIPT, RED, BLUE, LINK}
+)
+
 # Elements that separate the text either side of them without printing a word.
 _SEPARATORS = (qn("w:tab"), qn("w:br"), qn("w:cr"))
 
@@ -581,6 +591,11 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
     is one Word wrote inside a box the paragraph anchors. Those have paragraph
     properties of their own, and a box holding a list says so there and nowhere the
     caller can see.
+
+    Marks accumulate downwards, and a text box is where that stops: what a box holds
+    is not marked by the run the drawing hangs off. The block it sits in still counts
+    - a box inside a table is inside that table - so only the marks a run wears are
+    dropped.
     """
     segments: list[tuple[frozenset[str], str]] = []
     field = OpenField()
@@ -602,7 +617,8 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
         if tag == qn("w:hyperlink"):
             in_link = True
         elif tag == _TEXT_BOX:
-            active = active | {BOX}
+            active = (active - _WORN_BY_A_RUN) | {BOX}
+            in_link = False
         elif tag == qn("w:p"):
             active = active | list_features(Paragraph(element, paragraph))
         elif tag == qn("w:r"):

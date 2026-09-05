@@ -457,6 +457,36 @@ class TestFieldLinks:
             "[Claim form](https://example.org/claim)"
         )
 
+    def test_a_hyperlink_inside_a_field_keeps_its_place_and_its_address(
+        self, docx_bytes
+    ):
+        """Word nests a w:hyperlink among the runs a HYPERLINK field renders.
+
+        One paragraph of a real guide is written this way, and the two addresses are
+        different: the field points at the referral form, the hyperlink inside it at
+        the route guide. A w:hyperlink is a sibling of the runs either side of it, so
+        emitting it as the walk passes puts it ahead of the whole field - welding the
+        end of its anchor text to the start of the field's, "Guide" and "refer"
+        arriving as one word - and giving the field's address to text the hyperlink
+        had addressed itself.
+        """
+
+        def build(document):
+            paragraph = document.add_paragraph()
+            _fld_char(paragraph, "begin")
+            _instr_text(paragraph, ' HYPERLINK "https://example.org/referral" ')
+            _fld_char(paragraph, "separate")
+            paragraph.add_run("refer to the ")
+            _hyperlink(paragraph, "Route Guide", url="https://example.org/route")
+            paragraph.add_run(" for next steps.")
+            _fld_char(paragraph, "end")
+
+        assert _content(docx_bytes, build) == (
+            "[refer to the](https://example.org/referral) "
+            "[Route Guide](https://example.org/route) "
+            "[for next steps.](https://example.org/referral)"
+        )
+
     def test_a_field_that_is_not_a_link_is_left_as_its_text(self, docx_bytes):
         """A page number is what PAGEREF renders; the bookmark it read is not text."""
 

@@ -150,19 +150,42 @@ class _Field:
         marks = _marks_of(run)
         self.result.extend(_Run(text, marks) for text in _run_texts(run))
 
+    def absorb_link(self, link: _Run) -> None:
+        """Take a w:hyperlink written inside the field as part of its result.
+
+        A field's instruction is instrText and never an element, so a w:hyperlink
+        met while a field is open is always something Word rendered - and it has to
+        go in here rather than straight onto the line, or it is emitted ahead of the
+        whole field and the end of its anchor text welds to the start of the text
+        the field renders after it.
+        """
+        self.result.append(link)
+
     def rendered(self) -> list[_Run]:
         """What the field puts on the page: a link, or the text Word rendered.
 
         Only HYPERLINK is claimed as a link; a PAGEREF or a TOC renders text that
         says nothing about where it came from. A field rendering no text is not on
         the page at all, so it is not made into a link either.
+
+        A w:hyperlink nested in the result keeps the address it carries: it is the
+        nearer of the two over the text it covers, and the one Word follows. The
+        text either side of it is still the field's, so what comes back is one run
+        per stretch rather than one run for the lot.
         """
         target = _hyperlink_target(self.instruction)
-        text = "".join(run.text for run in self.result)
-        if not target or not text.strip():
+        if not target:
             return self.result
 
-        return [_Run(text, _link_marks(self.result[0].marks, target))]
+        rendered: list[_Run] = []
+        for linked, group in groupby(self.result, key=_wears_a_link):
+            runs = list(group)
+            text = "".join(run.text for run in runs)
+            if linked or not text.strip():
+                rendered.extend(runs)
+            else:
+                rendered.append(_Run(text, _link_marks(runs[0].marks, target)))
+        return rendered
 
 
 _PLAIN = _Marks()
@@ -180,7 +203,9 @@ def _paragraph_lines(paragraph: Paragraph) -> list[list[_Run]]:
     Dispatching on the paragraph's own children, rather than on every run beneath
     it, is what keeps a hyperlink whole: w:hyperlink is a sibling of w:r, and the
     runs it holds are one link however many pieces Word split its anchor text into.
-    It is also what makes a field legible, a field having no element of its own.
+    It is also what makes a field legible, a field having no element of its own -
+    and why a hyperlink met inside an open field is handed to the field: the two are
+    siblings, so only the walk knows that one is inside the other.
 
     A field still open when the paragraph ends is rendered anyway. Word does not
     always write the end boundary, and dropping an unterminated field would take its
@@ -192,8 +217,12 @@ def _paragraph_lines(paragraph: Paragraph) -> list[list[_Run]]:
     for child in paragraph._p:
         if child.tag == qn("w:hyperlink"):
             link = _link_run(child, paragraph)
-            if link is not None:
+            if link is None:
+                continue
+            if open_field is None:
                 lines[-1].append(link)
+            else:
+                open_field.absorb_link(link)
         elif child.tag == qn("w:r"):
             open_field = _absorb_run(lines, child, open_field)
 
@@ -294,6 +323,11 @@ def _link_run(hyperlink: Any, paragraph: Paragraph) -> _Run | None:
     return _Run(
         text, _link_marks(_marks_of(runs[0]), _link_target(hyperlink, paragraph))
     )
+
+
+def _wears_a_link(run: _Run) -> bool:
+    """Whether this run already carries an address of its own."""
+    return bool(run.marks.link)
 
 
 def _link_marks(marks: _Marks, target: str) -> _Marks:
