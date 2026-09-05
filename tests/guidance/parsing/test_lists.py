@@ -7,8 +7,8 @@ them back.
 
 All fixture text is invented, as everywhere in this package. The default template
 already defines "List Bullet" (bullet) and "List Number" (decimal), but declares them
-at ilvl 0 and nowhere else, so anything about a deeper level has to build a list
-definition of its own.
+at ilvl 0 and nowhere else and indents neither, so anything about depth has to build
+a list definition of its own.
 """
 
 import pytest
@@ -18,12 +18,30 @@ from docx.oxml.shared import OxmlElement
 
 from app.guidance.parsing import parser
 
+# Word's own step when it demotes an item, in twips: a quarter of an inch.
+_INDENT_STEP = 360
+
 
 def _val(name: str, value: object):
     """An element carrying nothing but a w:val, as OOXML writes most settings."""
     element = OxmlElement(name)
     element.set(qn("w:val"), str(value))
     return element
+
+
+def _indented(left: int):
+    """The paragraph properties a list level uses to indent the items in it."""
+    properties = OxmlElement("w:pPr")
+    indent = OxmlElement("w:ind")
+    indent.set(qn("w:left"), str(left))
+    properties.append(indent)
+    return properties
+
+
+def _drag(paragraph, left: int) -> None:
+    """Indent one paragraph directly, as dragging an item in Word does."""
+    indent = paragraph._p.get_or_add_pPr().get_or_add_ind()
+    indent.set(qn("w:left"), str(left))
 
 
 def _numbered(paragraph, num_id: int, level: int | None = None) -> None:
@@ -46,8 +64,12 @@ def _numbering_style(document, name: str, num_id: int) -> str:
     return name
 
 
-def _list_definition(document, *formats: str) -> int:
-    """Add a list defining one format per level, and return the numId naming it."""
+def _list_definition(document, *formats: str, step: int = _INDENT_STEP) -> int:
+    """Add a list defining one format per level, and return the numId naming it.
+
+    Each level is indented a step further than the one above it, as Word writes
+    one, because it is the indent and not the ilvl that says how deep an item sits.
+    """
     numbering = document.part.numbering_part.element
     definitions = numbering.findall(qn("w:abstractNum"))
     abstract_id = 1 + max(
@@ -63,6 +85,7 @@ def _list_definition(document, *formats: str) -> int:
         element = OxmlElement("w:lvl")
         element.set(qn("w:ilvl"), str(level))
         element.append(_val("w:numFmt", number_format))
+        element.append(_indented(step * (level + 1)))
         definition.append(element)
     definitions[-1].addnext(definition)
 
@@ -198,20 +221,56 @@ class TestReadingTheMarkerFormat:
 
 
 class TestNesting:
-    def test_a_run_opening_at_a_deeper_level_still_starts_at_the_left(self, opened):
-        """Levels are relative, exactly as headings are."""
+    def test_a_run_opening_indented_still_starts_at_the_left(self, opened):
+        """Depths are relative, exactly as heading levels are."""
 
         def build(document):
-            _numbered(document.add_paragraph("Check the register"), 1, level=2)
+            num_id = _list_definition(document, "bullet", "bullet", "bullet")
+            _numbered(document.add_paragraph("Check the register"), num_id, level=2)
 
         assert _content(opened(build)) == "- Check the register"
 
     def test_a_skipped_level_nests_one_deep(self, opened):
         def build(document):
-            _numbered(document.add_paragraph("Check the register"), 1, level=0)
-            _numbered(document.add_paragraph("Note the reference"), 1, level=2)
+            num_id = _list_definition(document, "bullet", "bullet", "bullet")
+            _numbered(document.add_paragraph("Check the register"), num_id, level=0)
+            _numbered(document.add_paragraph("Note the reference"), num_id, level=2)
 
         assert _content(opened(build)) == "- Check the register\n  - Note the reference"
+
+    def test_a_list_indented_past_the_one_above_it_nests_under_it(self, opened):
+        """How the guides write most of their sub-lists: not by demoting an item
+        into the list above it, which is what leaves an ilvl behind, but by starting
+        a separate list that is indented further. Both items sit at ilvl 0, so ilvl
+        reads one flat run where the page shows a sub-list."""
+
+        def build(document):
+            outer = _list_definition(document, "bullet")
+            inner = _list_definition(document, "bullet", step=_INDENT_STEP * 2)
+            _numbered(document.add_paragraph("If 'Yes',"), outer)
+            _numbered(document.add_paragraph("Note the reference"), inner)
+            _numbered(document.add_paragraph("Record the outcome"), inner)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes',\n  - Note the reference\n  - Record the outcome"
+        )
+
+    def test_an_item_dragged_a_little_stays_beside_its_neighbour(self, opened):
+        """An author nudging one item leaves it a few twips from the rest of its
+        list. Read as a depth that would nest the items after it under it, and a
+        list nobody wrote appears wherever a document has been edited by hand."""
+
+        def build(document):
+            num_id = _list_definition(document, "bullet")
+            _numbered(document.add_paragraph("Check the register"), num_id)
+            nudged = document.add_paragraph("Note the reference")
+            _numbered(nudged, num_id)
+            _drag(nudged, _INDENT_STEP + _INDENT_STEP // 4)
+            _numbered(document.add_paragraph("Record the outcome"), num_id)
+
+        assert _content(opened(build)) == (
+            "- Check the register\n- Note the reference\n- Record the outcome"
+        )
 
     def test_a_child_hangs_from_its_parent_own_text(self, opened):
         """An ordered marker is wider than a bullet, so a fixed indent per level

@@ -151,14 +151,34 @@ _W_VAL = "w:val"
 # one-cell table. Both are boxes to a reader, so both are BOX.
 _TEXT_BOX = qn("w:txbxContent")
 
-# The marks a run wears, as opposed to the block its text sits in. They are dropped
-# on the way into a text box, because a box is a story of its own: the run holding
-# the drawing carries run properties for the anchor character and Word applies none
-# of them to the text inside. Carried down, one red anchor paints a whole case note
-# red on this side and nowhere else - and, this side being the oracle, the parser is
-# reported as having lost fifty marks the page never drew.
-_WORN_BY_A_RUN = frozenset(
-    {BOLD, ITALIC, UNDERLINE, STRIKETHROUGH, SUPERSCRIPT, SUBSCRIPT, RED, BLUE, LINK}
+# What a text box does not inherit from the paragraph it hangs off: the marks that
+# paragraph's runs wear, and the list it is an item of. A box is a story of its own -
+# its paragraphs and runs carry their own properties, and Word applies none of the
+# anchor's to them. It draws no bullet on a box either, whatever the anchor's own
+# numbering says, which is also the answer the same box gets when it is drawn as a
+# one-cell table instead: those paragraphs are reached through the table and are
+# never asked what list the anchor was in.
+#
+# Left in, one red anchor paints a whole case note red and one bulleted anchor makes
+# a list of it - and, this side being the oracle, the parser is reported as having
+# lost marks the page never drew.
+#
+# What is *not* dropped is the block the box sits in. A box inside a table is inside
+# that table however it was drawn, and BOX itself is added on the way past.
+_NOT_INHERITED_BY_A_BOX = frozenset(
+    {
+        BOLD,
+        ITALIC,
+        UNDERLINE,
+        STRIKETHROUGH,
+        SUPERSCRIPT,
+        SUBSCRIPT,
+        RED,
+        BLUE,
+        LINK,
+        LIST,
+        NUMBERED,
+    }
 )
 
 # Elements that separate the text either side of them without printing a word.
@@ -593,9 +613,9 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
     caller can see.
 
     Marks accumulate downwards, and a text box is where that stops: what a box holds
-    is not marked by the run the drawing hangs off. The block it sits in still counts
-    - a box inside a table is inside that table - so only the marks a run wears are
-    dropped.
+    is marked by neither the run the drawing hangs off nor the list its paragraph is
+    an item of. The block it sits in still counts - a box inside a table is inside
+    that table - so what is dropped is what the anchor was wearing and no more.
     """
     segments: list[tuple[frozenset[str], str]] = []
     field = OpenField()
@@ -617,7 +637,7 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
         if tag == qn("w:hyperlink"):
             in_link = True
         elif tag == _TEXT_BOX:
-            active = (active - _WORN_BY_A_RUN) | {BOX}
+            active = (active - _NOT_INHERITED_BY_A_BOX) | {BOX}
             in_link = False
         elif tag == qn("w:p"):
             active = active | list_features(Paragraph(element, paragraph))
@@ -891,8 +911,11 @@ def word_sections(document: docx.document.Document) -> list[Section]:
 
     Everything before the first body heading is the cover page, and everything
     styled as a contents entry is navigation; neither is content the conversion is
-    meant to carry, so both are dropped rather than scored. A heading inside a table
-    cell is table content, not a new section.
+    meant to carry, so both are dropped rather than scored. Dropped, and no more:
+    a contents entry ends the section it sits in only when it is a heading, so that
+    a stray contents style on a body paragraph costs that paragraph and not the rest
+    of its section. A heading inside a table cell is table content, not a new
+    section.
     """
     sections: list[Section] = []
     current: Section | None = None
@@ -906,7 +929,18 @@ def word_sections(document: docx.document.Document) -> list[Section]:
             continue
 
         if is_contents(block):
-            current = None
+            # Navigation rather than content, so it is never absorbed - but only a
+            # contents *heading* ends the section it interrupts. A body paragraph
+            # merely carrying a contents style, which one guide does on an empty one
+            # mid-section, would otherwise take every paragraph after it up to the
+            # next heading with it: words the page really shows, absent from this
+            # side alone, so that nothing reads as missing and the marks on them are
+            # charged to the parser as marks it invented. Across the guides no real
+            # contents entry ever falls inside an open section - they sit ahead of
+            # the first heading, where there is nothing to close - so closing one
+            # here was only ever the destructive half of the rule.
+            if is_heading(block):
+                current = None
             continue
 
         if is_heading(block):
