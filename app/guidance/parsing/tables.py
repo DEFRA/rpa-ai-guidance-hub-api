@@ -29,7 +29,9 @@ it. Writing what a save would write makes the conversion a fixed point.
 
 `callout` is public because a one-cell table is not the only box Word draws: a text
 box holds the same thing, and `parser` renders one through here rather than growing a
-third copy of the paragraphs-to-blocks walk.
+third copy of the paragraphs-to-blocks walk. `blocks` and `quote` are the two halves
+of it, public for the third form, where the box is drawn by bordering the paragraphs
+themselves and so arrives as a run of them with no container to be read from.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ from app.guidance.parsing import inline, lists
 from app.guidance.parsing.ooxml import W_VAL
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
 # A vertical merge is a continuation unless it says it is the cell that starts one.
 _MERGE_ORIGIN = "restart"
@@ -99,8 +101,18 @@ def callout(container: Any, parent: Any) -> str:
     puts them all on one line - or, once a blockquote marker is in front of it, breaks
     out of the quote at the first newline.
     """
+    return quote(blocks(container.findall(qn("w:p")), parent))
+
+
+def quote(rendered: list[str]) -> str:
+    """Finished Markdown blocks as one blockquote.
+
+    The blocks are kept as blocks. Joining them into a single string first puts them
+    all on one line - or, once a blockquote marker is in front of it, breaks out of
+    the quote at the first newline.
+    """
     quoted: list[str] = []
-    for block in _own_blocks(container, parent):
+    for block in rendered:
         if quoted:
             quoted.append(">")
         quoted.extend(f"> {line}" for line in block.split("\n"))
@@ -198,10 +210,19 @@ def _own_blocks(container: Any, parent: Any) -> list[str]:
     guide, and one would need a table's shape inside a cell that cannot hold a line
     break. A text box nested inside a text box is left alone for the same reason.
     """
-    blocks: list[str] = []
+    return blocks(container.findall(qn("w:p")), parent)
+
+
+def blocks(paragraphs: Iterable[Any], parent: Any) -> list[str]:
+    """A sequence of w:p elements as Markdown blocks, in order.
+
+    Taken as elements rather than as their container, because a box drawn by
+    bordering the paragraphs themselves has no container to be read from.
+    """
+    rendered: list[str] = []
     run: list[tuple[lists.ListItem, str]] = []
 
-    for element in container.findall(qn("w:p")):
+    for element in paragraphs:
         paragraph = Paragraph(element, parent)
         markdown = inline.paragraph_markdown(paragraph)
 
@@ -210,11 +231,11 @@ def _own_blocks(container: Any, parent: Any) -> list[str]:
             run.append((item, markdown))
             continue
 
-        _append(blocks, _close_run(run))
-        _append(blocks, markdown)
+        _append(rendered, _close_run(run))
+        _append(rendered, markdown)
 
-    _append(blocks, _close_run(run))
-    return blocks
+    _append(rendered, _close_run(run))
+    return rendered
 
 
 def _close_run(run: list[tuple[lists.ListItem, str]]) -> str:
@@ -224,7 +245,7 @@ def _close_run(run: list[tuple[lists.ListItem, str]]) -> str:
     return block
 
 
-def _append(blocks: list[str], block: str) -> None:
+def _append(rendered: list[str], block: str) -> None:
     """Add a block to a cell, where it says anything.
 
     An empty paragraph is not a block, and neither is a run of list items that all
@@ -232,4 +253,4 @@ def _append(blocks: list[str], block: str) -> None:
     creates, so this is the ordinary case and not a defensive one.
     """
     if block:
-        blocks.append(block)
+        rendered.append(block)

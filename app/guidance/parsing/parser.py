@@ -13,7 +13,15 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
-from app.guidance.parsing import images, inline, lists, models, tables, textboxes
+from app.guidance.parsing import (
+    borders,
+    images,
+    inline,
+    lists,
+    models,
+    tables,
+    textboxes,
+)
 from app.guidance.parsing.errors import DocumentParseError
 from app.guidance.parsing.ooxml import is_toggle_on
 
@@ -238,11 +246,12 @@ def _extract_sections(
     is the cover page and the contents, and a contents page is regenerated from the
     headings anyway.
 
-    Consecutive list items are the one kind of content that is not one paragraph to
-    one block: a run of them is held open and rendered together, because what makes
-    a Markdown list is the items standing next to each other. A table is the other:
-    it is a block of the body in its own right, and closes any run open when it
-    arrives.
+    Two kinds of content are not one paragraph to one block. Consecutive list items
+    are held open and rendered together, because what makes a Markdown list is the
+    items standing next to each other; and so is a run of paragraphs Word drew a
+    border round, which is a box like any other box and has to be gathered before it
+    can be rendered as one. A table is neither: it is a block of the body in its own
+    right, and closes any run open when it arrives.
 
     The bookmarks a cross-reference can point at are collected on the way past. One
     is claimed only where it marks the start of a section, that being the whole of
@@ -252,11 +261,15 @@ def _extract_sections(
     sections: list[models.MarkdownSection] = []
     bookmarks: dict[str, models.MarkdownSection] = {}
     run = _OpenRun()
+    boxed: list[Any] = []
     # The document's own frame is never popped: it sits at level 0, and a heading's
     # level is never lower than 1.
     stack = [_OpenSection()]
 
     for element, opened_ahead_of_it in _body_items(document):
+        if element.tag != qn("w:p"):
+            _close_box(sections, run, boxed, document)
+
         if element.tag == qn("w:tbl"):
             _close_list(sections, run)
             _append_block(sections, tables.table_markdown(element, document))
@@ -270,6 +283,17 @@ def _extract_sections(
         appendix = _is_appendix(paragraph)
         level = _APPENDIX_LEVEL if appendix else _heading_level(paragraph)
         heading = paragraph.text.strip()
+        content = level is None or not heading
+
+        # A box drawn by bordering the paragraphs themselves is held until the first
+        # element that is not part of it, because nothing but that says where it
+        # ends. A heading is never part of one: a border round a heading is emphasis,
+        # and swallowing it into a quote would lose the section it opens.
+        if content and borders.is_boxed(element):
+            _take_bordered(sections, run, boxed, element, document)
+            continue
+
+        _close_box(sections, run, boxed, document)
 
         # A heading with nothing in it is a layout artefact - numbering it would put
         # a section in the output that the document does not have.
@@ -289,6 +313,7 @@ def _extract_sections(
         for name in opened_ahead_of_it + _bookmark_names(paragraph._p):
             bookmarks[name] = section
 
+    _close_box(sections, run, boxed, document)
     _close_list(sections, run)
     return sections, bookmarks
 
@@ -447,6 +472,46 @@ def _take_box(
         run.pending.append(markdown)
     else:
         run.items.append((None, markdown))
+
+
+def _take_bordered(
+    sections: list[models.MarkdownSection],
+    run: _OpenRun,
+    boxed: list[Any],
+    element: Any,
+    document: docx.document.Document,
+) -> None:
+    """Take one bordered paragraph into the box being gathered.
+
+    Where its border differs from the one before it, Word drew a fresh frame rather
+    than growing the open one, so the box held so far is finished and this paragraph
+    opens the next. That is what puts the line between an email template's subject
+    and its body: two boxes on the page are two blockquotes, not one.
+    """
+    if boxed and borders.signature(element) != borders.signature(boxed[-1]):
+        _close_box(sections, run, boxed, document)
+
+    boxed.append(element)
+
+
+def _close_box(
+    sections: list[models.MarkdownSection],
+    run: _OpenRun,
+    boxed: list[Any],
+    document: docx.document.Document,
+) -> None:
+    """File the run of bordered paragraphs held so far, and start a fresh one.
+
+    It is filed exactly where a text box anchored in the same place would be, because
+    it is the same box: what closes the run of bordered paragraphs is the first
+    element without the border, and that element has not been taken yet.
+    """
+    if not boxed:
+        return
+
+    markdown = borders.markdown(boxed, document)
+    boxed.clear()
+    _take_box(sections, run, markdown)
 
 
 def _take_pending(

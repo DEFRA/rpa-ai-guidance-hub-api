@@ -56,6 +56,18 @@ def _in_style(document: Any, text: str, style_name: str) -> None:
     document.add_paragraph(text, style=style_name)
 
 
+def _border(paragraph: Paragraph, *sides: str, value: str = "single") -> Paragraph:
+    """Draw a border on the sides named, or on all four when none are."""
+    border = OxmlElement("w:pBdr")
+    for side in sides or ("w:top", "w:left", "w:bottom", "w:right"):
+        edge = OxmlElement(side)
+        edge.set(qn("w:val"), value)
+        border.append(edge)
+
+    paragraph._p.get_or_add_pPr().append(border)
+    return paragraph
+
+
 def _bulleted(paragraph: Paragraph) -> None:
     """Put numbering on a paragraph, which is the whole of what makes it an item.
 
@@ -516,3 +528,81 @@ class TestUncAddresses:
         )
 
         assert list(bag.urls) != [audit_docx.normalise_url(word)]
+
+
+class TestTheBoxWordDrawsWithABorder:
+    """A box drawn by bordering the paragraphs themselves.
+
+    The third form, and the only one with no container to be read from. It is what
+    these guides use for text the reader is meant to copy rather than follow, so
+    what it costs to miss is the boundary between a template and the guidance that
+    resumes underneath it.
+    """
+
+    def test_a_four_sided_border_is_a_box(self):
+        """A reader sees the same box a one-cell table and a text box draw, so it
+        earns the same BOX."""
+        document = docx.Document()
+        paragraph = _border(document.add_paragraph("Claim reference: xxxxx"))
+
+        assert audit_docx.is_bordered(paragraph)
+
+    def test_a_border_on_one_side_is_a_rule(self):
+        """Word's own Title style underlines itself with a bottom border, and a
+        heading quoted for it would be a loss reported as a gain."""
+        document = docx.Document()
+        paragraph = _border(document.add_paragraph("Section summary"), "w:bottom")
+
+        assert not audit_docx.is_bordered(paragraph)
+
+    def test_a_side_turned_off_is_not_a_line(self):
+        """Word writes the side and says none rather than dropping the element, so
+        four sides present is not four sides drawn."""
+        document = docx.Document()
+        paragraph = _border(document.add_paragraph("Section summary"), value="none")
+
+        assert not audit_docx.is_bordered(paragraph)
+
+    def test_a_bordered_heading_is_not_part_of_a_box(self):
+        """A border round a heading is emphasis. Taken into a box the heading stops
+        opening a section, and the section's words go missing from this side alone -
+        which reads as the parser having invented every one of them."""
+        document = docx.Document()
+        paragraph = _border(document.add_heading("Rework required", level=2))
+
+        assert audit_docx.is_bordered(paragraph)
+        assert not audit_docx.belongs_to_a_box(paragraph)
+
+    def test_a_bordered_paragraph_wears_box(self):
+        """What the border says about the words, which is the whole point of
+        reading it: every word inside is a word inside a box."""
+        document = docx.Document()
+        section = audit_docx.Section("Rework required")
+        audit_docx.absorb_box(
+            section, [_border(document.add_paragraph("Claim reference: xxxxx"))]
+        )
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.BOX) == Counter(
+            {"claim": 1, "reference": 1, "xxxxx": 1}
+        )
+
+    def test_a_box_is_a_list_of_its_own(self):
+        """Its items step from each other and from nothing outside it, exactly as a
+        cell's do - so a box holding one item is not a step in from the item the
+        page drew before the box."""
+        document = docx.Document()
+        section = audit_docx.Section("Rework required")
+        outside = document.add_paragraph("Send the form")
+        _bulleted(outside)
+        _at_column(outside, 0)
+        inside = _border(document.add_paragraph("Include the version"))
+        _bulleted(inside)
+        _at_column(inside, 720)
+
+        run = audit_docx.ListRun(nudge=180)
+        audit_docx.absorb(section, outside, run)
+        audit_docx.absorb_box(section, [inside])
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
+            Counter()
+        )

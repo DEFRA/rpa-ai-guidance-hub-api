@@ -198,6 +198,12 @@ _W_VAL = "w:val"
 # one-cell table. Both are boxes to a reader, so both are BOX.
 _TEXT_BOX = qn("w:txbxContent")
 
+# The third way: a box drawn by bordering the paragraphs themselves, which is what
+# these guides use for text the reader is to copy rather than follow - a case note, an
+# email, a proforma comment. See `is_bordered` for why all four sides and no fewer.
+_BOX_SIDES = ("w:top", "w:left", "w:bottom", "w:right")
+_NO_LINE = frozenset({"none", "nil"})
+
 # What a text box does not inherit from the paragraph it hangs off: the marks that
 # paragraph's runs wear, and the list it is an item of. A box is a story of its own -
 # its paragraphs and runs carry their own properties, and Word applies none of the
@@ -1259,6 +1265,33 @@ def is_callout(table: Table) -> bool:
     return len(rows) == 1 and len(rows[0].findall(qn("w:tc"))) == 1
 
 
+def is_bordered(paragraph: Paragraph) -> bool:
+    """Whether Word drew a box round this paragraph itself.
+
+    The third way a box arrives, and the only one with no container: the author
+    borders a few adjacent body paragraphs and the box is that they share it. What a
+    reader sees is the same box a one-cell table and a text box draw, so it earns the
+    same BOX.
+
+    All four sides, and direct formatting only. One side is a rule rather than a box
+    - Word's own Title style underlines itself with a bottom border - and a rule is
+    where a style declares one. A side present but turned off is a declared absence
+    and not a line.
+    """
+    properties = paragraph._p.find(qn("w:pPr"))
+    if properties is None:
+        return False
+
+    border = properties.find(qn("w:pBdr"))
+    if border is None:
+        return False
+
+    sides = (border.find(qn(side)) for side in _BOX_SIDES)
+    return all(
+        side is not None and side.get(qn(_W_VAL)) not in _NO_LINE for side in sides
+    )
+
+
 def style_name(paragraph: Paragraph) -> str:
     """The paragraph's style name, lowercased, or "" when it has none."""
     style = paragraph.style
@@ -1331,18 +1364,20 @@ def word_sections(document: docx.document.Document) -> list[Section]:
     sections: list[Section] = []
     current: Section | None = None
     run = ListRun(nudge=_NUDGE)
+    boxed: list[Paragraph] = []
 
     for block in iter_blocks(document):
+        # Held until the first block that is not part of the box, because nothing
+        # but that says where it ends.
+        if isinstance(block, Paragraph) and belongs_to_a_box(block):
+            take_bordered(current, boxed, block)
+            continue
+
+        absorb_box(current, boxed)
+
         if isinstance(block, Table):
             run = ListRun(nudge=_NUDGE)
-            if current is not None:
-                features = frozenset({BOX if is_callout(block) else TABLE})
-                for cell in table_cells(block):
-                    # A cell is a list of its own however the cells around it are
-                    # written, so the run starts again at each one.
-                    cell_run = ListRun(nudge=_NUDGE)
-                    for paragraph in cell:
-                        absorb(current, paragraph, cell_run, features)
+            absorb_table(current, block)
             continue
 
         if is_contents(block):
@@ -1370,7 +1405,92 @@ def word_sections(document: docx.document.Document) -> list[Section]:
         if current is not None:
             absorb(current, block, run)
 
+    absorb_box(current, boxed)
     return sections
+
+
+def absorb_table(section: Section | None, table: Table) -> None:
+    """Add every cell of a table, each cell a list of its own.
+
+    A one-cell table is a box rather than a grid, so its contents are BOX and not
+    TABLE; the cells of a real table carry TABLE, which is what says a list inside
+    one is a list the format cannot hold.
+    """
+    if section is None:
+        return
+
+    features = frozenset({BOX if is_callout(table) else TABLE})
+    for cell in table_cells(table):
+        # A cell is a list of its own however the cells around it are written, so
+        # the run starts again at each one.
+        cell_run = ListRun(nudge=_NUDGE)
+        for paragraph in cell:
+            absorb(section, paragraph, cell_run, features)
+
+
+def border_signature(paragraph: Paragraph) -> tuple[Any, ...]:
+    """What says whether two bordered paragraphs are one box or two.
+
+    Word grows a single frame down consecutive bordered paragraphs only while their
+    border properties match exactly, and starts another wherever anything differs -
+    including a difference that renders the same, `w:color="auto"` against an
+    explicit black. It is the whole of what separates an email template's subject box
+    from its body box in the guides that draw them apart, so it is what the page
+    shows and what this side has to read.
+    """
+    properties = paragraph._p.find(qn("w:pPr"))
+    if properties is None:
+        return ()
+
+    border = properties.find(qn("w:pBdr"))
+    if border is None:
+        return ()
+
+    return tuple(
+        (side.tag, tuple(sorted(side.attrib.items())))
+        for side in sorted(border, key=lambda side: str(side.tag))
+    )
+
+
+def take_bordered(
+    section: Section | None, boxed: list[Paragraph], paragraph: Paragraph
+) -> None:
+    """Take one bordered paragraph into the box being gathered.
+
+    Where its border differs from the one before it Word drew a fresh frame, so the
+    box held so far is finished and this paragraph opens the next. Each box is a list
+    of its own, which is the whole of what this costs the score to get wrong.
+    """
+    if boxed and border_signature(paragraph) != border_signature(boxed[-1]):
+        absorb_box(section, boxed)
+
+    boxed.append(paragraph)
+
+
+def belongs_to_a_box(paragraph: Paragraph) -> bool:
+    """Whether this paragraph is part of a box drawn by bordering its paragraphs.
+
+    A heading is never part of one: a border round a heading is emphasis, and taking
+    it into a box would lose the section it opens.
+    """
+    return is_bordered(paragraph) and not is_heading(paragraph)
+
+
+def absorb_box(section: Section | None, boxed: list[Paragraph]) -> None:
+    """Add the run of bordered paragraphs held so far, and start a fresh one.
+
+    They are a box, so they are a list of their own: the run they interrupt goes on
+    around them, exactly as it does around a text box anchored between two items, and
+    the items inside the box step from each other and from nothing outside it.
+    """
+    if not boxed:
+        return
+
+    box_run = ListRun(nudge=_NUDGE)
+    for paragraph in boxed:
+        if section is not None:
+            absorb(section, paragraph, box_run, frozenset({BOX}))
+    boxed.clear()
 
 
 def markdown_sections(document: models.MarkdownDocument) -> list[Section]:
