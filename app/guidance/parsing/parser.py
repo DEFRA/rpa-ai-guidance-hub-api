@@ -263,8 +263,7 @@ def _extract_sections(
             continue
 
         if element.tag == textboxes.TEXT_BOX:
-            _close_list(sections, run)
-            _append_block(sections, textboxes.markdown(element, document))
+            _take_box(sections, run, textboxes.markdown(element, document))
             continue
 
         paragraph = Paragraph(element, document)
@@ -425,6 +424,29 @@ def _collect_body(
         return
 
     _append_block(sections, markdown)
+
+
+def _take_box(
+    sections: list[models.MarkdownSection], run: _OpenRun, markdown: str
+) -> None:
+    """File a box Word drew between two list items as a block of the item above it.
+
+    A box anchored on an item is what that item introduces - the case note the step
+    says to add, the template it says to use - and a reader reads it there. Closing
+    the run at one instead ends the list, so the items after it reopen at the margin
+    and every step the page draws between them is thrown away with the nesting.
+
+    A box arriving while prose is held joins the prose rather than the item, so that
+    the two are settled together and stay in the order the page puts them in. With
+    no run open at all it is a block of its own, which is where it stands.
+    """
+    if not run.items:
+        _close_list(sections, run)
+        _append_block(sections, markdown)
+    elif run.pending:
+        run.pending.append(markdown)
+    else:
+        run.items.append((None, markdown))
 
 
 def _take_pending(

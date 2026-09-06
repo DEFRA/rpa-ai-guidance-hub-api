@@ -310,6 +310,77 @@ class TestListSteps:
         )
 
 
+class TestTheBulletWordDraws:
+    """The depth rule, read off the markers rather than off the columns alone.
+
+    `ListRun` is asked directly here: what a marker *is* comes from the numbering a
+    document declares, which `item_marker` reads and the guides exercise, while what
+    a marker *does* is this - and it is what decides every step this file counts.
+    """
+
+    ROUND = ("Symbol:\uf0b7", 0)
+    HOLLOW = ("Courier New:o", 1)
+
+    def steps(self, *items):
+        """The step each of a run's items made, given (marker, column) for each."""
+        run = audit_docx.ListRun(nudge=180)
+        return [run.stepped("an item", column, marker) for marker, column in items]
+
+    def test_a_bullet_one_step_down_is_a_step_in_however_far_left_it_is_drawn(self):
+        """Word writes its bullet sequence only when an item is demoted, so a hollow
+        bullet under a filled one is nested however far left the author dragged it.
+        Read by the column alone it is a step out, and the page is credited with a
+        step out the parser is then charged with having lost."""
+        assert self.steps(
+            (self.ROUND, 2203), (self.HOLLOW, 643), (self.HOLLOW, 643)
+        ) == [
+            frozenset(),
+            frozenset({audit_docx.LIST_INDENT}),
+            frozenset(),
+        ]
+
+    def test_an_item_returns_to_the_depth_wearing_its_bullet_in_its_column(self):
+        """Only the column and the bullet together say so: by position alone the
+        second branch is further right than the sub-list it follows, and reads as a
+        step in rather than the step out back to its own question."""
+        assert self.steps(
+            (self.ROUND, 2203), (self.HOLLOW, 643), (self.ROUND, 2203)
+        ) == [
+            frozenset(),
+            frozenset({audit_docx.LIST_INDENT}),
+            frozenset({audit_docx.LIST_OUTDENT}),
+        ]
+
+    def test_a_bullet_enclosing_another_neither_closes_nor_takes_it_in(self):
+        """A hollow bullet is inside a filled one wherever the two are drawn, so an
+        item stepping left of its own sub-list rejoins that sub-list - and does not
+        step out to the filled bullet it is still inside of."""
+        assert self.steps(
+            (self.ROUND, 2203), (self.HOLLOW, 1145), (self.HOLLOW, 643)
+        ) == [
+            frozenset(),
+            frozenset({audit_docx.LIST_INDENT}),
+            frozenset(),
+        ]
+
+    def test_a_run_stepping_left_of_everything_it_has_drawn_has_not_stepped(self):
+        """Markdown has no column to the left of the one a list begins in, and
+        neither has the reading: an item left of every depth open closes them all
+        and stands at the first. Both sides draw it at the margin, so there is no
+        step for either to lose - which is why this is no longer held out as a limit
+        of the format, as it was while this side read the columns alone."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "Open the register", 1440)
+        _item(document, "Read the status", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+        assert not section.bag.limits
+
+
 class TestKnownLimits:
     """What the page shows that no Markdown could carry.
 
@@ -358,23 +429,6 @@ class TestKnownLimits:
             {"open": 1, "the": 1, "register": 1}
         )
         assert not section.bag.limits
-
-    def test_a_step_out_past_where_the_list_begins_is_a_limit(self):
-        """A Markdown list has no column to the left of its first item, so a run
-        opening indented and stepping back out cannot be drawn at all. The parser
-        starts every run at the margin, which is the only thing it can do."""
-        document = docx.Document()
-        document.add_heading("Working the case", level=1)
-        _item(document, "Open the register", 1440)
-        _item(document, "Read the status", 1440)
-        _item(document, "If no,", 720)
-
-        [section] = audit_docx.word_sections(document)
-
-        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
-        assert audit_docx.marks_of(
-            section.bag.limits, audit_docx.PAST_THE_START
-        ) == Counter({"if": 1, "no": 1})
 
     def test_a_step_out_from_deeper_is_drawn_however_far_left_it_lands(self):
         """It is the item being left that decides. Leaving one drawn deeper than the

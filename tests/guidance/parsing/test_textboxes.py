@@ -216,9 +216,10 @@ class TestWhereABoxGoes:
 
         assert _box_content(docx_bytes, build, index=1) == "> Check the claim"
 
-    def test_a_box_closes_an_open_list_run(self, docx_bytes):
-        """Two runs either side of a box are two lists, as they are either side of
-        a table."""
+    def test_a_box_between_two_items_belongs_to_the_item_above_it(self, docx_bytes):
+        """A box anchored on an item is what that item introduces, and does not end
+        the list: closing the run would reopen the items after it at the margin and
+        throw away every step the page draws between them."""
 
         def build(document):
             document.add_paragraph("Send the form", style="List Bullet")
@@ -226,7 +227,19 @@ class TestWhereABoxGoes:
             document.add_paragraph("Keep a copy", style="List Bullet")
 
         assert _box_content(docx_bytes, build) == (
-            "- Send the form\n\n> Check the version\n\n- Keep a copy"
+            "- Send the form\n\n  > Check the version\n- Keep a copy"
+        )
+
+    def test_a_box_with_no_list_open_is_a_block_of_its_own(self, docx_bytes):
+        """Nothing for it to belong to leaves it where it stands on the page."""
+
+        def build(document):
+            document.add_paragraph("Read the guidance.")
+            _anchor(document.add_paragraph(), _text_box("Check the version"))
+            document.add_paragraph("Keep a copy", style="List Bullet")
+
+        assert _box_content(docx_bytes, build) == (
+            "Read the guidance.\n\n> Check the version\n\n- Keep a copy"
         )
 
     def test_a_box_ahead_of_every_heading_is_dropped(self, docx_bytes):

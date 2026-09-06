@@ -64,11 +64,26 @@ def _numbering_style(document, name: str, num_id: int) -> str:
     return name
 
 
-def _list_definition(document, *formats: str, step: int = _INDENT_STEP) -> int:
+# Word's own bullets, by the font and character each is drawn with.
+_ROUND = ("Symbol", "\uf0b7")
+_HOLLOW = ("Courier New", "o")
+_SQUARE = ("Wingdings", "\uf0a7")
+
+
+def _list_definition(
+    document,
+    *formats: str,
+    step: int = _INDENT_STEP,
+    bullets: tuple[tuple[str, str], ...] = (),
+) -> int:
     """Add a list defining one format per level, and return the numId naming it.
 
     Each level is indented a step further than the one above it, as Word writes
     one, because it is the indent and not the ilvl that says how deep an item sits.
+
+    `bullets` names the font and character a level draws its bullet with, for the
+    levels it covers. A level given none declares no bullet at all, which is a
+    marker outside Word's sequence and so has no say in depth.
     """
     numbering = document.part.numbering_part.element
     definitions = numbering.findall(qn("w:abstractNum"))
@@ -85,6 +100,14 @@ def _list_definition(document, *formats: str, step: int = _INDENT_STEP) -> int:
         element = OxmlElement("w:lvl")
         element.set(qn("w:ilvl"), str(level))
         element.append(_val("w:numFmt", number_format))
+        if level < len(bullets):
+            font, glyph = bullets[level]
+            element.append(_val("w:lvlText", glyph))
+            properties = OxmlElement("w:rPr")
+            fonts = OxmlElement("w:rFonts")
+            fonts.set(qn("w:ascii"), font)
+            properties.append(fonts)
+            element.append(properties)
         element.append(_indented(step * (level + 1)))
         definition.append(element)
     definitions[-1].addnext(definition)
@@ -99,6 +122,13 @@ def _list_definition(document, *formats: str, step: int = _INDENT_STEP) -> int:
 def _content(source: bytes, index: int = 0) -> str:
     """The Markdown one parsed section holds, in document order."""
     return parser.parse_docx(source).sections[index].content
+
+
+def _item(document, text: str, num_id: int):
+    """A paragraph belonging to a named list, returned so it can be dragged."""
+    paragraph = document.add_paragraph(text)
+    _numbered(paragraph, num_id)
+    return paragraph
 
 
 @pytest.fixture
@@ -218,6 +248,84 @@ class TestReadingTheMarkerFormat:
             _numbered(document.add_paragraph("Check the register"), 99)
 
         assert _content(opened(build)) == "- Check the register"
+
+
+class TestTheBulletWordDraws:
+    """Depth as a reader reads it, where the indent and the bullet disagree.
+
+    Word writes its bullet sequence - filled round, hollow, filled square - only
+    when an item is demoted, so the bullet records what its author meant by it. The
+    indent records wherever the mouse last left it, and in these guides that is
+    frequently nowhere near.
+    """
+
+    def test_a_bullet_one_step_down_nests_however_far_left_it_is_drawn(self, opened):
+        """The shape these guides use constantly: a lead-in dragged far out to the
+        right, and the steps under it back at the margin wearing the hollow bullet
+        Word gives a demoted item. Read by the indent alone the steps are a step
+        *out* of the lead-in, and everything they say is filed beside it instead of
+        under it."""
+
+        def build(document):
+            outer = _list_definition(document, "bullet", bullets=(_ROUND,))
+            inner = _list_definition(document, "bullet", bullets=(_HOLLOW,))
+            _drag(_item(document, "If 'Yes':", outer), 2203)
+            _drag(_item(document, "Update the declaration.", inner), 643)
+            _drag(_item(document, "Resolve the case.", inner), 643)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes':\n  - Update the declaration.\n  - Resolve the case."
+        )
+
+    def test_an_item_returns_to_the_depth_wearing_its_bullet_in_its_column(
+        self, opened
+    ):
+        """The other half of that shape: the next branch of the question, drawn
+        where the first was and wearing the same bullet. Only its column and bullet
+        together say so - by position alone it is further right than the sub-list it
+        follows, and nests inside the very branch it is the alternative to."""
+
+        def build(document):
+            outer = _list_definition(document, "bullet", bullets=(_ROUND,))
+            inner = _list_definition(document, "bullet", bullets=(_HOLLOW,))
+            _drag(_item(document, "If 'Yes':", outer), 2203)
+            _drag(_item(document, "Update the declaration.", inner), 643)
+            _drag(_item(document, "If 'No':", outer), 2203)
+            _drag(_item(document, "Close the case.", inner), 643)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes':\n  - Update the declaration.\n- If 'No':\n  - Close the case."
+        )
+
+    def test_a_bullet_outside_another_is_not_closed_by_a_leftward_step(self, opened):
+        """A hollow bullet is inside a filled one wherever the two are drawn, so an
+        item stepping left of its sub-list but still wearing the sub-list's bullet
+        rejoins that sub-list rather than the depth above it."""
+
+        def build(document):
+            outer = _list_definition(document, "bullet", bullets=(_ROUND,))
+            inner = _list_definition(document, "bullet", bullets=(_HOLLOW,))
+            _drag(_item(document, "If 'Yes':", outer), 2203)
+            _drag(_item(document, "Draft the letter.", inner), 1145)
+            _drag(_item(document, "Send the letter.", inner), 643)
+
+        assert _content(opened(build)) == (
+            "- If 'Yes':\n  - Draft the letter.\n  - Send the letter."
+        )
+
+    def test_a_marker_outside_the_sequence_leaves_the_depth_to_the_indent(self, opened):
+        """A number is not a step of Word's bullet sequence and says nothing about
+        depth. Ranking one would nest the page by a marker that never meant a level,
+        so an unranked marker hands the question back to the indent, unchanged."""
+
+        def build(document):
+            numbers = _list_definition(document, "decimal")
+            _drag(_item(document, "Open the register.", numbers), 2203)
+            _drag(_item(document, "Note the reference.", numbers), 643)
+
+        assert _content(opened(build)) == (
+            "1. Open the register.\n1. Note the reference."
+        )
 
 
 class TestNesting:

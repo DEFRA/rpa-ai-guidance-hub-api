@@ -59,6 +59,17 @@ _BULLET_FORMAT = "bullet"
 
 _BULLET_MARKER = "-"
 
+# Word's own bullets, in the order it steps through them as an item is demoted: a
+# filled round bullet, a hollow one, a filled square. Only pressing Tab writes this
+# sequence, so a step down it records what the author meant by an item where the
+# indent records only where the mouse last left it. The font is half of the key: the
+# same character is a different bullet in Symbol and in Wingdings.
+_BULLET_RANKS = {
+    ("Symbol", "\uf0b7"): 0,
+    ("Courier New", "o"): 1,
+    ("Wingdings", "\uf0a7"): 2,
+}
+
 _TOP_LEVEL = 0
 
 # The margin itself, where Word draws an item nothing has indented.
@@ -78,10 +89,17 @@ class ListItem:
     `indent` is how far from the margin Word puts it, in twips. It is a position on
     the page rather than a depth in the output, and is turned into one only in the
     company of the items around it.
+
+    `marker` names what Word draws to mark it and `rank` is that bullet's place in
+    Word's sequence, where it has one. Two items wearing one marker in one column
+    are at one depth, and a marker one step down the sequence is an item its author
+    demoted - which says more about depth than the indent does.
     """
 
     indent: int = _NO_INDENT
     ordered: bool = False
+    marker: str = ""
+    rank: int | None = None
 
 
 def list_item(paragraph: Paragraph) -> ListItem | None:
@@ -91,10 +109,43 @@ def list_item(paragraph: Paragraph) -> ListItem | None:
         return None
 
     level = int(_numbering_value(paragraph, "w:ilvl") or _TOP_LEVEL)
+    marker, rank = _marker(paragraph, num_id, level)
     return ListItem(
         indent=_indent(paragraph, num_id, level),
         ordered=_is_ordered(paragraph, num_id, level),
+        marker=marker,
+        rank=rank,
     )
+
+
+def _marker(paragraph: Paragraph, num_id: str, level: int) -> tuple[str, int | None]:
+    """What Word draws to mark an item here, and where that sits in its sequence.
+
+    The name is what two items must share to count as marked the same way. The rank
+    is the bullet's place in Word's own sequence, and is None for anything outside
+    it - a number, or a symbol in a font not listed. Unranked is the safe answer: it
+    leaves the depth to the indent, where a wrong rank would nest the page wrongly.
+    """
+    declared = _declared_levels(paragraph, num_id).get(level)
+    if declared is None:
+        return _BULLET_FORMAT, None
+
+    formats = _values(declared, "w:numFmt")
+    if formats and formats[0] != _BULLET_FORMAT:
+        return formats[0], None
+
+    texts = _values(declared, "w:lvlText")
+    glyph = texts[0] if texts else ""
+    font = _marker_font(declared)
+    return f"{font}:{glyph}", _BULLET_RANKS.get((font, glyph))
+
+
+def _marker_font(declared: Any) -> str:
+    """The font a level draws its bullet in, or "" where it names none."""
+    fonts = declared.find(f"{qn('w:rPr')}/{qn('w:rFonts')}")
+    if fonts is None:
+        return ""
+    return str(fonts.get(qn("w:ascii")) or fonts.get(qn("w:hAnsi")) or "")
 
 
 def is_deeper(item: ListItem, previous: ListItem) -> bool:
@@ -150,11 +201,14 @@ def render(items: Sequence[tuple[ListItem | None, str]]) -> str:
 class _OpenLevel:
     """One depth of an open run: what it is counting, and where its items sit.
 
-    `left` is the column Word draws this depth in, and is the one the items joining
-    it are measured against. `indent` is the column its markers start in *here*, and
-    is fixed when the depth opens. `content_column` is where the text of its most
-    recent item starts, which is both where that item's own later lines hang and
-    where a child of it is indented to; `next_marker` records it on the way out.
+    `left` is the column Word drew this depth's most recent item in, and is what the
+    item after it is measured against. `marker` and `rank` are that item's bullet
+    and its place in Word's sequence, which is how a later item recognises this
+    depth as the one it belongs to. `indent` is the column its markers start in
+    *here*, and is fixed when the depth opens. `content_column` is where the text of
+    its most recent item starts, which is both where that item's own later lines
+    hang and where a child of it is indented to; `next_marker` records it on the way
+    out.
     """
 
     left: int
@@ -162,6 +216,8 @@ class _OpenLevel:
     indent: str = ""
     count: int = 0
     content_column: str = ""
+    marker: str = ""
+    rank: int | None = None
 
     def next_marker(self) -> str:
         """This depth's next marker, and the column it puts its item's text in.
@@ -180,6 +236,28 @@ class _OpenLevel:
 def _depth_for(stack: list[_OpenLevel], item: ListItem) -> tuple[_OpenLevel, bool]:
     """The depth this item belongs to, and whether it starts a list of its own.
 
+    Depth is what a reader reads, and a reader reads three things, in this order.
+
+    An item wearing the marker an open depth wears, drawn in the column that depth
+    was last drawn in, is *that* depth returned to, however far the run wandered in
+    between. It is the only rule that can bring a run back out of a sub-list an
+    author opened to the left of its own parent, which these guides do constantly.
+
+    An item wearing the next marker down Word's sequence is nested, whatever the
+    indent says. Only demoting an item writes that sequence, so it records what the
+    author meant; the indent records where the mouse left it. These guides
+    habitually draw a lead-in far to the right of the steps beneath it, and the
+    marker is the whole of what says the steps belong to it.
+
+    Anything else is position, as it always was: a depth is closed by an item drawn
+    to the left of it by more than a nudge, an item joins the innermost depth
+    standing in its own column, and anything further right than all of them starts a
+    depth of its own, however far right - two levels' worth of indent nests one
+    deep, exactly as it does for headings. The one addition is that a depth whose
+    bullet encloses the item's neither closes nor takes it in: a hollow bullet is
+    inside a filled one wherever the two are drawn, so a leftward step stops there
+    and the item opens a depth beneath it.
+
     A depth opened again after being closed starts counting from one, while the
     depth returned to carries on - which is what numbers a list 1, 2, 3 rather than
     1, 1, 1 when a sub-list interrupts it.
@@ -187,30 +265,89 @@ def _depth_for(stack: list[_OpenLevel], item: ListItem) -> tuple[_OpenLevel, boo
     Going deeper opens a nested list, which the caller does not part with a blank
     line; only a change of kind at a depth already open does, and saying which
     happened is why the answer is a pair.
-
-    A depth is closed only by an item drawn to the left of it by more than a nudge,
-    and an item joins the innermost depth standing in its own column. Anything
-    further right than all of them starts a depth of its own, however far right:
-    what a document says about how deep an item sits is only where its neighbours
-    are, so two levels' worth of indent nests one deep, exactly as it does for
-    headings.
     """
-    while stack and stack[-1].left - item.indent > _SAME_COLUMN:
+    for index in range(len(stack) - 1, -1, -1):
+        depth = stack[index]
+        if (
+            depth.marker == item.marker
+            and abs(depth.left - item.indent) <= _SAME_COLUMN
+        ):
+            del stack[index + 1 :]
+            return depth, _join(depth, item)
+
+    if _demoted(stack, item):
+        return _open(stack, item), False
+
+    while (
+        stack
+        and stack[-1].left - item.indent > _SAME_COLUMN
+        and not _encloses(stack[-1], item)
+    ):
         stack.pop()
 
-    if stack and abs(stack[-1].left - item.indent) <= _SAME_COLUMN:
-        depth = stack[-1]
-        # A bullet interrupting an ordered list at the same depth is a different
-        # list, so what its neighbour had counted to says nothing about it.
-        if depth.ordered != item.ordered:
-            depth.ordered = item.ordered
-            depth.count = 0
-            return depth, True
-        return depth, False
+    if (
+        not stack
+        or item.indent - stack[-1].left > _SAME_COLUMN
+        or _encloses(stack[-1], item)
+    ):
+        return _open(stack, item), False
 
+    return stack[-1], _join(stack[-1], item)
+
+
+def _demoted(stack: list[_OpenLevel], item: ListItem) -> bool:
+    """Whether this item wears the marker one step down from the open depth's."""
+    if not stack or item.rank is None or stack[-1].rank is None:
+        return False
+    return item.rank == stack[-1].rank + 1
+
+
+def _encloses(depth: _OpenLevel, item: ListItem) -> bool:
+    """Whether this depth's bullet says it is outside the item, wherever it is drawn.
+
+    A hollow bullet is inside a filled one and a square inside a hollow one, so a
+    depth wearing an earlier bullet than the item's is not one the item can close,
+    however far to the left of it the author dragged it.
+    """
+    if depth.rank is None or item.rank is None:
+        return False
+    return depth.rank < item.rank
+
+
+def _open(stack: list[_OpenLevel], item: ListItem) -> _OpenLevel:
+    """Start a depth for this item, nested inside whatever is open above it."""
     indent = stack[-1].content_column if stack else ""
-    stack.append(_OpenLevel(left=item.indent, ordered=item.ordered, indent=indent))
-    return stack[-1], False
+    stack.append(
+        _OpenLevel(
+            left=item.indent,
+            ordered=item.ordered,
+            indent=indent,
+            marker=item.marker,
+            rank=item.rank,
+        )
+    )
+    return stack[-1]
+
+
+def _join(depth: _OpenLevel, item: ListItem) -> bool:
+    """Put this item in an open depth, and say whether that starts a fresh list.
+
+    The depth takes the item's marker and column, because what the item after it is
+    measured against is where the one before it was drawn - not where the depth
+    first opened, which may be a column the run has long since left.
+    """
+    depth.left = item.indent
+    depth.marker = item.marker
+    depth.rank = item.rank
+
+    # A bullet interrupting an ordered list at the same depth is a different list,
+    # so what its neighbour had counted to says nothing about it.
+    if depth.ordered != item.ordered:
+        depth.ordered = item.ordered
+        depth.count = 0
+        return True
+
+    return False
 
 
 def _continuation(markdown: str, content_column: str) -> str:

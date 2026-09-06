@@ -134,24 +134,30 @@ _FEATURES = (
 # the faults that are real, which is the one place it must not be. `--missing` names
 # each one in full, so it is reported rather than quietly dropped.
 IN_A_CELL = "a list inside a table cell"
-PAST_THE_START = "a step out past where its list begins"
 
-_LIMITS = (IN_A_CELL, PAST_THE_START)
+_LIMITS = (IN_A_CELL,)
 
 _WHY = {
     IN_A_CELL: (
         "a GFM pipe row cannot hold a newline, so `tables` joins the cell's blocks "
         "with <br> and a bullet becomes a hyphen in the cell's text"
     ),
-    PAST_THE_START: (
-        "a list item's marker indented under four spaces is a top-level item, so "
-        "Markdown has no column to the left of the one a list begins in"
-    ),
 }
 
 # The marks a pipe cell cannot carry. Everything else a run wears - bold, a link, a
 # colour - survives in a cell perfectly well.
 _LOST_IN_A_CELL = frozenset({LIST, NUMBERED, LIST_INDENT, LIST_OUTDENT})
+
+# Word's own bullets, in the order it steps through them as an item is demoted: a
+# filled round bullet, a hollow one, a filled square. Only pressing Tab writes this
+# sequence, which is why it says more about depth than the indent does - and why the
+# ilvl says least of all: 320 of this corpus's 478 hollow bullets sit at ilvl 0,
+# having come from a named style or a pasted list rather than from a keystroke.
+_BULLET_RANKS = {
+    ("Symbol", "\uf0b7"): 0,
+    ("Courier New", "o"): 1,
+    ("Wingdings", "\uf0a7"): 2,
+}
 
 # How far one item can be drawn from the item before it and still be in its column,
 # in twips. Word steps a quarter of an inch when it demotes an item, so half of that
@@ -305,7 +311,10 @@ _SPAN_ATTRIBUTE = re.compile(r"\{\.([a-z]+)\}")
 # Block markers. A quote marker and a list marker each claim a whole line; a row of
 # pipes is a table row only under the delimiter that declares one.
 _ATX_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+")
-_QUOTE_MARKER = re.compile(r"^\s{0,3}>\s?")
+# A quote marker and whatever indents it. Any indent at all, because a box the
+# parser puts inside a list item is indented to that item's own text column, which
+# is two columns per depth and four before the second one is reached.
+_QUOTE_MARKER = re.compile(r"^(?P<indent> *)>\s?")
 _PIPE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 _DELIMITER_ROW = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
 
@@ -752,7 +761,11 @@ def mark_paragraph(bag: Bag, paragraph: Paragraph, features: frozenset[str]) -> 
             active = (
                 active
                 | list_features(boxed_paragraph)
-                | boxed.stepped(boxed_paragraph.text, item_column(boxed_paragraph))[0]
+                | boxed.stepped(
+                    prints_something(boxed_paragraph, boxed_paragraph.text),
+                    item_column(boxed_paragraph),
+                    item_marker(boxed_paragraph),
+                )
             )
         elif tag == qn("w:r"):
             linked = in_link or bool(field.absorb(element))
@@ -914,89 +927,225 @@ def left_indent(properties: Any) -> int | None:
     return None if value is None else int(value)
 
 
+def prints_something(paragraph: Paragraph, text: str) -> bool:
+    """Whether this paragraph puts anything at all on the page.
+
+    A picture is something. The parser writes a line for one, and that line ends a
+    run of items exactly as a paragraph of prose does, so a run held open across a
+    picture here would count steps the Markdown has no run left to draw.
+    """
+    if text.strip():
+        return True
+
+    return any(
+        True
+        for element in rendered_nodes(paragraph._p)
+        if element.tag == qn("w:r")
+        for _ in pictures(element)
+    )
+
+
+def item_marker(paragraph: Paragraph) -> tuple[str, int | None]:
+    """What Word draws to mark this item, and its place in Word's bullet sequence.
+
+    The name is what two items must share to count as marked the same way, and pairs
+    the character with the font it is drawn in: the same character is a different
+    bullet in Symbol and in Wingdings. The rank is None for anything outside the
+    sequence - a number, or a symbol in a font not listed - which is the safe answer,
+    because an unranked marker leaves the depth to the indent while a wrongly ranked
+    one would nest the page wrongly.
+    """
+    num_id = numbering_value(paragraph, "w:numId")
+    if num_id is None or num_id == _NUMBERING_REMOVED:
+        return "", None
+
+    declared = declared_levels(paragraph, num_id).get(
+        int(numbering_value(paragraph, "w:ilvl") or 0)
+    )
+    if declared is None:
+        return _BULLET_FORMAT, None
+
+    value = _declared_value(declared, "w:numFmt")
+    if value and value != _BULLET_FORMAT:
+        return value, None
+
+    glyph = _declared_value(declared, "w:lvlText") or ""
+    font = _marker_font(declared)
+    return f"{font}:{glyph}", _BULLET_RANKS.get((font, glyph))
+
+
+def _declared_value(declared: Any, name: str) -> str | None:
+    """One w:val a list level declares, where it declares that element at all."""
+    element = declared.find(qn(name))
+    if element is None:
+        return None
+    value = element.get(qn(_W_VAL))
+    return None if value is None else str(value)
+
+
+def _marker_font(declared: Any) -> str:
+    """The font a list level draws its bullet in, or "" where it names none."""
+    fonts = declared.find(f"{qn('w:rPr')}/{qn('w:rFonts')}")
+    if fonts is None:
+        return ""
+    return str(fonts.get(qn("w:ascii")) or fonts.get(qn("w:hAnsi")) or "")
+
+
+@dataclass
+class Depth:
+    """One open depth of a run: the marker and column of its most recent item."""
+
+    marker: str
+    rank: int | None
+    column: int
+
+
 @dataclass
 class ListRun:
-    """Where the item before this one was drawn, as a run of items is walked.
+    """The depths open as a run of items is walked, and where each was last drawn.
 
-    Depth cannot be scored as a level. Word measures one in twips and Markdown in
-    columns, so the two never name the same number, and both sides read depth
-    relatively anyway - a run opening indented starts at the left - so an absolute
-    level would report a loss where that is working. What both *can* say in their own
-    units is what one item did relative to the one before it: stepped in, stepped
-    out, or stayed where it was.
+    Depth cannot be scored as a level the document declares. Word measures one in
+    twips and Markdown in columns, so the two never name the same number, and Word's
+    own ilvl is not the level either - 320 of this corpus's 478 hollow bullets sit at
+    ilvl 0, having arrived from a named style or a pasted list rather than from
+    pressing Tab. What both sides can read is the depth a *reader* reads, and from it
+    what one item did relative to the one before: stepped in, out, or stayed.
 
-    Read from adjacent items alone and never from a stack of open depths, which is
-    the point. Counting how many depths an item closes would mean running the
-    parser's own rule here, and an instrument that shares the algorithm under test
-    cannot find a fault in it.
+    The reading is set out in full on the parser's `_depth_for`, and is written here
+    a second time rather than imported, as everything in this file is. It is the one
+    rule the two sides have to share to be talking about the same thing, and sharing
+    it costs this side some of its independence: a fault in the rule itself would now
+    be invisible here, where a fault in a column comparison was not. What is still
+    caught is everything the parser does *with* a depth - the Markdown side reads its
+    depths out of the columns in the text, so an item indented wrongly, a run broken
+    by a stray blank line, or a block filed under the wrong item is a difference this
+    side can still see.
 
-    `nudge` is how far apart two items can be drawn and still be in one column,
-    which only the side measuring in twips needs.
+    `nudge` is how far apart two items can be drawn and still be in one column, which
+    only the side measuring in twips needs.
     """
 
     nudge: int = 0
-    column: int | None = None
+    depths: list[Depth] = field(default_factory=list)
     floor: int | None = None
+    interrupted: bool = False
 
     def stepped(
-        self, text: str, column: int | None
-    ) -> tuple[frozenset[str], frozenset[str]]:
-        """What an item drawn at this column did, relative to the one before it.
+        self,
+        shows: bool,
+        column: int | None,
+        marker: tuple[str, int | None] = ("", None),
+    ) -> frozenset[str]:
+        """What an item drawn at this column, wearing this marker, did.
 
-        A `column` of None is not an item at all and closes the run: whatever comes
-        next has nothing behind it to have moved from.
+        A `column` of None is prose between two items, and what it does depends on
+        the item that follows it. Where that item is drawn further right than the run
+        began, the prose is a sub-list's unbulleted lead-in: Word goes on drawing the
+        items after it at the level they were at, a reader reads them there, and
+        ending the run would throw away the one thing the page says about how they
+        sit. Where it is not, the prose is a paragraph of its own - a note, or the
+        next question - and the list under it is a new list, which is what a reader
+        reads and what the parser writes. So the interruption is remembered and
+        settled by the next item, never by itself.
 
-        Text printing nothing is the exception, and holds the run open either way.
-        Word spaces its lists with empty paragraphs, CommonMark makes a list loose
-        rather than ending it at a blank line, and an item saying nothing is given
-        no Markdown line at all - so a run closed here and open there would put a
-        step at the seam on one side only, and charge the mark to whichever side
-        was still counting. A step is worn by words in any case, and text printing
-        none has none to wear it.
+        A paragraph printing nothing at all is the other exception, and holds the run
+        open either way. Word spaces its lists with empty paragraphs, CommonMark
+        makes a list loose rather than ending it at a blank line, and a paragraph
+        saying nothing is given no Markdown line at all - so a run closed here and
+        open there would put a step at the seam on one side only, and charge the mark
+        to whichever side was still counting. `shows` is what says which: a picture
+        prints, and the parser writes a line for one that ends a run as prose does.
 
-        The answer is a pair: the step, and however much of it Markdown has no way
-        to draw.
-
-        `floor` is the leftmost column the run has reached, and it is the margin as
-        Markdown draws it: a list begins at its first item's column with nothing to
-        the left of it, so every item at or left of the floor is one depth there,
-        and the parser is right to start each run at the margin. A step *between*
-        two of those is therefore a step between two items Markdown draws in the
-        same place, and it is the one it cannot carry. It is the item being left
-        that decides, not the item arriving: leaving something drawn deeper than
-        the floor, Markdown has an indent to bring back however far left the step
-        lands.
+        The first item of a run has stepped nowhere: there is nothing behind it to
+        have moved from.
         """
-        if not text.strip():
-            return frozenset(), frozenset()
+        if not shows:
+            return frozenset()
 
         if column is None:
-            # A paragraph between two items does not end what the page shows as one
-            # list: Word goes on drawing the items after it at the level they were
-            # at, and a reader reads them there. Ending the run here would throw
-            # away the one thing the page says about how they sit - which is the
-            # whole of what this measures - so only a block of another kind closes
-            # it, and `close` is where that is said.
-            return frozenset(), frozenset()
+            self.interrupted = True
+            return frozenset()
 
-        previous, self.column = self.column, column
-        if previous is None:
-            self.floor = column
-            return frozenset(), frozenset()
-        if column > previous + self.nudge:
-            return frozenset({LIST_INDENT}), frozenset()
-        if previous > column + self.nudge:
-            step = frozenset({LIST_OUTDENT})
-            floor = column if self.floor is None else self.floor
-            self.floor = min(floor, column)
-            drawn = previous > floor + self.nudge
-            return (step, frozenset()) if drawn else (step, step)
-        return frozenset(), frozenset()
+        if self.interrupted:
+            self.interrupted = False
+            if self.floor is None or column - self.floor <= self.nudge:
+                self.close()
+
+        self.floor = column if self.floor is None else min(self.floor, column)
+        before = len(self.depths)
+        self.place(marker[0], marker[1], column)
+        after = len(self.depths)
+
+        if not before:
+            return frozenset()
+        if after > before:
+            return frozenset({LIST_INDENT})
+        if after < before:
+            return frozenset({LIST_OUTDENT})
+        return frozenset()
+
+    def place(self, marker: str, rank: int | None, column: int) -> None:
+        """Put an item among the open depths, opening and closing as the page says.
+
+        Returned to, nested by its marker, or placed by position - the three things a
+        reader reads, in that order. See the parser's `_depth_for` for why.
+        """
+        for index in range(len(self.depths) - 1, -1, -1):
+            depth = self.depths[index]
+            if depth.marker == marker and abs(depth.column - column) <= self.nudge:
+                del self.depths[index + 1 :]
+                self.join(depth, marker, rank, column)
+                return
+
+        if self.demoted(rank):
+            self.depths.append(Depth(marker, rank, column))
+            return
+
+        while (
+            self.depths
+            and self.depths[-1].column - column > self.nudge
+            and not self.encloses(self.depths[-1], rank)
+        ):
+            self.depths.pop()
+
+        if (
+            not self.depths
+            or column - self.depths[-1].column > self.nudge
+            or self.encloses(self.depths[-1], rank)
+        ):
+            self.depths.append(Depth(marker, rank, column))
+            return
+
+        self.join(self.depths[-1], marker, rank, column)
+
+    def demoted(self, rank: int | None) -> bool:
+        """Whether this marker is one step down from the innermost open depth's."""
+        if not self.depths or rank is None or self.depths[-1].rank is None:
+            return False
+        return rank == self.depths[-1].rank + 1
+
+    @staticmethod
+    def encloses(depth: Depth, rank: int | None) -> bool:
+        """Whether this depth's bullet puts it outside an item wearing that one.
+
+        A hollow bullet is inside a filled one and a square inside a hollow one, so a
+        depth wearing an earlier bullet is not one such an item can close, however
+        far to the left of it the author dragged it.
+        """
+        if depth.rank is None or rank is None:
+            return False
+        return depth.rank < rank
+
+    @staticmethod
+    def join(depth: Depth, marker: str, rank: int | None, column: int) -> None:
+        """Put an item in an open depth, which then stands where that item stands."""
+        depth.marker, depth.rank, depth.column = marker, rank, column
 
     def close(self) -> None:
-        """End the run at a block that is not a paragraph: a table, a box, a heading."""
-        self.column = None
+        """End the run: at a block that is not a paragraph, or at prose no item claims."""
+        self.depths.clear()
         self.floor = None
+        self.interrupted = False
 
 
 def numbering_value(paragraph: Paragraph, name: str) -> str | None:
@@ -1150,7 +1299,11 @@ def absorb(
     cannot be read from either alone.
     """
     text = rendered_text(paragraph)
-    step, past_the_start = run.stepped(text, item_column(paragraph))
+    step = run.stepped(
+        prints_something(paragraph, text),
+        item_column(paragraph),
+        item_marker(paragraph),
+    )
     listed = list_features(paragraph) | step
 
     section.bag.add_text(text)
@@ -1160,9 +1313,6 @@ def absorb(
     if listed and TABLE in features:
         section.bag.add_limit(text, IN_A_CELL)
         listed -= _LOST_IN_A_CELL
-    elif past_the_start:
-        section.bag.add_limit(text, PAST_THE_START)
-        listed -= past_the_start
 
     mark_paragraph(section.bag, paragraph, features | listed)
 
@@ -1286,16 +1436,23 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
             run.close()
             continue
 
-        if _QUOTE_MARKER.match(line):
+        quote = _QUOTE_MARKER.match(line)
+        if quote:
             end = index
             while end < len(lines) and _QUOTE_MARKER.match(lines[end]):
                 end += 1
             quoted = [
-                _QUOTE_MARKER.sub("", quote, count=1) for quote in lines[index:end]
+                _QUOTE_MARKER.sub("", block, count=1) for block in lines[index:end]
             ]
             scan_blocks(bag, quoted, features | {BOX})
-            index, item = end, frozenset()
-            run.close()
+            index = end
+            # A box indented into an item is a block of that item and ends neither
+            # it nor the run: Word draws the items after such a box at the depth
+            # they were already at, and this side goes on counting them there. A box
+            # at the margin is a block of its own, and does close the run.
+            if not quote.group("indent"):
+                item = frozenset()
+                run.close()
             continue
 
         index += 1
@@ -1314,20 +1471,26 @@ def scan_blocks(bag: Bag, lines: list[str], features: frozenset[str]) -> None:
             # An item's own column is where its marker starts, which is also where
             # the parser puts a child of it - so a nested item is the one drawn past
             # the column of the item above it, exactly as it is on the Word side.
+            # Markdown draws one bullet at every depth, so there is no marker here to
+            # tell the depths apart and the columns decide alone - which they can,
+            # being exact on this side where Word's are dragged about.
             column = len(line) - len(line.lstrip())
-            item = features | marker[0] | run.stepped(line, column)[0]
+            item = features | marker[0] | run.stepped(bool(line.strip()), column)
             scan_line(bag, line[marker[1] :], item)
             continue
 
-        # A line hanging under an item is the rest of that item: the parser indents
-        # an item's later lines to its own text column, and there they still wear
-        # whatever the item wears.
-        if item and line.startswith(" "):
-            scan_line(bag, line, item)
+        # Anything indented is inside the item above it: the rest of that item's own
+        # text where it wraps, which wears what the item wears, and a block of its
+        # own where the parser moved one in, which wears no bullet because the page
+        # draws none on it. Either way it cannot end the run - only something at the
+        # margin ends a Markdown list - and a blank line before it has already put
+        # the item down, which is what tells the two apart.
+        if line.startswith(" "):
+            scan_line(bag, line, item or features)
             continue
 
         item = frozenset()
-        run.stepped(line, None)
+        run.stepped(bool(line.strip()), None)
         if line.strip():
             scan_line(bag, line, features)
 
