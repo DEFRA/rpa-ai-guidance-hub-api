@@ -36,7 +36,6 @@ themselves and so arrives as a run of them with no container to be read from.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from docx.oxml.ns import qn
@@ -51,21 +50,14 @@ if TYPE_CHECKING:
 # A vertical merge is a continuation unless it says it is the cell that starts one.
 _MERGE_ORIGIN = "restart"
 
-# Anything a pipe row cannot contain. A hard line break arrives as a backslash and a
-# newline, and the backslash goes with it: it marks a break there is no longer room
-# for. Block joins produce the rest. The whitespace either side goes too, because the
-# editor's serialiser takes it and a cell has to be written the way that would write
-# it - see `_cell_markdown`.
-# The leading run is possessive, because giving a space back could never help: what
-# follows it matches a backslash or a newline and never a space, so every one of
-# those retries is bound to fail. Left greedy, a long run of spaces is re-walked from
-# each position in turn and the scan is quadratic in the length of the cell.
-_ROW_BREAK = re.compile(r"[ \t]*+\\?\n[ \t]*")
-
-# Runs of whitespace inside a cell, which the editor collapses to one space.
-_RUN_OF_SPACE = re.compile(r"\s+")
-
+# What a newline becomes, a pipe row being one line and unable to hold another.
 _CELL_BREAK = "<br>"
+
+# How a hard line break is written: a backslash marking the break, then the newline
+# it breaks at. Only the newline survives a cell, and the marker goes with it - it
+# marks a break there is no longer room for. A backslash the cell ends on is not one
+# of these and stays, which is why this is matched as the pair and not as a suffix.
+_HARD_BREAK = "\\\n"
 
 
 # A pipe ends a cell wherever it appears, so a pipe the document means as text has to
@@ -196,9 +188,20 @@ def _cell_markdown(cell: Any | None, parent: Any) -> str:
     if cell is None:
         return ""
 
-    blocks = _CELL_BREAK.join(_own_blocks(cell, parent))
-    collapsed = _RUN_OF_SPACE.sub(" ", _ROW_BREAK.sub(_CELL_BREAK, blocks)).strip()
-    return collapsed.replace("|", _ESCAPED_PIPE)
+    text = _CELL_BREAK.join(_own_blocks(cell, parent)).replace(_HARD_BREAK, "\n")
+    one_line = _CELL_BREAK.join(_collapsed(line) for line in text.split("\n"))
+    return one_line.replace("|", _ESCAPED_PIPE)
+
+
+def _collapsed(line: str) -> str:
+    """One line of a cell, with its whitespace as the editor would leave it.
+
+    Runs of whitespace become single spaces and the whitespace at either end goes.
+    `str.split` with no separator is that rule and nothing else - it is defined as
+    splitting on runs of whitespace and discarding the empty fields at the ends - so
+    the collapse needs no pattern and cannot be written as a slow one.
+    """
+    return " ".join(line.split())
 
 
 def _own_blocks(container: Any, parent: Any) -> list[str]:
