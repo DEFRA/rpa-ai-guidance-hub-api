@@ -42,7 +42,7 @@ def summarise(document, images) -> str:
         f"images:   {len(images)}",
     ]
     lines.extend(
-        f"  {'  ' * (section.depth - 1)}{section.number} {section.heading}"
+        f"  {'  ' * (section.level - 1)}{section.number} {section.heading}"
         for section in document.sections
     )
     return "\n".join(lines)

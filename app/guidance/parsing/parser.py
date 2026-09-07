@@ -214,15 +214,15 @@ def _ends_page(paragraph: Paragraph) -> bool:
 class _OpenSection:
     """A section still open for children as the walk moves down the document.
 
-    `children` is how many sections have been opened directly beneath this one, and
-    so is the ordinal the next one takes. The stack's first frame stands for the
-    document itself, holding no section, so a top-level heading is counted and
-    parented by the same code as any other.
+    `numbered` and `appendices` are how many of each kind have been opened directly
+    beneath this one, and so are the ordinal the next one of that kind takes. The
+    stack's first frame stands for the document itself, holding no section, so a
+    top-level heading is counted and parented by the same code as any other.
     """
 
     level: int = 0
     section: models.MarkdownSection | None = None
-    children: int = 0
+    numbered: int = 0
     appendices: int = 0
 
 
@@ -242,7 +242,7 @@ def _extract_sections(
     style declares a top level outright, and it is lettered rather than numbered.
 
     Every other paragraph is content, and belongs to the section opened most recently
-    whatever its depth. Anything ahead of the first heading is not: what sits there
+    whatever its level. Anything ahead of the first heading is not: what sits there
     is the cover page and the contents, and a contents page is regenerated from the
     headings anyway.
 
@@ -325,17 +325,24 @@ def _open_beneath(
 
     Appendices and numbered sections are counted apart, so an annex following
     section 7 is A rather than 8, and a numbered heading after that annex is 8.
+
+    The link is made both ways here, which is the only place both ends are known.
+    The document's own frame holds no section, so a top-level heading is linked to
+    nothing - and "has no parent" and "is in no section's children" stay one fact.
     """
     if appendix:
         parent.appendices += 1
         ordinal = parent.appendices
     else:
-        parent.children += 1
-        ordinal = parent.children
+        parent.numbered += 1
+        ordinal = parent.numbered
 
-    return models.MarkdownSection(
+    section = models.MarkdownSection(
         heading=heading, ordinal=ordinal, parent=parent.section, appendix=appendix
     )
+    if parent.section is not None:
+        parent.section.children.append(section)
+    return section
 
 
 def _body_items(

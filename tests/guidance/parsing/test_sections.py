@@ -120,6 +120,58 @@ class TestBuildingTheSectionTree:
         ]
 
 
+class TestLinkingASectionToItsChildren:
+    """The hierarchy read downwards, which only the walk that built it can write."""
+
+    def test_a_section_holds_the_sections_directly_beneath_it(self, docx_bytes):
+        """Directly: a grandchild is its own parent's, not its grandparent's."""
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            document.add_heading("Eligibility", level=2)
+            document.add_heading("Land parcels", level=3)
+            document.add_heading("Evidence", level=2)
+
+        applying, eligibility, parcels, _ = parser.parse_docx(
+            docx_bytes(build)
+        ).sections
+
+        assert [child.heading for child in applying.children] == [
+            "Eligibility",
+            "Evidence",
+        ]
+        assert [child.heading for child in eligibility.children] == ["Land parcels"]
+        assert parcels.children == []
+
+    def test_a_top_level_section_is_the_child_of_nothing(self, docx_bytes):
+        """Having no parent and being in no section's children are one fact."""
+
+        def build(document):
+            document.add_heading("Applying", level=1)
+            document.add_heading("Eligibility", level=2)
+            document.add_heading("Payments", level=1)
+
+        sections = parser.parse_docx(docx_bytes(build)).sections
+        applying, _, payments = sections
+
+        assert (applying.parent, payments.parent) == (None, None)
+        assert [
+            child.heading for section in sections for child in section.children
+        ] == ["Eligibility"]
+
+    def test_an_annex_links_to_what_nests_beneath_it(self, docx_bytes, in_style):
+        """An appendix is a section like any other once it is open."""
+
+        def build(document):
+            in_style(document, "Annex A - Case types", "Appendix")
+            document.add_heading("Rejected claims", level=2)
+
+        annex, rejected = parser.parse_docx(docx_bytes(build)).sections
+
+        assert annex.children == [rejected]
+        assert rejected.parent is annex
+
+
 class TestWhatDoesNotOpenASection:
     def test_text_before_the_first_heading_opens_no_section(self, docx_bytes):
         def build(document):
@@ -176,7 +228,7 @@ class TestWhatDoesNotOpenASection:
 
 class TestWhereContentGoes:
     def test_a_paragraph_belongs_to_the_section_opened_most_recently(self, docx_bytes):
-        """Whatever its depth: prose under 1.1 is 1.1's, not section 1's."""
+        """Whatever its level: prose under 1.1 is 1.1's, not section 1's."""
 
         def build(document):
             document.add_heading("Applying", level=1)
@@ -234,7 +286,7 @@ class TestWhereContentGoes:
 
 
 class TestRenderingTheSections:
-    def test_a_section_is_headed_by_its_number_at_its_own_depth(self, docx_bytes):
+    def test_a_section_is_headed_by_its_number_at_its_own_level(self, docx_bytes):
         """The hash count follows the parent chain, so a skipped level stays sane."""
 
         def build(document):

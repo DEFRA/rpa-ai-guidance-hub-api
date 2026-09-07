@@ -9,6 +9,18 @@ def _image(name: str = "1_img_1.png") -> models.Image:
     return models.Image(name=name, data=b"\x89PNG", content_type="image/png")
 
 
+def _family() -> tuple[models.MarkdownSection, ...]:
+    """Three generations, linked both ways as the parser links them."""
+    parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
+    child = models.MarkdownSection(
+        heading="Evidence required", ordinal=1, parent=parent
+    )
+    grandchild = models.MarkdownSection(heading="Appeals", ordinal=2, parent=child)
+    parent.children.append(child)
+    child.children.append(grandchild)
+    return parent, child, grandchild
+
+
 class TestSectionNumbering:
     def test_a_number_follows_its_parent_rather_than_being_stored(self):
         """The point of deriving it: no stored number can disagree with the structure.
@@ -116,8 +128,75 @@ class TestCrossReferences:
         assert "[Payment](#4)" in rendered
 
 
+class TestComparingSections:
+    def test_two_sections_compare_without_walking_in_circles(self):
+        """`parent` and `children` point at each other.
+
+        Were children compared, equality would walk up from one section and down
+        from the other and never finish. They say nothing about identity that the
+        parent chain does not say already.
+        """
+        assert _family()[0] == _family()[0]
+
+
+class TestSubtreeMarkdown:
+    def test_a_section_renders_alone_unless_its_children_are_asked_for(self):
+        """The document folds over every section, so the default must not recurse.
+
+        Asking by default would print each nested section twice - once beneath its
+        parent, once in its own right.
+        """
+        parent, *_ = _family()
+
+        rendered = parent.markdown()
+
+        assert rendered.startswith("## 3 Eligibility")
+        assert "Evidence required" not in rendered
+
+    def test_the_whole_subtree_comes_when_it_is_asked_for(self):
+        """Everything beneath it, not one generation of it."""
+        parent, *_ = _family()
+
+        assert parent.markdown(include_children=True) == (
+            "## 3 Eligibility\n\n### 3.1 Evidence required\n\n#### 3.1.2 Appeals\n"
+        )
+
+    def test_a_subtree_renders_as_the_document_renders_the_same_sections(self):
+        """One layout, not one per caller: the two paths cannot be left to drift."""
+        parent, child, grandchild = _family()
+        document = models.MarkdownDocument(
+            title="Example Guide", sections=[parent, child, grandchild]
+        )
+
+        assert document.markdown() == (
+            f"# Example Guide\n\n{parent.markdown(include_children=True)}"
+        )
+
+    def test_a_child_is_rendered_with_the_holes_the_call_was_given(self):
+        """A child has no other way to learn either of them.
+
+        Rendered without them it would carry a raw bookmark name and an unprefixed
+        image path, both of which point nowhere.
+        """
+        payment = models.MarkdownSection(heading="Payment", ordinal=4)
+        parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
+        child = models.MarkdownSection(
+            heading="Evidence required",
+            ordinal=1,
+            parent=parent,
+            content="See [Payment](#_Payment).\n\n![x](3.1_img_1.png)",
+            images=[_image("3.1_img_1.png")],
+        )
+        parent.children.append(child)
+
+        rendered = parent.markdown("s3/", {"_Payment": payment}, include_children=True)
+
+        assert "[Payment](#4)" in rendered
+        assert "![x](s3/3.1_img_1.png)" in rendered
+
+
 class TestDocumentMarkdown:
-    def test_sections_render_one_heading_level_below_their_depth(self):
+    def test_sections_render_one_heading_level_below_their_level(self):
         parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
         child = models.MarkdownSection(
             heading="Evidence required", ordinal=1, parent=parent

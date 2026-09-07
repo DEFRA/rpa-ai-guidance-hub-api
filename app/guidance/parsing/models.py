@@ -55,21 +55,28 @@ class MarkdownSection:
     """One numbered section of a document, holding its own Markdown.
 
     `ordinal` is the section's 1-based position among its siblings. Together with
-    `parent` it is the whole of the numbering: `number` and `depth` are computed by
-    walking up the parent chain.
+    `parent` it is the whole of the numbering: `number` and `level` are computed by
+    walking up the parent chain. `children` is that same hierarchy read downwards -
+    the sections directly beneath this one, in document order.
     """
 
     heading: str
     ordinal: int = 1
-    parent: MarkdownSection | None = None
     appendix: bool = False
+    parent: MarkdownSection | None = None
+    # Held out of equality and repr because `parent` points back at us: compared, two
+    # sections would walk up from one and down from the other and never finish. A
+    # child says nothing about identity that the parent chain does not say already.
+    children: list[MarkdownSection] = field(
+        default_factory=list, repr=False, compare=False
+    )
     content: str = ""
     images: list[Image] = field(default_factory=list)
 
     @property
-    def depth(self) -> int:
-        """How deep this section sits, counting top-level sections as 1."""
-        return 1 if self.parent is None else self.parent.depth + 1
+    def level(self) -> int:
+        """The level this section sits at, counting top-level sections as 1."""
+        return 1 if self.parent is None else self.parent.level + 1
 
     @property
     def number(self) -> str:
@@ -87,14 +94,22 @@ class MarkdownSection:
         self,
         image_prefix: str = "",
         bookmarks: dict[str, MarkdownSection] | None = None,
+        *,
+        include_children: bool = False,
     ) -> str:
-        """This section's own Markdown: its heading and content, not its children.
+        """This section's Markdown: its heading and content, and its subtree if asked.
 
         An appendix prints no number: the author already wrote the designation into
         the heading, and "A Annex A" reads as a mistake. The letter is still the
         section's number, and is what a cross-reference to it resolves to.
+
+        A subtree is joined exactly as the document joins its sections, so a section
+        rendered with its children is what the document renders for the same run of
+        headings - one layout rather than one per caller. The children are rendered
+        with the holes this call was given, a child having no other way to learn
+        where the images live or where a cross-reference points.
         """
-        hashes = "#" * (self.depth + 1)
+        hashes = "#" * (self.level + 1)
         title = self.heading if self.appendix else f"{self.number} {self.heading}"
         lines = [f"{hashes} {title}", ""]
 
@@ -102,7 +117,15 @@ class MarkdownSection:
         if content:
             lines.extend((alignment.aligned(content), ""))
 
-        return "\n".join(lines)
+        rendered = "\n".join(lines)
+        if not include_children:
+            return rendered
+
+        subtrees = (
+            child.markdown(image_prefix, bookmarks, include_children=True)
+            for child in self.children
+        )
+        return "\n".join([rendered, *subtrees])
 
     def _resolved_content(
         self, image_prefix: str, bookmarks: dict[str, MarkdownSection]
@@ -148,7 +171,12 @@ class MarkdownDocument:
         return [image for section in self.sections for image in section.images]
 
     def markdown(self, image_prefix: str = "") -> str:
-        """The whole document: its title followed by every section in order."""
+        """The whole document: its title followed by every section in order.
+
+        `sections` holds every section at every level, so each is rendered alone: a
+        fold asking for children would print each nested section twice, once beneath
+        its parent and once in its own right.
+        """
         parts = [f"# {self.title}", ""]
         parts.extend(
             section.markdown(image_prefix, self.bookmarks) for section in self.sections
