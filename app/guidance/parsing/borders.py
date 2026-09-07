@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from docx.oxml.ns import qn
 
 from app.guidance.parsing import tables
+from app.guidance.parsing.ooxml import W_PPR
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -50,7 +51,7 @@ def is_boxed(element: Any) -> bool:
     if element.tag != qn("w:p"):
         return False
 
-    properties = element.find(qn("w:pPr"))
+    properties = element.find(qn(W_PPR))
     if properties is None:
         return False
 
@@ -71,7 +72,7 @@ def signature(element: Any) -> tuple[Any, ...]:
     Read off the sides as Word wrote them rather than off any one attribute, because
     which attribute carries the difference is the author's business and not ours.
     """
-    properties = element.find(qn("w:pPr"))
+    properties = element.find(qn(W_PPR))
     if properties is None:
         return ()
 

@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml.ns import qn
 
-from app.guidance.parsing.ooxml import W_VAL
+from app.guidance.parsing.ooxml import W_PPR, W_VAL
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -376,7 +376,7 @@ def _numbering_value(paragraph: Paragraph, name: str) -> str | None:
     so a paragraph setting only its own w:ilvl still takes its w:numId from the
     style it is in.
     """
-    sources = (paragraph._p.find(qn("w:pPr")), _style_properties(paragraph))
+    sources = (paragraph._p.find(qn(W_PPR)), _style_properties(paragraph))
     values = (_numbering_property(source, name) for source in sources)
     return next((value for value in values if value is not None), None)
 
@@ -389,7 +389,7 @@ def _style_properties(paragraph: Paragraph) -> Any:
     style id to the document's default, so the None it allows for never arrives.
     """
     style = paragraph.style
-    return style.element.find(qn("w:pPr")) if style is not None else None
+    return style.element.find(qn(W_PPR)) if style is not None else None
 
 
 def _numbering_property(properties: Any, name: str) -> str | None:
@@ -411,7 +411,7 @@ def _indent(paragraph: Paragraph, num_id: str, level: int) -> int:
     to ask - the style an item is in never reaches this, because a style carrying an
     indent but no numbering makes no list item to begin with.
     """
-    own = _left_indent(paragraph._p.find(qn("w:pPr")))
+    own = _left_indent(paragraph._p.find(qn(W_PPR)))
     if own is not None:
         return own
 
@@ -419,7 +419,7 @@ def _indent(paragraph: Paragraph, num_id: str, level: int) -> int:
     if declared is None:
         return _NO_INDENT
 
-    return _left_indent(declared.find(qn("w:pPr"))) or _NO_INDENT
+    return _left_indent(declared.find(qn(W_PPR))) or _NO_INDENT
 
 
 def _left_indent(properties: Any) -> int | None:

@@ -23,7 +23,7 @@ from app.guidance.parsing import (
     textboxes,
 )
 from app.guidance.parsing.errors import DocumentParseError
-from app.guidance.parsing.ooxml import is_toggle_on
+from app.guidance.parsing.ooxml import W_PPR, is_toggle_on
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -195,7 +195,7 @@ def _is_contents(paragraph: Paragraph) -> bool:
 
 def _starts_new_page(paragraph: Paragraph) -> bool:
     """Whether this paragraph is forced to the top of a new page by its properties."""
-    properties = paragraph._p.find(qn("w:pPr"))
+    properties = paragraph._p.find(qn(W_PPR))
     if properties is None:
         return False
     return is_toggle_on(properties.find(qn("w:pageBreakBefore")))
