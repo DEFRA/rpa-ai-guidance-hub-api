@@ -56,6 +56,14 @@ def _border(
     return paragraph
 
 
+def _between(paragraph: Paragraph) -> Paragraph:
+    """Add the line Word draws between two paragraphs already inside one frame."""
+    edge = OxmlElement("w:between")
+    edge.set(qn("w:val"), "single")
+    paragraph._p.pPr.find(qn("w:pBdr")).append(edge)
+    return paragraph
+
+
 def _boxed(document: Document, *texts: str, style: str | None = None) -> None:
     """Add one bordered paragraph per text given, which is one box between them."""
     for text in texts:
@@ -169,6 +177,20 @@ class TestWhereOneBoxEndsAndTheNextBegins:
 
         def build(document):
             _boxed(document, "Claim reference: xxxxx", "Task type: signoff")
+
+        assert _bordered_content(docx_bytes, build) == (
+            "> Claim reference: xxxxx\n>\n> Task type: signoff"
+        )
+
+    def test_a_line_between_two_paragraphs_does_not_part_them(self, docx_bytes):
+        """w:between is the line Word draws between paragraphs that are already in
+        one frame, so a paragraph carrying it and the one after it not is a box
+        saying so twice over. Reading it as a change of border would split a box on
+        the strength of the very thing saying it is one."""
+
+        def build(document):
+            _between(_border(document.add_paragraph("Claim reference: xxxxx")))
+            _border(document.add_paragraph("Task type: signoff"))
 
         assert _bordered_content(docx_bytes, build) == (
             "> Claim reference: xxxxx\n>\n> Task type: signoff"

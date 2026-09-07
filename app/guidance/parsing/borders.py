@@ -37,8 +37,9 @@ from app.guidance.parsing.ooxml import W_PPR
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-# What a box has and a rule does not. Word writes w:between as well where consecutive
-# bordered paragraphs share one box; it says nothing this rule needs.
+# What a box has and a rule does not, and the whole of what either rule below reads.
+# Word writes w:between as well where consecutive bordered paragraphs share one box,
+# and it is a line drawn inside a frame rather than anything about which frame.
 _SIDES = ("w:top", "w:left", "w:bottom", "w:right")
 
 # A side declared and then turned off. Word writes it rather than dropping the
@@ -69,8 +70,11 @@ def signature(element: Any) -> tuple[Any, ...]:
     is the whole of what separates an email template's subject box from its body box,
     and a case note's hold code from its fields, in every guide that draws them apart.
 
-    Read off the sides as Word wrote them rather than off any one attribute, because
-    which attribute carries the difference is the author's business and not ours.
+    Read off the four sides as Word wrote them rather than off any one attribute,
+    because which attribute carries the difference is the author's business and not
+    ours. The four and no more: w:between is what Word draws between paragraphs that
+    are already in one frame, so a run carrying it on some of its paragraphs and not
+    others would be split here on the strength of the very thing saying it is one box.
     """
     properties = element.find(qn(W_PPR))
     if properties is None:
@@ -81,8 +85,9 @@ def signature(element: Any) -> tuple[Any, ...]:
         return ()
 
     return tuple(
-        (side.tag, tuple(sorted(side.attrib.items())))
-        for side in sorted(border, key=_tag)
+        (side, tuple(sorted(edge.attrib.items())))
+        for side in _SIDES
+        if (edge := border.find(qn(side))) is not None
     )
 
 
@@ -93,11 +98,6 @@ def markdown(paragraphs: Iterable[Any], parent: Any) -> str:
     resolves through the document part's relationships.
     """
     return tables.quote(tables.blocks(paragraphs, parent))
-
-
-def _tag(side: Any) -> str:
-    """One side's tag, for putting a border's sides in an order that compares."""
-    return str(side.tag)
 
 
 def _drawn(border: Any, side: str) -> bool:
