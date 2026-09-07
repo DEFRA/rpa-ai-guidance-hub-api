@@ -226,6 +226,20 @@ class _OpenSection:
     appendices: int = 0
 
 
+@dataclass(frozen=True)
+class _Heading:
+    """A paragraph that opens a section: what it says, and where it sits.
+
+    `level` is relative to the headings around it rather than Word's own absolute
+    one. An appendix declares a top level outright and is lettered rather than
+    numbered, so which kind of heading it is travels with it.
+    """
+
+    text: str
+    level: int
+    appendix: bool
+
+
 def _extract_sections(
     document: docx.document.Document,
 ) -> tuple[list[models.MarkdownSection], dict[str, models.MarkdownSection]]:
@@ -269,53 +283,91 @@ def _extract_sections(
     for element, opened_ahead_of_it in _body_items(document):
         if element.tag != qn("w:p"):
             _close_box(sections, run, boxed, document)
-
-        if element.tag == qn("w:tbl"):
-            _close_list(sections, run)
-            _append_block(sections, tables.table_markdown(element, document))
-            continue
-
-        if element.tag == textboxes.TEXT_BOX:
-            _take_box(sections, run, textboxes.markdown(element, document))
+            _take_whole_block(sections, run, element, document)
             continue
 
         paragraph = Paragraph(element, document)
-        appendix = _is_appendix(paragraph)
-        level = _APPENDIX_LEVEL if appendix else _heading_level(paragraph)
-        heading = paragraph.text.strip()
-        content = level is None or not heading
+        heading = _heading_of(paragraph)
 
         # A box drawn by bordering the paragraphs themselves is held until the first
         # element that is not part of it, because nothing but that says where it
         # ends. A heading is never part of one: a border round a heading is emphasis,
         # and swallowing it into a quote would lose the section it opens.
-        if content and borders.is_boxed(element):
+        if heading is None and borders.is_boxed(element):
             _take_bordered(sections, run, boxed, element, document)
             continue
 
         _close_box(sections, run, boxed, document)
 
-        # A heading with nothing in it is a layout artefact - numbering it would put
-        # a section in the output that the document does not have.
-        if level is None or not heading:
+        if heading is None:
             _collect_body(sections, run, paragraph)
             continue
 
         _close_list(sections, run)
-
-        while stack[-1].level >= level:
-            stack.pop()
-
-        section = _open_beneath(stack[-1], heading, appendix=appendix)
+        section = _open_section(stack, heading)
         sections.append(section)
-        stack.append(_OpenSection(level=level, section=section))
 
-        for name in opened_ahead_of_it + _bookmark_names(paragraph._p):
-            bookmarks[name] = section
+        names = opened_ahead_of_it + _bookmark_names(paragraph._p)
+        bookmarks.update(dict.fromkeys(names, section))
 
     _close_box(sections, run, boxed, document)
     _close_list(sections, run)
     return sections, bookmarks
+
+
+def _take_whole_block(
+    sections: list[models.MarkdownSection],
+    run: _OpenRun,
+    element: Any,
+    document: docx.document.Document,
+) -> None:
+    """Render the body element that is not a paragraph: a table, or a text box.
+
+    Those are the only two the walk yields beside a paragraph, and they differ in
+    what they do to a list open around them. A table is a block of the body in its
+    own right and closes one. A text box is a box like any other - what the item
+    before it introduces - so it joins that item and closes nothing.
+    """
+    if element.tag == textboxes.TEXT_BOX:
+        _take_box(sections, run, textboxes.markdown(element, document))
+        return
+
+    _close_list(sections, run)
+    _append_block(sections, tables.table_markdown(element, document))
+
+
+def _heading_of(paragraph: Paragraph) -> _Heading | None:
+    """The section this paragraph opens, or None where it opens none.
+
+    A paragraph that is not a heading holds content. So does a heading with nothing
+    in it, which is a layout artefact rather than a section - numbering it would put
+    a section in the output that the document does not have. Answering both with the
+    same None is what lets the walk ask the question once.
+    """
+    appendix = _is_appendix(paragraph)
+    level = _APPENDIX_LEVEL if appendix else _heading_level(paragraph)
+    text = paragraph.text.strip()
+
+    if level is None or not text:
+        return None
+    return _Heading(text=text, level=level, appendix=appendix)
+
+
+def _open_section(
+    stack: list[_OpenSection], heading: _Heading
+) -> models.MarkdownSection:
+    """Close every frame this heading is level with or inside, and open one below.
+
+    The frames left standing are the ones the heading is beneath, so the topmost of
+    them is its parent - which is the whole of how a relative level becomes a place
+    in the tree. The document's own frame sits at level 0 and so is never popped.
+    """
+    while stack[-1].level >= heading.level:
+        stack.pop()
+
+    section = _open_beneath(stack[-1], heading.text, appendix=heading.appendix)
+    stack.append(_OpenSection(level=heading.level, section=section))
+    return section
 
 
 def _open_beneath(
