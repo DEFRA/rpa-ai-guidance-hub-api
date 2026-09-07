@@ -24,15 +24,21 @@ first body heading, which is also where the parser's own sections begin.
 Nothing but python-docx and the parser is involved -- no configuration, database,
 S3 or Bedrock access -- so this runs against any document on disk.
 
+Everything lost is named, not merely counted: the report ends with the words, URLs
+and marks that never reached the Markdown. A score says where to look and the list
+says what to look at, and one without the other is half an instrument.
+
 ``--tiptap`` adds a third leg. The guidance editor's schema cannot model everything
 the parser can write, so a document is changed again the first time anyone opens and
 saves it; given that round trip's Markdown, the report scores it against the same
 Word side and says which marks survive being stored *and* edited. Producing it needs
-the UI repository, so the flag takes a file rather than making one -- the
-orchestrator's ``audit_doc.py`` is what assembles the leg.
+the UI repository, so the option takes a file rather than making one -- the
+orchestrator's ``audit_doc.py`` is what assembles the leg, and is how this is
+normally run. Left out, the first two legs are reported alone, which is what lets
+this script audit any document on disk with nothing but python-docx.
 
 Usage:
-  uv run scripts/audit_docx.py <document.docx> [--tiptap FILE] [--missing] [--top N]
+  uv run scripts/audit_docx.py <document.docx> [--tiptap FILE] [--top N]
 
 Called directly, or by ``scripts/audit_doc.py`` in the local-dev orchestrator
 repository, which resolves paths and audits several documents at once.
@@ -131,8 +137,8 @@ _FEATURES = (
 # These are counted apart from the marks rather than among them. A score is meant to
 # point at something a repair could put right, so a loss no conversion can avoid
 # would read there as a fault nobody can fix - and would sit in the same column as
-# the faults that are real, which is the one place it must not be. `--missing` names
-# each one in full, so it is reported rather than quietly dropped.
+# the faults that are real, which is the one place it must not be. Each one is named
+# in full under `Known limits of the format`, so it is reported rather than dropped.
 IN_A_CELL = "a list inside a table cell"
 
 _LIMITS = (IN_A_CELL,)
@@ -353,7 +359,7 @@ _COLUMNS_WIDTH = 48
 _FEATURE_WIDTH = 16
 _KEPT_WIDTH = 8
 
-# Wide enough for "strikethrough:", the longest label a --missing line can open with.
+# Wide enough for "strikethrough:", the longest label a missing line can open with.
 _MARK_LABEL_WIDTH = 15
 
 _DEFAULT_TOP = 12
@@ -2014,7 +2020,6 @@ def report(
     rendered: list[Section],
     whole: Bag,
     editor: Bag | None,
-    show_missing: bool,
     top: int,
 ) -> None:
     """Print the section-by-section report for one document.
@@ -2087,10 +2092,9 @@ def report(
 
     print_features(source_total, whole, editor)
 
-    if show_missing:
-        print_missing(source, rendered, top)
-        if editor is not None:
-            print_discarded(whole, editor, top)
+    print_missing(source, rendered, top)
+    if editor is not None:
+        print_discarded(whole, editor, top)
 
 
 def sum_coverage(rows: list[Row], attribute: str) -> Coverage | None:
@@ -2287,17 +2291,13 @@ def parse_args() -> argparse.Namespace:
         "document", help="Path to the guidance document (.docx)."
     )
     argument_parser.add_argument(
-        "--missing",
-        action="store_true",
-        help="List the words, URLs and marks that never reached the Markdown.",
-    )
-    argument_parser.add_argument(
         "--tiptap",
         metavar="FILE",
         help=(
             "Markdown from a TipTap load/save round trip of this document, to score "
-            "as a third leg. Produced by the UI repository, so this is normally "
-            "reached as `uv run task audit <document.docx> --tiptap`."
+            "as a third leg. Producing it needs the UI repository, so this is "
+            "normally reached as `uv run task audit <document.docx>`, which makes "
+            "the file and passes it in."
         ),
     )
     argument_parser.add_argument(
@@ -2345,7 +2345,6 @@ def main() -> int:
         markdown_side,
         whole,
         editor,
-        show_missing=args.missing,
         top=args.top,
     )
 
