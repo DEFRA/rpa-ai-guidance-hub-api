@@ -13,6 +13,14 @@ module's work, and two rules do most of it:
   at all - the reader is shown the asterisks - while an editor that tidies the space
   outwards deletes it and welds "Note:" to the word after. Hoisting the space out
   here is what stops both.
+- Nor the stray punctuation Word marks along with the word beside it. A `*` or `~~`
+  run is read by what stands on each side of it, so punctuation against its inside
+  and a letter against its outside silences it exactly as the space does:
+  "**HOLD867 (**Evidence" and "Verified**.**" show their asterisks too. The
+  punctuation is hoisted out by the same rule, which leaves every character where
+  the author put it and moves only where the markers sit - and only where they would
+  otherwise be silenced, "**Note:** Validation" being emphasis already and
+  "**Note**:" a mark taken off a colon the author marked.
 
 Bold, italic and strikethrough are written as Markdown. Underline, superscript and
 subscript have no Markdown, so they are written as the HTML that Markdown allows.
@@ -48,6 +56,7 @@ would save.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from itertools import groupby
@@ -94,6 +103,11 @@ _HYPERLINK_INSTRUCTION = re.compile(r'HYPERLINK\s+"([^"]*)"', re.IGNORECASE)
 # and this is load-bearing - the other way round, "<" would become "&amp;lt;".
 _HTML_ENTITIES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
 _MARKDOWN_SYNTAX = re.compile(r"([\\`*_\[\]~])")
+
+# CommonMark's punctuation, which its flanking rules are written in terms of: the
+# ASCII set it lists outright, plus any Unicode P category - which is what makes the
+# curly quotes these guides are full of count as punctuation rather than as text.
+_ASCII_PUNCTUATION = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
 class _FieldBoundary(StrEnum):
@@ -430,22 +444,41 @@ def _colour(element: Any) -> str:
 
 
 def _render_line(runs: list[_Run]) -> str:
-    """One line of a paragraph: its runs merged into spans and marked up.
+    """One line of a paragraph: its spans marked up, each knowing its neighbours.
+
+    Whether a span's markers are markers at all depends on the characters either
+    side of them, so a span cannot be rendered on its own. What precedes it is
+    whatever has been rendered so far, hoisting included; what follows it is the
+    first character the rest of the line will print.
+    """
+    spans = _spans(runs)
+    parts: list[str] = []
+    for index, span in enumerate(spans):
+        if span.image:
+            parts.append(images.placeholder(span.image))
+            continue
+
+        before, after = _last_character(parts), _first_character(spans[index + 1 :])
+        parts.append(_render_span(span.marks, span.text, before, after))
+
+    return "".join(parts).strip()
+
+
+def _spans(runs: list[_Run]) -> list[_Run]:
+    """The line's runs merged into the spans they render as.
 
     Runs merge only where they are text and their marks agree, because Word splits a
     word across runs wherever anything at all changes. A picture merges with nothing
     and takes the marks of nothing: two pictures side by side are two pictures.
     """
-    parts: list[str] = []
+    spans: list[_Run] = []
     for (marks, is_image), group in groupby(runs, key=_span_key):
         pieces = list(group)
         if is_image:
-            parts.extend(images.placeholder(piece.image) for piece in pieces)
-            continue
-
-        parts.append(_render_span(marks, "".join(piece.text for piece in pieces)))
-
-    return "".join(parts).strip()
+            spans.extend(pieces)
+        else:
+            spans.append(_Run("".join(piece.text for piece in pieces), marks))
+    return spans
 
 
 def _span_key(run: _Run) -> tuple[_Marks, bool]:
@@ -453,15 +486,110 @@ def _span_key(run: _Run) -> tuple[_Marks, bool]:
     return run.marks, bool(run.image)
 
 
-def _render_span(marks: _Marks, text: str) -> str:
-    """Mark up one span, leaving the space around it outside the markers."""
-    core = text.strip()
-    if not core:
-        return text
+def _last_character(parts: list[str]) -> str:
+    """The last character rendered so far, or "" at the start of the line."""
+    for part in reversed(parts):
+        if part:
+            return part[-1]
+    return ""
 
-    leading = text[: len(text) - len(text.lstrip())]
-    trailing = text[len(text.rstrip()) :]
-    return f"{leading}{_marked_up(_escaped(core), marks)}{trailing}"
+
+def _first_character(spans: list[_Run]) -> str:
+    """The first character the rest of the line renders, or "" where it ends.
+
+    A picture opens with its `!` and a marked span with its markup, both punctuation
+    whatever they go on to wrap, so only plain text can silence the markers of the
+    span in front of it. Escaping only ever puts a backslash or an entity's `&` at
+    the front, and those are punctuation as well.
+    """
+    for span in spans:
+        if span.image:
+            return "!"
+        if span.text:
+            return _marked_up(span.text, span.marks)[0]
+    return ""
+
+
+def _render_span(marks: _Marks, text: str, before: str, after: str) -> str:
+    """Mark up one span, leaving outside the markers what they cannot wrap."""
+    leading, core, trailing = _hoisted(text, marks, before, after)
+    if not core:
+        return _escaped(text)
+
+    marked = _marked_up(_escaped(core), marks)
+    return f"{_escaped(leading)}{marked}{_escaped(trailing)}"
+
+
+def _hoisted(text: str, marks: _Marks, before: str, after: str) -> tuple[str, str, str]:
+    """The span's text split into what its markers can wrap, and what they cannot.
+
+    Every character hoisted out is still printed, in the order the author wrote it;
+    only the markers move inwards past it. Space is hoisted whatever the markers are
+    - `[ text ](url)` is as wrong as `**Note: **` - while punctuation silences a `*`
+    or `~~` run alone, and only where the character beyond the marker is text.
+    """
+    start, end = 0, len(text)
+    punctuation = _delimited(marks)
+
+    while start < end:
+        if not _hoists(text[start], _beyond(text, start - 1, before), punctuation):
+            break
+        start += 1
+
+    while start < end:
+        if not _hoists(text[end - 1], _beyond(text, end, after), punctuation):
+            break
+        end -= 1
+
+    return text[:start], text[start:end], text[end:]
+
+
+def _beyond(text: str, index: int, outside: str) -> str:
+    """What stands on the far side of a marker: the span's own text, or the line's."""
+    return text[index] if 0 <= index < len(text) else outside
+
+
+def _hoists(character: str, beyond: str, punctuation: bool) -> bool:
+    """Whether this edge character has to sit outside the span's markers.
+
+    Space always: a marker run with space against its inside end opens and closes
+    nothing. Punctuation only where the markers are a `*` or `~~` run and what
+    stands beyond them is neither space nor punctuation itself - CommonMark's
+    flanking rule, narrowed to the one shape Word produces.
+    """
+    if character.isspace():
+        return True
+    return punctuation and _is_punctuation(character) and _is_text(beyond)
+
+
+def _delimited(marks: _Marks) -> bool:
+    """Whether the span's own text sits directly against a `*` or `~~` run.
+
+    Those are the only markers read by what surrounds them; a bracket or a tag says
+    which end it is by its own shape. A colour or a link wraps everything else in
+    brackets, and an underline or a raised tag puts a `<` between the marker and the
+    text - in each case the character beside the marker is punctuation already, and
+    moving the author's would buy nothing.
+    """
+    if marks.colour or marks.link or marks.underline or marks.vertical:
+        return False
+    return marks.bold or marks.italic or marks.strikethrough
+
+
+def _is_punctuation(character: str) -> bool:
+    """Whether CommonMark counts this character as punctuation."""
+    return character in _ASCII_PUNCTUATION or unicodedata.category(character)[0] == "P"
+
+
+def _is_text(character: str) -> bool:
+    """Whether flanking counts this as text rather than as an edge to lean on.
+
+    Neither end of a line is a character at all, and both behave as the space they
+    stand in for.
+    """
+    if not character:
+        return False
+    return not character.isspace() and not _is_punctuation(character)
 
 
 def _escaped(text: str) -> str:

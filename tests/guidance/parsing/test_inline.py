@@ -179,6 +179,100 @@ class TestPuttingRunsBackTogether:
         )
 
 
+class TestMarkersPunctuationWouldSilence:
+    """The other half of the space rule: Word bolds the punctuation beside a word.
+
+    CommonMark reads a `*` or `~~` run by what stands on each side of it, so a run
+    with punctuation against its inside and a letter against its outside is not a
+    marker at all - the reader is shown the asterisks. Hoisting the punctuation out
+    of the markers keeps every character the author wrote and moves only where the
+    markers sit.
+    """
+
+    def test_punctuation_word_bolded_with_the_word_before_it(self, docx_bytes):
+        """`**HOLD867 (**Evidence` shows its asterisks and emphasises nothing."""
+
+        def build(document):
+            paragraph = document.add_paragraph("The note must start ")
+            paragraph.add_run("HOLD867 (").bold = True
+            paragraph.add_run("Evidence to be returned)")
+
+        assert _content(docx_bytes, build) == (
+            "The note must start **HOLD867** (Evidence to be returned)"
+        )
+
+    def test_punctuation_word_bolded_with_the_word_after_it(self, docx_bytes):
+        """The same failure at the other end of the span."""
+
+        def build(document):
+            paragraph = document.add_paragraph("Contact the claimant by phone")
+            paragraph.add_run(". Three").bold = True
+            paragraph.add_run(" attempts should be made.")
+
+        assert _content(docx_bytes, build) == (
+            "Contact the claimant by phone. **Three** attempts should be made."
+        )
+
+    def test_a_span_of_nothing_but_punctuation_carries_no_markers(self, docx_bytes):
+        """Nothing is left for the markers to wrap once the full stop is outside."""
+
+        def build(document):
+            paragraph = document.add_paragraph("marked as Verified")
+            paragraph.add_run(".").bold = True
+
+        assert _content(docx_bytes, build) == "marked as Verified."
+
+    def test_punctuation_hoisted_out_is_still_escaped(self, docx_bytes):
+        """It is the author's text wherever it sits, and still looks like syntax."""
+
+        def build(document):
+            paragraph = document.add_paragraph("a red asterisk")
+            paragraph.add_run("*").bold = True
+
+        assert _content(docx_bytes, build) == r"a red asterisk\*"
+
+    def test_punctuation_the_markers_survive_is_left_inside_them(self, docx_bytes):
+        """`**steps.** Then` is emphasis, and narrowing it would unmark the full stop.
+
+        The hoist answers whether the markers would be read, not whether the span
+        ends in punctuation - most of the time they are read perfectly well.
+        """
+
+        def build(document):
+            paragraph = document.add_paragraph("Follow the ")
+            paragraph.add_run("steps.").bold = True
+            paragraph.add_run(" Then close the case.")
+
+        assert _content(docx_bytes, build) == (
+            "Follow the **steps.** Then close the case."
+        )
+
+    def test_the_start_of_a_line_leaves_the_markers_readable(self, docx_bytes):
+        """There is no character before them to silence them, so nothing moves."""
+
+        def build(document):
+            paragraph = document.add_paragraph()
+            paragraph.add_run("‘Yes’").bold = True
+            paragraph.add_run(" continue to the next check.")
+
+        assert _content(docx_bytes, build) == ("**‘Yes’** continue to the next check.")
+
+    def test_markers_that_say_which_end_they_are_keep_their_punctuation(
+        self, docx_bytes
+    ):
+        """A colour is a bracket, and a bracket is not read by what surrounds it.
+
+        Hoisting there would take a mark off a character the author marked, for a
+        span that was never in any danger.
+        """
+
+        def build(document):
+            paragraph = document.add_paragraph("marked as Verified")
+            _colour(paragraph.add_run("."), "FF0000")
+
+        assert _content(docx_bytes, build) == "marked as Verified[.]{.red}"
+
+
 class TestTheMarksARunCarries:
     @pytest.mark.parametrize(
         ("mark", "expected"),
