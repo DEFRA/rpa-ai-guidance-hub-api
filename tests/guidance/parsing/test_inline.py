@@ -257,6 +257,21 @@ class TestMarkersPunctuationWouldSilence:
 
         assert _content(docx_bytes, build) == ("**‘Yes’** continue to the next check.")
 
+    def test_a_run_with_no_text_is_not_the_neighbour_that_counts(self, docx_bytes):
+        """Word leaves empty runs behind wherever text has been deleted.
+
+        One printing nothing cannot silence anything, so the question is put to the
+        first run after it that actually prints.
+        """
+
+        def build(document):
+            paragraph = document.add_paragraph("marked as Verified")
+            paragraph.add_run(".").bold = True
+            paragraph.add_run("").italic = True
+            paragraph.add_run("Next")
+
+        assert _content(docx_bytes, build) == "marked as Verified.Next"
+
     def test_markers_that_say_which_end_they_are_keep_their_punctuation(
         self, docx_bytes
     ):
