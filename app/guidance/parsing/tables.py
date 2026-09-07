@@ -56,7 +56,11 @@ _MERGE_ORIGIN = "restart"
 # for. Block joins produce the rest. The whitespace either side goes too, because the
 # editor's serialiser takes it and a cell has to be written the way that would write
 # it - see `_cell_markdown`.
-_ROW_BREAK = re.compile(r"[ \t]*\\?\n[ \t]*")
+# The leading run is possessive, because giving a space back could never help: what
+# follows it matches a backslash or a newline and never a space, so every one of
+# those retries is bound to fail. Left greedy, a long run of spaces is re-walked from
+# each position in turn and the scan is quadratic in the length of the cell.
+_ROW_BREAK = re.compile(r"[ \t]*+\\?\n[ \t]*")
 
 # Runs of whitespace inside a cell, which the editor collapses to one space.
 _RUN_OF_SPACE = re.compile(r"\s+")
