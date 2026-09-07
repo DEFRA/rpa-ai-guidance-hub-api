@@ -134,9 +134,19 @@ class TestComparingSections:
 
         Were children compared, equality would walk up from one section and down
         from the other and never finish. They say nothing about identity that the
-        parent chain does not say already.
+        parent chain does not say already - which the last assertion is here to
+        show: holding them out costs nothing, because the chain still separates
+        two sections that differ.
         """
-        assert _family()[0] == _family()[0]
+        section, *_ = _family()
+        twin, *_ = _family()
+
+        assert section is not twin
+        assert section == twin
+
+        twin.heading = "Payments"
+
+        assert section != twin
 
 
 class TestSubtreeMarkdown:
