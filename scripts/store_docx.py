@@ -96,14 +96,12 @@ def dangling_anchors(document: models.MarkdownDocument) -> set[str]:
     return {target for target in _LINK.findall(markdown) if target not in printed}
 
 
-def missing_assets(
-    document: models.MarkdownDocument, guide_id: str, base: str
-) -> list[str]:
+def missing_assets(document: models.MarkdownDocument, guide: str) -> list[str]:
     """Every picture named by the document whose bytes are not in the store."""
     return [
         image.name
         for image in document.images
-        if store.load_asset(guide_id, image.name, base) is None
+        if store.load_asset(guide, image.name) is None
     ]
 
 
@@ -138,8 +136,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     source = Path(args.document)
-    base = as_url(args.destination)
     guide_id = args.guide_id or str(uuid.uuid4())
+    guide = store.guide_url(as_url(args.destination), guide_id)
 
     try:
         parsed = parser.parse_docx(source.read_bytes())
@@ -147,8 +145,8 @@ def main() -> int:
         print(f"{source.name}: {error}", file=sys.stderr)
         return 1
 
-    saved = store.save(parsed, guide_id, base)
-    loaded = store.load(guide_id, base)
+    saved = store.save(parsed, guide)
+    loaded = store.load(guide)
 
     if loaded is None:
         print(f"stored {guide_id} and could not read it back", file=sys.stderr)
@@ -156,7 +154,7 @@ def main() -> int:
 
     print(f"guide:    {guide_id}")
     print(f"markdown: {saved}")
-    print(f"assets:   {store.asset_url(guide_id, '', base)}")
+    print(f"assets:   {store.assets_url(guide)}")
     print(f"sections: {len(loaded.sections)}")
     print(f"pictures: {len(loaded.images)}")
 
@@ -171,7 +169,7 @@ def main() -> int:
     failures = compare(parsed, loaded)
     failures += [
         f"picture missing from the store: {name}"
-        for name in missing_assets(loaded, guide_id, base)
+        for name in missing_assets(loaded, guide)
     ]
     failures += [
         f"storing the document broke a link to #{target}"

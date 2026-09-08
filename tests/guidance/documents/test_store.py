@@ -5,15 +5,16 @@ to put bytes somewhere and find them again, and a fake that answered from a dict
 would be asserting that this module calls the fake the way it thinks it does -
 which is the one thing that cannot go wrong in a way anybody cares about.
 
-`base` is a URL, so these run against `file://` - the scheme is what says how a guide
-is reached, and the layout, the names and the order of the writes are the same
-whatever answers it.
+A guide is addressed by one URL, so these run against `file://` - the scheme is what
+says how it is reached, and the layout, the names and the order of the writes are the
+same whatever answers it.
 
 All fixture text is invented, as everywhere in this package.
 """
 
 import re
 from pathlib import Path
+from urllib.parse import urljoin
 
 import pytest
 
@@ -41,9 +42,9 @@ def _document(*images: models.Image) -> models.MarkdownDocument:
     return models.MarkdownDocument(title="Claims", sections=[section])
 
 
-def _base(tmp_path: Path) -> str:
-    """`tmp_path` as the URL a caller would hand the store."""
-    return tmp_path.as_uri()
+def _guide(tmp_path: Path, guide_id: str = GUIDE) -> str:
+    """The URL of a guide kept under `tmp_path`, as a caller would compose it."""
+    return store.guide_url(tmp_path.as_uri(), guide_id)
 
 
 def _assets_in(tmp_path: Path) -> list[str]:
@@ -55,13 +56,13 @@ def _assets_in(tmp_path: Path) -> list[str]:
 
 class TestSaving:
     def test_a_guide_is_a_markdown_file_under_its_own_id(self, tmp_path):
-        saved = store.save(_document(), GUIDE, _base(tmp_path))
+        saved = store.save(_document(), _guide(tmp_path))
 
-        assert saved == f"{_base(tmp_path)}/{GUIDE}/content.md"
+        assert saved == f"{_guide(tmp_path)}/content.md"
         assert (tmp_path / GUIDE / "content.md").is_file()
 
     def test_the_pictures_land_beside_the_document_that_draws_them(self, tmp_path):
-        store.save(_document(_picture()), GUIDE, _base(tmp_path))
+        store.save(_document(_picture()), _guide(tmp_path))
 
         assert (tmp_path / GUIDE / "assets" / "a3f9.png").read_bytes() == PNG
 
@@ -69,7 +70,7 @@ class TestSaving:
         """The whole of what makes the file portable. An absolute path - a bucket
         name, or this machine's directory layout - would be configuration written
         into a file that outlives the configuration."""
-        store.save(_document(_picture()), GUIDE, _base(tmp_path))
+        store.save(_document(_picture()), _guide(tmp_path))
 
         stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
         assert "![](assets/a3f9.png)" in stored
@@ -77,15 +78,13 @@ class TestSaving:
     def test_one_picture_drawn_twice_is_one_file(self, tmp_path):
         """A section records a picture once per place it is drawn, and the name is
         the digest of the bytes, so both entries are the same file."""
-        store.save(_document(_picture(), _picture()), GUIDE, _base(tmp_path))
+        store.save(_document(_picture(), _picture()), _guide(tmp_path))
 
         assert _assets_in(tmp_path) == ["a3f9.png"]
 
     def test_two_different_pictures_are_two_files(self, tmp_path):
         store.save(
-            _document(_picture(), _picture("b7c2.png", b"other")),
-            GUIDE,
-            _base(tmp_path),
+            _document(_picture(), _picture("b7c2.png", b"other")), _guide(tmp_path)
         )
 
         assert _assets_in(tmp_path) == ["a3f9.png", "b7c2.png"]
@@ -97,44 +96,71 @@ class TestSaving:
         value - the bytes are already there, under that very name. Writing it again
         must leave them alone rather than put an empty file over each one.
         """
-        store.save(_document(_picture()), GUIDE, _base(tmp_path))
-        loaded = store.load(GUIDE, _base(tmp_path))
+        store.save(_document(_picture()), _guide(tmp_path))
+        loaded = store.load(_guide(tmp_path))
 
         assert loaded is not None
-        store.save(loaded, GUIDE, _base(tmp_path))
+        store.save(loaded, _guide(tmp_path))
 
-        assert store.load_asset(GUIDE, "a3f9.png", _base(tmp_path)) == PNG
+        assert store.load_asset(_guide(tmp_path), "a3f9.png") == PNG
 
     def test_a_guide_can_be_stored_beside_another(self, tmp_path):
-        store.save(_document(_picture()), GUIDE, _base(tmp_path))
-        store.save(_document(_picture()), "01JBQ9", _base(tmp_path))
+        store.save(_document(_picture()), _guide(tmp_path))
+        store.save(_document(_picture()), _guide(tmp_path, "01JBQ9"))
 
-        assert store.load(GUIDE, _base(tmp_path)) is not None
-        assert store.load("01JBQ9", _base(tmp_path)) is not None
+        assert store.load(_guide(tmp_path)) is not None
+        assert store.load(_guide(tmp_path, "01JBQ9")) is not None
 
 
 class TestWhereAGuideLives:
     """The scheme is the whole of what says how a guide is reached."""
 
-    def test_the_urls_a_guide_is_written_to(self, tmp_path):
-        base = _base(tmp_path)
+    def test_what_a_guide_url_holds(self, tmp_path):
+        guide = _guide(tmp_path)
 
-        assert store.content_url(GUIDE, base) == f"{base}/{GUIDE}/content.md"
-        assert (
-            store.asset_url(GUIDE, "a3f9.png", base)
-            == f"{base}/{GUIDE}/assets/a3f9.png"
-        )
+        assert store.content_url(guide) == f"{guide}/content.md"
+        assert store.assets_url(guide) == f"{guide}/assets/"
+        assert store.asset_url(guide, "a3f9.png") == f"{guide}/assets/a3f9.png"
 
-    def test_a_base_that_already_ends_in_a_slash_does_not_gain_another(self, tmp_path):
-        assert store.content_url(GUIDE, f"{_base(tmp_path)}/") == store.content_url(
-            GUIDE, _base(tmp_path)
-        )
+    def test_a_documents_own_image_path_resolves_to_where_the_picture_went(
+        self, tmp_path
+    ):
+        """Resolved the way a reader resolves it - against the document's own URL -
+        the relative path in the stored Markdown reaches the file that was written.
+        That the two agree is the whole of what makes the stored file readable on
+        its own, so it is asserted rather than assumed.
+        """
+        guide = _guide(tmp_path)
+        store.save(_document(_picture()), guide)
+
+        referenced = urljoin(store.content_url(guide), f"{store.ASSET_PREFIX}a3f9.png")
+
+        assert referenced == store.asset_url(guide, "a3f9.png")
+        assert store.load_asset(guide, "a3f9.png") == PNG
+
+    def test_a_url_that_already_ends_in_a_slash_does_not_gain_another(self, tmp_path):
+        guide = _guide(tmp_path)
+
+        assert store.content_url(f"{guide}/") == store.content_url(guide)
 
     def test_a_scheme_this_store_cannot_reach_says_so(self):
         """Naming the schemes it does speak, because writing the wrong URL is a
         configuration mistake and the fix is to write a different one."""
         with pytest.raises(store.UnsupportedSchemeError, match="file://"):
-            store.load(GUIDE, "s3://a-bucket/guides")
+            store.load("s3://a-bucket/guides/01JBQ8")
+
+    def test_composing_a_guide_url_escapes_the_id(self, tmp_path):
+        """The one place an id is escaped. The dev tooling names a guide after the
+        document it converted, and those hold spaces; a `#` in one would truncate
+        every URL built from it."""
+        base = tmp_path.as_uri()
+
+        assert store.guide_url(base, "CS Revenue 2026") == f"{base}/CS%20Revenue%202026"
+
+        store.save(_document(), store.guide_url(base, "CS Revenue 2026"))
+
+        assert (tmp_path / "CS Revenue 2026" / "content.md").is_file()
+        assert store.load(store.guide_url(base, "CS Revenue 2026")) is not None
 
     def test_a_url_escaping_a_character_a_path_may_hold_is_unescaped(self, tmp_path):
         """A guide's directory is named by whatever minted its id, and a URL escapes
@@ -143,16 +169,16 @@ class TestWhereAGuideLives:
         spaced = tmp_path / "with a space"
         spaced.mkdir()
 
-        store.save(_document(), GUIDE, spaced.as_uri())
+        store.save(_document(), store.guide_url(spaced.as_uri(), GUIDE))
 
         assert (spaced / GUIDE / "content.md").is_file()
 
 
 class TestLoading:
     def test_a_guide_comes_back_as_the_model_that_wrote_it(self, tmp_path):
-        store.save(_document(_picture()), GUIDE, _base(tmp_path))
+        store.save(_document(_picture()), _guide(tmp_path))
 
-        loaded = store.load(GUIDE, _base(tmp_path))
+        loaded = store.load(_guide(tmp_path))
 
         assert loaded is not None
         assert loaded.title == "Claims"
@@ -162,27 +188,27 @@ class TestLoading:
     def test_a_guide_that_was_never_stored_is_not_an_error(self, tmp_path):
         """ "No such guide" is an ordinary answer to an ordinary question, so it is
         an answer rather than an exception a caller has to know to catch."""
-        assert store.load("no-such-guide", _base(tmp_path)) is None
+        assert store.load(_guide(tmp_path, "no-such-guide")) is None
 
     def test_a_picture_is_read_only_when_something_asks_for_it(self, tmp_path):
-        store.save(_document(_picture(data=b"the bytes")), GUIDE, _base(tmp_path))
+        store.save(_document(_picture(data=b"the bytes")), _guide(tmp_path))
 
-        loaded = store.load(GUIDE, _base(tmp_path))
+        loaded = store.load(_guide(tmp_path))
 
         assert loaded is not None
         assert loaded.images[0].data is None
-        assert store.load_asset(GUIDE, "a3f9.png", _base(tmp_path)) == b"the bytes"
+        assert store.load_asset(_guide(tmp_path), "a3f9.png") == b"the bytes"
 
     def test_asking_for_a_picture_that_is_not_there(self, tmp_path):
-        assert store.load_asset(GUIDE, "missing.png", _base(tmp_path)) is None
+        assert store.load_asset(_guide(tmp_path), "missing.png") is None
 
 
 class TestTheRoundTrip:
     def test_a_guide_renders_the_same_after_the_trip(self, tmp_path):
         document = _document(_picture())
 
-        store.save(document, GUIDE, _base(tmp_path))
-        loaded = store.load(GUIDE, _base(tmp_path))
+        store.save(document, _guide(tmp_path))
+        loaded = store.load(_guide(tmp_path))
 
         assert loaded is not None
         assert loaded.markdown(store.ASSET_PREFIX) == document.markdown(
@@ -204,15 +230,14 @@ class TestTheRoundTrip:
         )
         store.save(
             models.MarkdownDocument(title="Claims", sections=[section]),
-            GUIDE,
-            _base(tmp_path),
+            _guide(tmp_path),
         )
 
         first = (tmp_path / GUIDE / "content.md").read_bytes()
         for _ in range(2):
-            written = store.load(GUIDE, _base(tmp_path))
+            written = store.load(_guide(tmp_path))
             assert written is not None
-            store.save(written, GUIDE, _base(tmp_path))
+            store.save(written, _guide(tmp_path))
             assert (tmp_path / GUIDE / "content.md").read_bytes() == first
 
     def test_a_stored_guide_needs_nothing_but_itself(self, tmp_path):
@@ -220,13 +245,13 @@ class TestTheRoundTrip:
         document names is on disk where the document says, and every anchor it
         links to is printed by a heading in the same file."""
         document = _document(_picture())
-        store.save(document, GUIDE, _base(tmp_path))
+        store.save(document, _guide(tmp_path))
         markdown = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
 
         for image in document.images:
             assert (tmp_path / GUIDE / "assets" / image.name).is_file()
 
-        loaded = store.load(GUIDE, _base(tmp_path))
+        loaded = store.load(_guide(tmp_path))
         assert loaded is not None
         printed = {
             f"#{anchor}" for anchor in anchors.of_document(loaded.sections).values()
