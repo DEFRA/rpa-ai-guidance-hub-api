@@ -37,10 +37,10 @@ from dataclasses import dataclass
 
 from app.guidance.parsing import anchors, models
 
-# A section heading: two or more hashes, because one is the document's title. The
-# level is one less than the depth `markdown` writes, which adds one so that a
-# top-level section sits beneath the title rather than beside it.
-_HEADING = re.compile(r"^(#{2,})\s+(.*)$")
+# What a section heading opens with: two or more hashes, because one is the
+# document's title. The level is one less than the depth `markdown` writes, which
+# adds one so that a top-level section sits beneath the title rather than beside it.
+_SECTION_HASHES = 2
 
 # The title line, whose text is empty in a document whose cover named none.
 _TITLE = re.compile(r"^#\s?(.*)$")
@@ -67,6 +67,24 @@ def from_markdown(text: str, image_prefix: str = "") -> models.MarkdownDocument:
     )
 
 
+def _heading(line: str) -> tuple[str, str] | None:
+    """A heading line as the hashes it opens with and the text it prints, or None.
+
+    Hashes, whitespace, then the text - and `str.lstrip` and `str.strip` say exactly
+    that in the order a reader reads it, so the rule needs no pattern and cannot be
+    written as a slow one. A run of hashes with nothing after it is not a heading,
+    and neither is one whose hashes run straight into a word: both are content that
+    happens to begin with a `#`.
+    """
+    hashes = line[: len(line) - len(line.lstrip("#"))]
+    printed = line[len(hashes) :]
+
+    if len(hashes) < _SECTION_HASHES or not printed[:1].isspace():
+        return None
+
+    return hashes, printed.strip()
+
+
 def _title_of(lines: list[str]) -> str:
     """The document's title: the first line, and only ever the first line.
 
@@ -77,7 +95,10 @@ def _title_of(lines: list[str]) -> str:
         return ""
 
     matched = _TITLE.match(lines[0])
-    return matched.group(1).strip() if matched and not _HEADING.match(lines[0]) else ""
+    if not matched or _heading(lines[0]):
+        return ""
+
+    return matched.group(1).strip()
 
 
 @dataclass
@@ -116,12 +137,8 @@ def _sections_of(lines: list[str], image_prefix: str) -> list[models.MarkdownSec
 
 def _heading_lines(lines: list[str]) -> list[tuple[int, str, str]]:
     """Each heading's line number, its hashes and the text it prints."""
-    matches = ((index, _HEADING.match(line)) for index, line in enumerate(lines))
-    return [
-        (index, matched.group(1), matched.group(2).strip())
-        for index, matched in matches
-        if matched
-    ]
+    headings = ((index, _heading(line)) for index, line in enumerate(lines))
+    return [(index, *matched) for index, matched in headings if matched is not None]
 
 
 def _body(lines: list[str], start: int) -> str:
@@ -131,7 +148,7 @@ def _body(lines: list[str], start: int) -> str:
     content holds blank lines of its own between its blocks.
     """
     end = start + 1
-    while end < len(lines) and not _HEADING.match(lines[end]):
+    while end < len(lines) and not _heading(lines[end]):
         end += 1
 
     return "\n".join(lines[start + 1 : end]).strip("\n")
