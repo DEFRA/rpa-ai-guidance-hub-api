@@ -2,12 +2,13 @@
 
 An image is inline content - every one in the two real guides is a `wp:inline` - so
 these cases are mostly about it staying where the run put it, and about the name it is
-given, which only the section it lands in can decide.
+given, which is the digest of the bytes it holds.
 
 All fixture text is invented, as everywhere in this package.
 """
 
 import base64
+import hashlib
 import io
 from collections.abc import Callable
 from typing import Any
@@ -27,6 +28,24 @@ HEADING = "Applying"
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
+
+# A second, different picture: one opaque red pixel. Needed wherever a case is about
+# two pictures being told apart, which the transparent one above cannot show now that
+# a name is the digest of what it holds.
+OTHER_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
+)
+
+
+def named(data: bytes, extension: str = "png") -> str:
+    """The name the parser gives a picture holding `data`.
+
+    Computed the way the parser computes it rather than written out as a literal: a
+    digest pasted into a test says only that the answer has not changed, and says it
+    in forty characters nobody can check by reading.
+    """
+    return f"{hashlib.sha256(data).hexdigest()}.{extension}"
+
 
 # The `docx_bytes` fixture's contract, restated as it is in test_inline.py. It cannot
 # be shared through conftest.py: pytest runs with --import-mode=importlib, so the test
@@ -51,9 +70,9 @@ def _image_content(docx_bytes: DocxBytes, build: Build, index: int = 0) -> str:
     return parser.parse_docx(docx_bytes(with_heading)).sections[index].content
 
 
-def _picture(paragraph: Paragraph) -> Any:
+def _picture(paragraph: Paragraph, data: bytes = PNG) -> Any:
     """Draw a picture in a run of its own, the way Word writes one."""
-    return paragraph.add_run().add_picture(io.BytesIO(PNG))
+    return paragraph.add_run().add_picture(io.BytesIO(data))
 
 
 def _empty_drawing(paragraph: Paragraph) -> None:
@@ -68,14 +87,14 @@ def _unembed(paragraph: Paragraph) -> None:
 
 
 class TestWhereAPictureGoes:
-    def test_a_picture_becomes_an_image_named_for_its_section(self, docx_bytes):
-        """Only a section can say what a picture is called, so the name is given
-        after the walk rather than where the picture is met."""
+    def test_a_picture_becomes_an_image_named_for_its_bytes(self, docx_bytes):
+        """Only the parser can reach the part a run's relationship names, so the
+        name is given after the walk rather than where the picture is met."""
 
         def build(document):
             _picture(document.add_paragraph())
 
-        assert _image_content(docx_bytes, build) == "![](1_img_1.png)"
+        assert _image_content(docx_bytes, build) == f"![]({named(PNG)})"
 
     def test_a_picture_beside_text_stays_where_it_sits(self, docx_bytes):
         """One of the two real inline icons reads "Select the (icon) binocular
@@ -89,14 +108,14 @@ class TestWhereAPictureGoes:
             paragraph.add_run(" binocular icon")
 
         assert _image_content(docx_bytes, build) == (
-            "Select the ![](1_img_1.png) binocular icon"
+            f"Select the ![]({named(PNG)}) binocular icon"
         )
 
     def test_a_picture_in_a_list_item_keeps_its_marker(self, docx_bytes):
         def build(document):
             _picture(document.add_paragraph(style="List Bullet"))
 
-        assert _image_content(docx_bytes, build) == "- ![](1_img_1.png)"
+        assert _image_content(docx_bytes, build) == f"- ![]({named(PNG)})"
 
     def test_two_pictures_side_by_side_are_two_pictures(self, docx_bytes):
         """They merge with nothing: a run of text either side of them would be one
@@ -105,9 +124,11 @@ class TestWhereAPictureGoes:
         def build(document):
             paragraph = document.add_paragraph()
             _picture(paragraph)
-            _picture(paragraph)
+            _picture(paragraph, OTHER_PNG)
 
-        assert _image_content(docx_bytes, build) == "![](1_img_1.png)![](1_img_2.png)"
+        assert _image_content(docx_bytes, build) == (
+            f"![]({named(PNG)})![]({named(OTHER_PNG)})"
+        )
 
     def test_a_picture_takes_no_marks(self, docx_bytes):
         """Five image runs in the two real guides are bold, struck through or
@@ -120,7 +141,7 @@ class TestWhereAPictureGoes:
             run.bold = True
             run.add_picture(io.BytesIO(PNG))
 
-        assert _image_content(docx_bytes, build) == "![](1_img_1.png)"
+        assert _image_content(docx_bytes, build) == f"![]({named(PNG)})"
 
     def test_a_drawing_holding_no_picture_says_nothing(self, docx_bytes):
         """A shape or a chart is a drawing too, and neither is an image."""
@@ -146,9 +167,10 @@ class TestWhereAPictureGoes:
 
 
 class TestNaming:
-    def test_pictures_are_numbered_within_their_own_section(self, docx_bytes):
-        """The number says where the picture belongs, so it restarts wherever a new
-        section does."""
+    def test_the_same_picture_is_the_same_name_wherever_it_is_drawn(self, docx_bytes):
+        """A name says what a picture holds, so one drawn three times in two
+        sections is one name three times - and one object to store rather than
+        three."""
 
         def build(document):
             _picture(document.add_paragraph())
@@ -159,10 +181,47 @@ class TestNaming:
         document = parser.parse_docx(
             docx_bytes(lambda d: (d.add_heading(HEADING, level=1), build(d)))
         )
+        assert [image.name for image in document.images] == [named(PNG)] * 3
+
+    def test_two_different_pictures_are_two_names(self, docx_bytes):
+        """The dedup above is of identical bytes, not of pictures generally."""
+
+        def build(document):
+            _picture(document.add_paragraph())
+            _picture(document.add_paragraph(), OTHER_PNG)
+
+        document = parser.parse_docx(
+            docx_bytes(lambda d: (d.add_heading(HEADING, level=1), build(d)))
+        )
         assert [image.name for image in document.images] == [
-            "1_img_1.png",
-            "1_img_2.png",
-            "2_img_1.png",
+            named(PNG),
+            named(OTHER_PNG),
+        ]
+
+    def test_a_name_survives_the_section_it_sits_in_being_renumbered(self, docx_bytes):
+        """This is the whole point of naming by content rather than by position.
+
+        A stored picture is immutable, so its address has to be. Under the old name
+        - the section number and the position within it - inserting a heading above
+        a picture renamed a file that had not changed, and every reference held to
+        it elsewhere became a reference to nothing.
+        """
+
+        def with_picture_in_section_one(document):
+            document.add_heading(HEADING, level=1)
+            _picture(document.add_paragraph())
+
+        def with_a_section_inserted_above_it(document):
+            document.add_heading("Checking", level=1)
+            document.add_paragraph("Check the claim")
+            with_picture_in_section_one(document)
+
+        first = parser.parse_docx(docx_bytes(with_picture_in_section_one))
+        moved = parser.parse_docx(docx_bytes(with_a_section_inserted_above_it))
+
+        assert moved.sections[1].number == "2"
+        assert [image.name for image in moved.images] == [
+            image.name for image in first.images
         ]
 
     def test_a_picture_carries_the_bytes_and_type_of_its_part(self, docx_bytes):
@@ -200,4 +259,4 @@ class TestNaming:
         rendered = parser.parse_docx(
             docx_bytes(lambda d: (d.add_heading(HEADING, level=1), build(d)))
         ).markdown("https://example.org/docs/")
-        assert "![](https://example.org/docs/1_img_1.png)" in rendered
+        assert f"![](https://example.org/docs/{named(PNG)})" in rendered

@@ -82,10 +82,12 @@ class TestWhenItHappens:
     """A cell's width is only knowable once every hole in it is filled."""
 
     def test_a_cross_reference_is_measured_after_it_resolves(self):
-        """The bookmark Word names is longer than the number it resolves to, so a
-        table measured before the rewrite is padded to a width no cell has. This is
-        the case that sent a real conversion out 13 columns wide."""
-        target = models.MarkdownSection(heading="Transition failed", ordinal=2)
+        """The anchor a cross-reference resolves to is longer than the bookmark
+        Word named it by, so a table measured before the rewrite is padded to a width
+        no cell has. This is the case that sent a real conversion out 13 columns
+        wide - then the other way about, the target having been a bare number and
+        shorter. Either direction is wrong, which is the point: the width is not
+        knowable until the hole is filled."""
         section = models.MarkdownSection(
             heading="Applying",
             content=(
@@ -95,24 +97,23 @@ class TestWhenItHappens:
             ),
         )
 
-        rendered = section.markdown(bookmarks={"_Toc178312345": target})
+        rendered = section.markdown(anchors={"_Toc178312345": "2-transition-failed"})
 
-        assert "| Withdrawal | See [step](#2) |" in rendered
-        assert "| ---------- | -------------- |" in rendered
+        assert "| Withdrawal | See [step](#2-transition-failed) |" in rendered
+        widths = {len(line) for line in rendered.split("\n") if line.startswith("|")}
+        assert len(widths) == 1, "every row of a table is the same width"
 
     def test_an_image_path_is_measured_after_its_prefix(self):
         """The prefix makes a cell longer, where a cross-reference makes it shorter.
         Both are only known at render time, and both have to be measured then."""
         section = models.MarkdownSection(
             heading="Applying",
-            content="| Case | Figure |\n| --- | --- |\n| Withdrawal | ![](1_img_1.png) |",
-            images=[
-                models.Image(name="1_img_1.png", data=b"", content_type="image/png")
-            ],
+            content="| Case | Figure |\n| --- | --- |\n| Withdrawal | ![](a3f9.png) |",
+            images=[models.Image(name="a3f9.png", content_type="image/png")],
         )
 
         rendered = section.markdown(image_prefix="https://example.org/docs/")
 
-        assert "![](https://example.org/docs/1_img_1.png)" in rendered
+        assert "![](https://example.org/docs/a3f9.png)" in rendered
         widths = {len(line) for line in rendered.split("\n") if line.startswith("|")}
         assert len(widths) == 1, "every row of a table is the same width"

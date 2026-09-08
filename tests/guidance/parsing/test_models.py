@@ -5,7 +5,7 @@ import pytest
 from app.guidance.parsing import models
 
 
-def _image(name: str = "1_img_1.png") -> models.Image:
+def _image(name: str = "a3f9.png") -> models.Image:
     return models.Image(name=name, data=b"\x89PNG", content_type="image/png")
 
 
@@ -46,14 +46,14 @@ class TestImagePrefixes:
         """Only a link target is rewritten, never the document's own words."""
         section = models.MarkdownSection(
             heading="Evidence",
-            content="The file 1_img_1.png is attached.\n\n![x](1_img_1.png)",
+            content="The file a3f9.png is attached.\n\n![x](a3f9.png)",
             images=[_image()],
         )
 
         rendered = section.markdown("images/")
 
-        assert "The file 1_img_1.png is attached." in rendered
-        assert "![x](images/1_img_1.png)" in rendered
+        assert "The file a3f9.png is attached." in rendered
+        assert "![x](images/a3f9.png)" in rendered
 
     def test_the_same_section_renders_for_more_than_one_destination(self):
         """The content is a template, so one parse serves S3 and a local directory.
@@ -62,11 +62,11 @@ class TestImagePrefixes:
         otherwise be prefixing an already-prefixed name.
         """
         section = models.MarkdownSection(
-            heading="Evidence", content="![x](1_img_1.png)", images=[_image()]
+            heading="Evidence", content="![x](a3f9.png)", images=[_image()]
         )
 
-        assert "(s3/1_img_1.png)" in section.markdown("s3/")
-        assert "(local/1_img_1.png)" in section.markdown("local/")
+        assert "(s3/a3f9.png)" in section.markdown("s3/")
+        assert "(local/a3f9.png)" in section.markdown("local/")
 
 
 class TestAppendixNumbering:
@@ -119,13 +119,13 @@ class TestCrossReferences:
             content="The tag #_Payment is not a link.\n\n[Payment](#_Payment)",
         )
         document = models.MarkdownDocument(
-            sections=[section], bookmarks={"_Payment": payment}
+            sections=[section, payment], bookmarks={"_Payment": payment}
         )
 
         rendered = document.markdown()
 
         assert "The tag #_Payment is not a link." in rendered
-        assert "[Payment](#4)" in rendered
+        assert "[Payment](#4-payment)" in rendered
 
 
 class TestComparingSections:
@@ -188,21 +188,22 @@ class TestSubtreeMarkdown:
         Rendered without them it would carry a raw bookmark name and an unprefixed
         image path, both of which point nowhere.
         """
-        payment = models.MarkdownSection(heading="Payment", ordinal=4)
         parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
         child = models.MarkdownSection(
             heading="Evidence required",
             ordinal=1,
             parent=parent,
-            content="See [Payment](#_Payment).\n\n![x](3.1_img_1.png)",
-            images=[_image("3.1_img_1.png")],
+            content="See [Payment](#_Payment).\n\n![x](a3f9.png)",
+            images=[_image("a3f9.png")],
         )
         parent.children.append(child)
 
-        rendered = parent.markdown("s3/", {"_Payment": payment}, include_children=True)
+        rendered = parent.markdown(
+            "s3/", {"_Payment": "4-payment"}, include_children=True
+        )
 
-        assert "[Payment](#4)" in rendered
-        assert "![x](s3/3.1_img_1.png)" in rendered
+        assert "[Payment](#4-payment)" in rendered
+        assert "![x](s3/a3f9.png)" in rendered
 
 
 class TestDocumentMarkdown:
@@ -245,11 +246,11 @@ class TestDocumentMarkdown:
         )
 
     def test_images_are_gathered_from_every_section_in_order(self):
-        first = models.MarkdownSection(heading="One", images=[_image("1_img_1.png")])
-        second = models.MarkdownSection(heading="Two", images=[_image("2_img_1.png")])
+        first = models.MarkdownSection(heading="One", images=[_image("a3f9.png")])
+        second = models.MarkdownSection(heading="Two", images=[_image("b7c2.png")])
         document = models.MarkdownDocument(sections=[first, second])
 
         assert [image.name for image in document.images] == [
-            "1_img_1.png",
-            "2_img_1.png",
+            "a3f9.png",
+            "b7c2.png",
         ]

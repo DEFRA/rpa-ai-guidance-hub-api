@@ -8,8 +8,9 @@ The content is a *template* with two late-bound holes. Images are written into t
 Markdown by their generated name alone, and the caller supplies the prefix at render
 time, so the same parsed document can be rendered for S3, for a local directory, or
 for anywhere else. Cross-references are written as the name of the Word bookmark
-they point at, which means nothing to a renderer, and are resolved to the section
-that bookmark marks - only the document as a whole knows which section that is.
+they point at, which means nothing to a renderer, and are resolved to the anchor of
+the heading that bookmark marks - only the document as a whole knows which section
+that is.
 
 Hierarchy is carried by each section's parent link, and a section's number is
 *derived* from that link rather than stored, so no stored number can disagree with
@@ -20,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.guidance.parsing import alignment
+from app.guidance.parsing import alignment, anchors
 
 
 def _letters(ordinal: int) -> str:
@@ -41,13 +42,19 @@ def _letters(ordinal: int) -> str:
 class Image:
     """An image extracted from a document.
 
-    `name` is the bare generated filename as it appears in the section's Markdown,
-    before any prefix is applied.
+    `name` is the bare filename as it appears in the section's Markdown, before any
+    prefix is applied: the digest of the picture's own bytes and the extension of the
+    part it came from. Naming it by its content rather than by where it sits is what
+    lets a stored document be re-ordered without every picture in it changing address.
+
+    `data` is the bytes when the picture has just been read out of a .docx, and None
+    once a document has been stored and read back - the bytes are then in the asset
+    store, under this name, and are fetched only if something asks for them.
     """
 
     name: str
-    data: bytes
     content_type: str
+    data: bytes | None = None
 
 
 @dataclass
@@ -90,18 +97,32 @@ class MarkdownSection:
             return _letters(self.ordinal) if self.appendix else str(self.ordinal)
         return f"{self.parent.number}.{self.ordinal}"
 
+    @property
+    def rendered_heading(self) -> str:
+        """The heading line this section prints, without its `#`s.
+
+        An appendix prints no number: the author already wrote the designation into
+        the heading, and "A Annex A" reads as a mistake. The letter is still the
+        section's number, and is what a cross-reference to it resolves against.
+
+        Held here rather than inside `markdown` because it is also what `anchors`
+        slugifies and what the reader matches a heading line against. A second
+        statement of the rule would be a second answer to "which heading is this".
+        """
+        return self.heading if self.appendix else f"{self.number} {self.heading}"
+
     def markdown(
         self,
         image_prefix: str = "",
-        bookmarks: dict[str, MarkdownSection] | None = None,
+        anchors: dict[str, str] | None = None,
         *,
         include_children: bool = False,
     ) -> str:
         """This section's Markdown: its heading and content, and its subtree if asked.
 
-        An appendix prints no number: the author already wrote the designation into
-        the heading, and "A Annex A" reads as a mistake. The letter is still the
-        section's number, and is what a cross-reference to it resolves to.
+        `anchors` maps each bookmark name to the anchor of the heading it marks, and
+        only the document as a whole can build it - which is why a section rendered
+        alone leaves its cross-references as Word wrote them.
 
         A subtree is joined exactly as the document joins its sections, so a section
         rendered with its children is what the document renders for the same run of
@@ -110,10 +131,9 @@ class MarkdownSection:
         where the images live or where a cross-reference points.
         """
         hashes = "#" * (self.level + 1)
-        title = self.heading if self.appendix else f"{self.number} {self.heading}"
-        lines = [f"{hashes} {title}", ""]
+        lines = [f"{hashes} {self.rendered_heading}", ""]
 
-        content = self._resolved_content(image_prefix, bookmarks or {})
+        content = self._resolved_content(image_prefix, anchors or {})
         if content:
             lines.extend((alignment.aligned(content), ""))
 
@@ -122,21 +142,19 @@ class MarkdownSection:
             return rendered
 
         subtrees = (
-            child.markdown(image_prefix, bookmarks, include_children=True)
+            child.markdown(image_prefix, anchors, include_children=True)
             for child in self.children
         )
         return "\n".join([rendered, *subtrees])
 
-    def _resolved_content(
-        self, image_prefix: str, bookmarks: dict[str, MarkdownSection]
-    ) -> str:
+    def _resolved_content(self, image_prefix: str, anchors: dict[str, str]) -> str:
         """Fill the template's holes: where the images live, and where a
         cross-reference points.
 
-        Only a link target is rewritten, never prose. Image names are generated by
-        the parser (`3.1_img_2.png`) so they cannot collide with anything the
-        document itself says, and the `#` that makes an anchor an anchor is what
-        keeps the two rewrites off each other's targets.
+        Only a link target is rewritten, never prose. An image name is the digest of
+        the picture's own bytes, so it cannot collide with anything the document
+        itself says, and the `#` that makes an anchor an anchor is what keeps the two
+        rewrites off each other's targets.
 
         A bookmark the document did not resolve to a section is left exactly as Word
         wrote it, as is every bookmark in a section rendered with no map at all.
@@ -148,8 +166,8 @@ class MarkdownSection:
                     f"]({image.name})", f"]({image_prefix}{image.name})"
                 )
 
-        for name, section in bookmarks.items():
-            content = content.replace(f"](#{name})", f"](#{section.number})")
+        for name, anchor in anchors.items():
+            content = content.replace(f"](#{name})", f"](#{anchor})")
         return content
 
     # Tables are aligned by `markdown` rather than here, and only once every hole
@@ -179,6 +197,22 @@ class MarkdownDocument:
         """
         parts = [f"# {self.title}", ""]
         parts.extend(
-            section.markdown(image_prefix, self.bookmarks) for section in self.sections
+            section.markdown(image_prefix, self.anchors()) for section in self.sections
         )
         return "\n".join(parts)
+
+    def anchors(self) -> dict[str, str]:
+        """Each bookmark name against the anchor of the heading it marks.
+
+        This is the whole of what a section needs to resolve a cross-reference, and
+        it is deliberately less than the document holds: `bookmarks` points at
+        sections, and a section resolving a link would then be able to reach the rest
+        of the document through one. A bookmark naming a section the document does
+        not carry is dropped here rather than rendered as a link to nowhere.
+        """
+        of_section = anchors.of_document(self.sections)
+        return {
+            name: of_section[id(section)]
+            for name, section in self.bookmarks.items()
+            if id(section) in of_section
+        }

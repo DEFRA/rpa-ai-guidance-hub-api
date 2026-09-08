@@ -2,16 +2,27 @@
 
 An image reaches the Markdown in two moves, because the two things needed to write it
 are known in different places. `inline` meets the picture while rendering a run and
-knows only which relationship it points at, so it writes `![](rId7)`. The parser knows
-which section the block landed in, and only a section can say what the picture should
-be called - so it is `resolved` afterwards, against the section, into
-`![](3.1_img_2.png)`.
+knows only which relationship it points at, so it writes `![](rId7)`. Only the parser
+can reach the part that relationship names, and so the bytes the name is taken from -
+so it is `resolved` afterwards, against the section, into `![](a3f9....png)`.
 
 Keeping both ends here is the point of the module: the form is written once and read
 once, in one file, so the two cannot drift apart. It is the same late binding
 `models.py` already does for the image prefix and for cross-references, one step
 earlier - and it is what lets `inline`, `lists` and `tables` stay entirely ignorant of
 images.
+
+A picture is named by the digest of its own bytes. The name it used to carry said
+where it sat - `3.1_img_2.png`, the section and the position within it - which reads
+far better and is wrong the moment the document is stored: a picture is immutable and
+its address should be too, but inserting a paragraph above one renumbers its section
+and so renames a file that has not changed. Anything holding the old address is then
+holding a broken one. Naming by content also makes storing idempotent, the same
+picture used twice being one object written once, and it is what lets an asset store
+keep every past version of a document resolving without versioning anything.
+
+Where a picture belongs is not lost with the old name, it just stops being encoded in
+it: the section that owns an image holds it in `section.images`.
 
 The alt text is deliberately empty. Word writes a `wp:docPr/@descr` of its own accord,
 describing what it thinks a picture shows, and nothing in the file distinguishes that
@@ -23,6 +34,7 @@ they do.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -35,11 +47,11 @@ from app.guidance.parsing import models
 # escaping in `inline` means text the author typed cannot produce brackets bare.
 _PLACEHOLDER = re.compile(r"!\[\]\(([^)\s]+)\)")
 
-# The generated name, e.g. "3.1_img_2.png": the section it appears in, its position
-# within that section, and the extension of the part it came from. Generated rather
-# than taken from word/media so that a name says where the picture belongs, and cannot
-# collide with anything the document itself says.
-_NAME = "{number}_img_{position}.{extension}"
+# The generated name, e.g. "a3f9...c1.png": the digest of the picture's bytes and the
+# extension of the part it came from. Generated rather than taken from word/media so
+# that it cannot collide with anything the document itself says, and identical bytes
+# reached by different documents arrive at the same name.
+_NAME = "{digest}.{extension}"
 
 
 def embedded_in(run: Any) -> str:
@@ -72,31 +84,36 @@ def resolved(block: str, section: models.MarkdownSection, part: Any) -> str:
     """
 
     def named(match: re.Match[str]) -> str:
-        image = _extracted(match.group(1), section, part)
+        image = _extracted(match.group(1), part)
         section.images.append(image)
         return f"![]({image.name})"
 
     return _PLACEHOLDER.sub(named, block)
 
 
-def _extracted(embed: str, section: models.MarkdownSection, part: Any) -> models.Image:
-    """One picture, named for where it sits and carrying the bytes of its part."""
+def _extracted(embed: str, part: Any) -> models.Image:
+    """One picture, named for what it holds and carrying the bytes of its part.
+
+    Takes no section: what a picture is called used to depend on where it sat, and
+    now depends on nothing but the bytes behind `embed`.
+    """
     source = part.related_parts[embed]
     name = _NAME.format(
-        number=section.number,
-        position=len(section.images) + 1,
+        digest=hashlib.sha256(source.blob).hexdigest(),
         extension=source.partname.ext,
     )
     return models.Image(
-        name=name, data=source.blob, content_type=str(source.content_type)
+        name=name, content_type=str(source.content_type), data=source.blob
     )
 
 
 def name_all(sections: list[models.MarkdownSection], part: Any) -> None:
-    """Name the pictures of every section, in document order.
+    """Name the pictures of every section.
 
-    Numbering is per section and starts at 1, so it depends on the sections being
-    resolved in the order they appear - which is the order they are built in.
+    A name depends on nothing but the picture's own bytes, so the order sections are
+    walked in does not affect the answer. They are still walked in document order,
+    because `section.images` records what a section holds and that list reads better
+    the way the page does.
     """
     for section in sections:
         section.content = resolved(section.content, section, part)

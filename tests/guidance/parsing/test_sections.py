@@ -499,7 +499,7 @@ class TestBookmarksACrossReferenceCanNameASectionBy:
 
         rendered = parser.parse_docx(docx_bytes(build)).markdown()
 
-        assert "[Payment](#2)" in rendered
+        assert "[Payment](#2-payment)" in rendered
 
     def test_a_cross_reference_to_an_annex_resolves_to_its_letter(
         self, docx_bytes, in_style
@@ -518,4 +518,4 @@ class TestBookmarksACrossReferenceCanNameASectionBy:
 
         rendered = parser.parse_docx(docx_bytes(build)).markdown()
 
-        assert "[Case types](#A)" in rendered
+        assert "[Case types](#annex-a---case-types)" in rendered
