@@ -93,8 +93,8 @@ def converts(mocker):
     return mocker.patch.object(
         router.service,
         "convert",
-        return_value=service.StoredGuide(
-            guide_id="01JBQ8",
+        return_value=service.StoredDocument(
+            document_id="01JBQ8",
             content="s3://managed-docs/guides/01JBQ8/content.md",
             assets="s3://managed-doc-assets/01JBQ8",
             title="CS Revenue Claims",

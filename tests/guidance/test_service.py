@@ -1,7 +1,8 @@
-"""Converting an uploaded document into a stored guide.
+"""Converting an uploaded document into a stored document.
 
 The object store is stubbed at its own boundary - `store.read` and `store.save` -
-rather than at boto3, because what these cases are about is which locations a guide
+rather than at boto3, because what these cases are about is which locations a
+document
 and its pictures are written to, and that is this module's decision. How a location
 is reached is tested in `documents/test_store_s3.py`.
 
@@ -26,11 +27,11 @@ def stored(mocker):
     """The store, answering with a document and recording what it was asked."""
     calls = {}
 
-    def save(document, guide, assets=None):
+    def save(document, document_url_prefix, assets_url_prefix):
         calls["document"] = document
-        calls["guide"] = guide
-        calls["assets"] = assets
-        return store.content_url(guide)
+        calls["into"] = document_url_prefix
+        calls["assets"] = assets_url_prefix
+        return store.content_url(document_url_prefix)
 
     mocker.patch.object(store, "read", return_value=b"a docx, as far as this knows")
     mocker.patch.object(store, "save", save)
@@ -45,19 +46,17 @@ def stored(mocker):
     return calls
 
 
-class TestWhereAConvertedGuideGoes:
+class TestWhereAConvertedDocumentGoes:
     def test_the_markdown_goes_to_the_managed_bucket_under_its_id(self, stored):
-        converted = service.convert(SOURCE, guide_id="01JBQ8")
+        converted = service.convert(SOURCE, document_id="01JBQ8")
 
-        assert stored["guide"] == (
-            "s3://rpa-ai-guidance-hub-managed-docs/guides/01JBQ8"
-        )
-        assert converted.content == f"{stored['guide']}/content.md"
+        assert stored["into"] == "s3://rpa-ai-guidance-hub-managed-docs/01JBQ8"
+        assert converted.content == f"{stored['into']}/content.md"
 
     def test_the_pictures_go_to_a_bucket_of_their_own(self, stored):
         """Which is why they are addressed absolutely: a relative path could not
         reach out of the document's own bucket."""
-        converted = service.convert(SOURCE, guide_id="01JBQ8")
+        converted = service.convert(SOURCE, document_id="01JBQ8")
 
         assert stored["assets"] == (
             "s3://rpa-ai-guidance-hub-managed-doc-assets/01JBQ8"
@@ -65,15 +64,15 @@ class TestWhereAConvertedGuideGoes:
         assert converted.assets == stored["assets"]
 
     @pytest.mark.usefixtures("stored")
-    def test_a_guide_given_no_id_is_given_one(self):
+    def test_a_document_given_no_id_is_given_one(self):
         first = service.convert(SOURCE)
         second = service.convert(SOURCE)
 
-        assert first.guide_id != second.guide_id
+        assert first.document_id != second.document_id
 
     @pytest.mark.usefixtures("stored")
     def test_what_was_converted_is_reported(self):
-        converted = service.convert(SOURCE, guide_id="01JBQ8")
+        converted = service.convert(SOURCE, document_id="01JBQ8")
 
         assert converted.title == "Claims"
         assert converted.sections == 1

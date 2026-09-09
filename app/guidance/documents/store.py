@@ -13,7 +13,7 @@ document says about itself do not change with the medium, so none of them are
 written down twice.
 
 Nothing here decides where a guide lives. Keeping one as `<base>/<id>` with its
-pictures in an `assets/` directory beside it is one arrangement, and `guide_url` and
+pictures in an `assets/` directory beside it is one arrangement, and `document_url` and
 `assets_url` compose it, but it is the caller's arrangement rather than this module's:
 pictures put in a bucket of their own are stored and read the same.
 
@@ -73,14 +73,14 @@ class UnsupportedSchemeError(ValueError):
     """Raised for a location this cannot reach."""
 
 
-def guide_url(base: str, guide_id: str) -> str:
-    """The URL of the guide `guide_id` names beneath `base`.
+def document_url(base: str, document_id: str) -> str:
+    """The URL of the document `document_id` names beneath `base`.
 
     A convenience for callers that keep guides as `<base>/<id>`, and the one place
     an id is escaped: the dev tooling names a guide after the document it converted,
     and those hold spaces - a `#` in one would truncate every URL built from it.
     """
-    return f"{_directory(base)}{_segment(guide_id)}"
+    return f"{_directory(base)}{_segment(document_id)}"
 
 
 def content_url(document_url_prefix: str) -> str:
