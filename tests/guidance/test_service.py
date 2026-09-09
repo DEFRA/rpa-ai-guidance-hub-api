@@ -60,20 +60,27 @@ class TestWhereAConvertedDocumentGoes:
 
         assert stored["assets"] == "../assets"
 
-    def test_and_that_resolves_to_the_documents_own_pictures(self, stored):  # noqa: ARG002
-        converted = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
+    def test_and_that_resolves_to_the_documents_own_pictures(self, stored):
+        """What the store is told to write to, resolved: one step above the version,
+        so it is the document's pictures and not this version's."""
+        service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
 
-        assert converted.assets == "s3://rpa-ai-guidance-hub-docs/01JBQ8/assets/"
+        assert store.assets_url(stored["into"], stored["assets"]) == (
+            "s3://rpa-ai-guidance-hub-docs/01JBQ8/assets/"
+        )
 
-    def test_two_versions_of_one_document_share_its_pictures(self, stored):  # noqa: ARG002
+    def test_two_versions_of_one_document_share_its_pictures(self, stored):
         """The whole reason the address is relative. A picture is named by the digest
         of its own bytes, so a second conversion rewrites the Markdown and writes not
         one image again."""
         first = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
+        where_first_put_them = store.assets_url(stored["into"], stored["assets"])
+
         second = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQA")
+        where_second_put_them = store.assets_url(stored["into"], stored["assets"])
 
         assert first.content != second.content
-        assert first.assets == second.assets
+        assert where_first_put_them == where_second_put_them
 
     @pytest.mark.usefixtures("stored")
     def test_a_document_given_no_id_is_given_one(self):

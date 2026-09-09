@@ -78,11 +78,18 @@ class NewDocument(pydantic.BaseModel):
 
 
 class Version(pydantic.BaseModel):
-    """One conversion: where its Markdown went, and who made it."""
+    """One conversion: where its Markdown went, and who made it.
+
+    The content URL is the whole of where. The pictures are named by the file itself,
+    in addresses relative to that URL, so anything holding it can reach them and a
+    second field pointing at them would be free to disagree with the file.
+
+    The title is a copy of what the stored document called itself when this version
+    was made, so that a list of versions reads as something a person can follow.
+    """
 
     id: str
-    content: str
-    assets: str
+    content_url: str = pydantic.Field(alias="contentUrl")
     title: str | None = None
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
@@ -91,10 +98,12 @@ class Version(pydantic.BaseModel):
 
 
 class Document(pydantic.BaseModel):
-    """A document as it is answered: what it is, and every version of it."""
+    """A document as it is answered: what it is, where it came from, and every
+    version of it there has been."""
 
     id: str
     metadata: dict[str, Any]
+    source: Source
     versions: list[Version]
 
 
@@ -108,9 +117,8 @@ def _version(record: dict[str, Any]) -> Version:
     return Version.model_validate(
         {
             "id": record["_id"],
-            "content": record["content"]["url"],
-            "assets": record["content"]["assets"],
-            "title": record["content"].get("title"),
+            "contentUrl": record["contentUrl"],
+            "title": record.get("title"),
             "createdBy": record.get("createdBy"),
             "createdAt": record["createdAt"],
         }
@@ -121,6 +129,7 @@ def _answer(document: dict[str, Any], versions: list[dict[str, Any]]) -> Documen
     return Document(
         id=document["_id"],
         metadata=document["metadata"],
+        source=Source.model_validate(document["source"]),
         versions=[_version(version) for version in versions],
     )
 
@@ -150,10 +159,10 @@ async def create_document(
     than once - a refresh, a back button, a retried request - and every one of those
     means the same version of the same document.
     """
-    already = await records.find_version_by_upload(database, new.source.upload_id)
+    already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
         response.status_code = fastapi.status.HTTP_200_OK
-        return await _answered(database, already[records.DOCUMENT_ID])
+        return await _answered(database, already["_id"])
 
     stored = await _converted(new.source.url)
 
@@ -169,17 +178,18 @@ async def create_document(
     # The document first: a document with no versions is a conversion that failed
     # half way, which is recoverable and legible. A version pointing at a document
     # that was never written is neither.
-    document = await records.create(database, stored.document_id, metadata=new.metadata)
+    document = await records.create(
+        database,
+        stored.document_id,
+        metadata=new.metadata,
+        source=new.source.model_dump(by_alias=True),
+    )
     version = await records.create_version(
         database,
         stored.version_id,
         document_id=stored.document_id,
-        source=new.source.model_dump(by_alias=True),
-        content={
-            "url": stored.content,
-            "assets": stored.assets,
-            "title": stored.title,
-        },
+        content_url=stored.content,
+        title=stored.title,
         created_by=new.created_by.model_dump(by_alias=True) if new.created_by else None,
     )
     response.headers["Location"] = f"/guides/{stored.document_id}"
@@ -210,7 +220,7 @@ async def read_content(document_id: str, database: Database) -> str:
             detail=f"No guide {document_id}",
         )
 
-    content = await run_in_threadpool(store.read, version["content"]["url"])
+    content = await run_in_threadpool(store.read, version["contentUrl"])
     if content is None:
         # The record points at something that is not there: a version half-deleted,
         # or a bucket emptied under it. Not a 404, which would say the document does
