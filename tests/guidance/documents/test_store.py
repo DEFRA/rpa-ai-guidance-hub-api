@@ -27,6 +27,9 @@ PNG = b"\x89PNG\r\n\x1a\n"
 # A cross-reference's target, as the stored document writes it.
 _LINK = re.compile(r"\]\((#[^)]*)\)")
 
+# Where a stored document says one of its pictures is.
+_IMAGE_SRC = re.compile(r"!\[[^\]]*\]\(([^)]*)\)")
+
 
 def _picture(name: str = "a3f9.png", data: bytes | None = PNG) -> models.Image:
     return models.Image(name=name, content_type="image/png", data=data)
@@ -102,7 +105,7 @@ class TestSaving:
         assert loaded is not None
         store.save(loaded, _guide(tmp_path))
 
-        assert store.load_asset(_guide(tmp_path), "a3f9.png") == PNG
+        assert store.read(store.asset_url(_guide(tmp_path), "a3f9.png")) == PNG
 
     def test_a_guide_can_be_stored_beside_another(self, tmp_path):
         store.save(_document(_picture()), _guide(tmp_path))
@@ -136,7 +139,7 @@ class TestWhereAGuideLives:
         referenced = urljoin(store.content_url(guide), f"{store.ASSET_PREFIX}a3f9.png")
 
         assert referenced == store.asset_url(guide, "a3f9.png")
-        assert store.load_asset(guide, "a3f9.png") == PNG
+        assert store.read(store.asset_url(guide, "a3f9.png")) == PNG
 
     def test_a_url_that_already_ends_in_a_slash_does_not_gain_another(self, tmp_path):
         guide = _guide(tmp_path)
@@ -146,8 +149,11 @@ class TestWhereAGuideLives:
     def test_a_scheme_this_store_cannot_reach_says_so(self):
         """Naming the schemes it does speak, because writing the wrong URL is a
         configuration mistake and the fix is to write a different one."""
-        with pytest.raises(store.UnsupportedSchemeError, match="file://"):
-            store.load("s3://a-bucket/guides/01JBQ8")
+        with pytest.raises(store.UnsupportedSchemeError) as refused:
+            store.load("https://example.org/guides/01JBQ8")
+
+        assert "file://" in str(refused.value)
+        assert "s3://" in str(refused.value)
 
     def test_composing_a_guide_url_escapes_the_id(self, tmp_path):
         """The one place an id is escaped. The dev tooling names a guide after the
@@ -174,6 +180,59 @@ class TestWhereAGuideLives:
         assert (spaced / GUIDE / "content.md").is_file()
 
 
+class TestWhereThePicturesGo:
+    """`assets` says both where the pictures are written and how the stored
+    document addresses them, because those must be the same answer."""
+
+    def test_by_default_a_guide_keeps_its_pictures_beside_itself(self, tmp_path):
+        guide = _guide(tmp_path)
+
+        store.save(_document(_picture()), guide)
+
+        stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
+        assert "![](assets/a3f9.png)" in stored
+        assert (tmp_path / GUIDE / "assets" / "a3f9.png").is_file()
+
+    def test_pictures_can_be_kept_somewhere_of_their_own(self, tmp_path):
+        """A bucket of their own, in the service. The document then names them
+        absolutely, and the picture is written where it is named."""
+        guide = _guide(tmp_path)
+        assets = (tmp_path / "elsewhere").as_uri()
+
+        store.save(_document(_picture()), guide, assets)
+
+        stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
+        assert f"![]({assets}/a3f9.png)" in stored
+        assert (tmp_path / "elsewhere" / "a3f9.png").read_bytes() == PNG
+        assert not (tmp_path / GUIDE / "assets").exists()
+
+    def test_a_document_addressing_its_pictures_absolutely_needs_nothing_told_to_it(
+        self, tmp_path
+    ):
+        """The whole reason to write absolute addresses: the file describes itself,
+        so reading it back does not depend on knowing where it was written for."""
+        guide = _guide(tmp_path)
+        assets = (tmp_path / "elsewhere").as_uri()
+        store.save(_document(_picture()), guide, assets)
+
+        loaded = store.load(guide)
+
+        assert loaded is not None
+        assert [image.name for image in loaded.images] == ["a3f9.png"]
+
+    def test_the_address_the_document_gives_is_the_one_that_answers(self, tmp_path):
+        """Following the URL in the file reaches the picture, with nothing working
+        out where it ought to have been."""
+        guide = _guide(tmp_path)
+        assets = (tmp_path / "elsewhere").as_uri()
+        store.save(_document(_picture()), guide, assets)
+
+        stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
+        addressed = _IMAGE_SRC.search(stored).group(1)
+
+        assert store.read(addressed) == PNG
+
+
 class TestLoading:
     def test_a_guide_comes_back_as_the_model_that_wrote_it(self, tmp_path):
         store.save(_document(_picture()), _guide(tmp_path))
@@ -197,10 +256,10 @@ class TestLoading:
 
         assert loaded is not None
         assert loaded.images[0].data is None
-        assert store.load_asset(_guide(tmp_path), "a3f9.png") == b"the bytes"
+        assert store.read(store.asset_url(_guide(tmp_path), "a3f9.png")) == b"the bytes"
 
     def test_asking_for_a_picture_that_is_not_there(self, tmp_path):
-        assert store.load_asset(_guide(tmp_path), "missing.png") is None
+        assert store.read(store.asset_url(_guide(tmp_path), "missing.png")) is None
 
 
 class TestTheRoundTrip:

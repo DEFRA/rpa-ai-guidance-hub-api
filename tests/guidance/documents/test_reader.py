@@ -20,7 +20,7 @@ PREFIX = "s3://assets/01JBQ8/"
 
 def _round_trip(document: models.MarkdownDocument) -> models.MarkdownDocument:
     """The document read back out of its own rendering."""
-    return reader.from_markdown(document.markdown(PREFIX), PREFIX)
+    return reader.from_markdown(document.markdown(PREFIX))
 
 
 def _document(
@@ -203,8 +203,8 @@ class TestTables:
         document = _document(models.MarkdownSection(heading="Rates", content=content))
 
         first = document.markdown(PREFIX)
-        second = reader.from_markdown(first, PREFIX).markdown(PREFIX)
-        third = reader.from_markdown(second, PREFIX).markdown(PREFIX)
+        second = reader.from_markdown(first).markdown(PREFIX)
+        third = reader.from_markdown(second).markdown(PREFIX)
 
         assert first == second == third
 
@@ -275,4 +275,4 @@ class TestCrossReferences:
 
         once = document.markdown(PREFIX)
 
-        assert reader.from_markdown(once, PREFIX).markdown(PREFIX) == once
+        assert reader.from_markdown(once).markdown(PREFIX) == once

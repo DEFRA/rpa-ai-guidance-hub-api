@@ -101,7 +101,7 @@ def missing_assets(document: models.MarkdownDocument, guide: str) -> list[str]:
     return [
         image.name
         for image in document.images
-        if store.load_asset(guide, image.name) is None
+        if store.read(store.asset_url(guide, image.name)) is None
     ]
 
 
