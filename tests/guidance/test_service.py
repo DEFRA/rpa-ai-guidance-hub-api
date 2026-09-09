@@ -47,21 +47,33 @@ def stored(mocker):
 
 
 class TestWhereAConvertedDocumentGoes:
-    def test_the_markdown_goes_to_the_managed_bucket_under_its_id(self, stored):
-        converted = service.convert(SOURCE, document_id="01JBQ8")
+    def test_the_markdown_goes_under_the_document_and_then_its_version(self, stored):
+        converted = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
 
-        assert stored["into"] == "s3://rpa-ai-guidance-hub-managed-docs/01JBQ8"
+        assert stored["into"] == "s3://rpa-ai-guidance-hub-docs/01JBQ8/01JBQ9"
         assert converted.content == f"{stored['into']}/content.md"
 
-    def test_the_pictures_go_to_a_bucket_of_their_own(self, stored):
-        """Which is why they are addressed absolutely: a relative path could not
-        reach out of the document's own bucket."""
-        converted = service.convert(SOURCE, document_id="01JBQ8")
+    def test_the_document_is_told_to_call_its_pictures_relatively(self, stored):
+        """A version says `../assets`, which resolves one step up - to the document.
+        Absolute would name this version, and the pictures are not this version's."""
+        service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
 
-        assert stored["assets"] == (
-            "s3://rpa-ai-guidance-hub-managed-doc-assets/01JBQ8"
-        )
-        assert converted.assets == stored["assets"]
+        assert stored["assets"] == "../assets"
+
+    def test_and_that_resolves_to_the_documents_own_pictures(self, stored):  # noqa: ARG002
+        converted = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
+
+        assert converted.assets == "s3://rpa-ai-guidance-hub-docs/01JBQ8/assets/"
+
+    def test_two_versions_of_one_document_share_its_pictures(self, stored):  # noqa: ARG002
+        """The whole reason the address is relative. A picture is named by the digest
+        of its own bytes, so a second conversion rewrites the Markdown and writes not
+        one image again."""
+        first = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
+        second = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQA")
+
+        assert first.content != second.content
+        assert first.assets == second.assets
 
     @pytest.mark.usefixtures("stored")
     def test_a_document_given_no_id_is_given_one(self):
@@ -69,6 +81,13 @@ class TestWhereAConvertedDocumentGoes:
         second = service.convert(SOURCE)
 
         assert first.document_id != second.document_id
+
+    @pytest.mark.usefixtures("stored")
+    def test_a_version_given_no_id_is_given_one(self):
+        first = service.convert(SOURCE, document_id="01JBQ8")
+        second = service.convert(SOURCE, document_id="01JBQ8")
+
+        assert first.version_id != second.version_id
 
     @pytest.mark.usefixtures("stored")
     def test_what_was_converted_is_reported(self):

@@ -88,27 +88,57 @@ def content_url(document_url_prefix: str) -> str:
     return f"{_directory(document_url_prefix)}{_CONTENT}"
 
 
+def resolved(base: str, reference: str) -> str:
+    """The address a reference inside a stored document points at.
+
+    A stored document says `../assets/a3f9.png`, and a Markdown reader resolves that
+    against the document's own URL. An object store does not: `s3://` has no notion
+    of a relative key, and a `..` handed to it is a literal segment in a name, so
+    every reference has to become an address before anything can be fetched. This is
+    the one place that happens, which is what lets a picture be read by the address
+    the document gives whatever form the document gave it in.
+
+    `base` is a document's own URL and is resolved against the way every reader of a
+    URL resolves one: against everything up to its last `/`. So the address a record
+    keeps - the `content.md` itself - resolves as the file's own reader would, and a
+    base already naming a directory is used as it stands.
+
+    An absolute reference is already an address and is answered unchanged.
+    """
+    if urllib.parse.urlsplit(reference).scheme:
+        return reference
+
+    against = urllib.parse.urlsplit(f"{_within(base)}{reference}")
+
+    return urllib.parse.urlunsplit(
+        against._replace(path=posixpath.normpath(against.path))
+    )
+
+
+def _within(url: str) -> str:
+    """The neighbourhood `url` sits in: everything up to and including its last `/`.
+
+    Taken off the path rather than the whole URL, so that the `//` in a scheme is
+    never mistaken for the separator being looked for.
+    """
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path
+
+    return urllib.parse.urlunsplit(
+        parts._replace(path=path[: path.rindex("/") + 1] if "/" in path else "/")
+    )
+
+
 def assets_url(document_url_prefix: str, assets_url_prefix: str) -> str:
-    """Where a guide's pictures actually go.
+    """Where a document's pictures actually go.
 
     A relative assets prefix is an address in the document rather than a place: it
     says where the pictures are *from the document*, so the document's own URL is
-    what turns it into somewhere to write. An absolute one already names its place
-    and is answered unchanged.
-
-    The path is normalised, so a prefix written the way a document would write it -
-    `./assets`, or `../shared` for pictures a sibling guide also draws - names the
-    same location as the plain form rather than a directory with a dot in its name.
+    what turns it into somewhere to write. `../assets` is what keeps one set of
+    pictures shared between every version of a document, each of which is written
+    beneath the same document but under a version of its own.
     """
-    if urllib.parse.urlsplit(assets_url_prefix).scheme:
-        return _directory(assets_url_prefix)
-
-    beneath = urllib.parse.urlsplit(
-        f"{_directory(document_url_prefix)}{assets_url_prefix}"
-    )
-    resolved = beneath._replace(path=posixpath.normpath(beneath.path))
-
-    return _directory(urllib.parse.urlunsplit(resolved))
+    return _directory(resolved(_directory(document_url_prefix), assets_url_prefix))
 
 
 def asset_url(document_url_prefix: str, assets_url_prefix: str, name: str) -> str:
