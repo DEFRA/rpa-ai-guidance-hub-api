@@ -41,10 +41,10 @@ class SourceMissingError(LookupError):
 
 
 @dataclass(frozen=True)
-class StoredGuide:
+class StoredDocument:
     """Where a converted guide went, and what it turned out to be."""
 
-    guide_id: str
+    document_id: str
     content: str
     assets: str
     title: str
@@ -52,7 +52,7 @@ class StoredGuide:
     images: int
 
 
-def convert(source_url: str, guide_id: str | None = None) -> StoredGuide:
+def convert(source_url: str, document_id: str | None = None) -> StoredDocument:
     """Convert the .docx at `source_url` into a stored guide.
 
     Takes the URL cdp-uploader's status reports rather than a bucket and a key,
@@ -74,13 +74,15 @@ def convert(source_url: str, guide_id: str | None = None) -> StoredGuide:
 
     document = parser.parse_docx(source)
 
-    guide_id = guide_id or str(uuid.uuid4())
-    guide = store.guide_url(f"s3://{settings.managed_docs_s3_bucket}/guides", guide_id)
-    assets = store.guide_url(f"s3://{settings.managed_doc_assets_s3_bucket}", guide_id)
+    document_id = document_id or str(uuid.uuid4())
+    into = store.document_url(f"s3://{settings.managed_docs_s3_bucket}", document_id)
+    assets = store.document_url(
+        f"s3://{settings.managed_doc_assets_s3_bucket}", document_id
+    )
 
-    return StoredGuide(
-        guide_id=guide_id,
-        content=store.save(document, guide, assets),
+    return StoredDocument(
+        document_id=document_id,
+        content=store.save(document, into, assets),
         assets=assets,
         title=document.title,
         sections=len(document.sections),

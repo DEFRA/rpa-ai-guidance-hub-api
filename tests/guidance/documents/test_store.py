@@ -52,9 +52,9 @@ def _elsewhere(tmp_path: Path) -> str:
     return f"{tmp_path.as_uri()}/pictures"
 
 
-def _guide(tmp_path: Path, guide_id: str = GUIDE) -> str:
+def _guide(tmp_path: Path, document_id: str = GUIDE) -> str:
     """The URL of a guide kept under `tmp_path`, as a caller would compose it."""
-    return store.guide_url(tmp_path.as_uri(), guide_id)
+    return store.document_url(tmp_path.as_uri(), document_id)
 
 
 def _save(document: models.MarkdownDocument, guide: str) -> str:
@@ -175,12 +175,14 @@ class TestWhereAGuideLives:
         every URL built from it."""
         base = tmp_path.as_uri()
 
-        assert store.guide_url(base, "CS Revenue 2026") == f"{base}/CS%20Revenue%202026"
+        assert (
+            store.document_url(base, "CS Revenue 2026") == f"{base}/CS%20Revenue%202026"
+        )
 
-        _save(_document(), store.guide_url(base, "CS Revenue 2026"))
+        _save(_document(), store.document_url(base, "CS Revenue 2026"))
 
         assert (tmp_path / "CS Revenue 2026" / "content.md").is_file()
-        assert store.load(store.guide_url(base, "CS Revenue 2026")) is not None
+        assert store.load(store.document_url(base, "CS Revenue 2026")) is not None
 
     def test_a_url_escaping_a_character_a_path_may_hold_is_unescaped(self, tmp_path):
         """A guide's directory is named by whatever minted its id, and a URL escapes
@@ -189,7 +191,7 @@ class TestWhereAGuideLives:
         spaced = tmp_path / "with a space"
         spaced.mkdir()
 
-        _save(_document(), store.guide_url(spaced.as_uri(), GUIDE))
+        _save(_document(), store.document_url(spaced.as_uri(), GUIDE))
 
         assert (spaced / GUIDE / "content.md").is_file()
 

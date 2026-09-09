@@ -46,7 +46,7 @@ class Source(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
 
-class NewGuide(pydantic.BaseModel):
+class NewDocument(pydantic.BaseModel):
     """A converted document and what its author said about it."""
 
     source: Source
@@ -56,7 +56,7 @@ class NewGuide(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
 
-class Guide(pydantic.BaseModel):
+class Document(pydantic.BaseModel):
     """A guide as it is answered: what it is, and where its content went."""
 
     id: str
@@ -66,8 +66,8 @@ class Guide(pydantic.BaseModel):
     metadata: dict[str, Any]
 
 
-def _answer(record: dict[str, Any]) -> Guide:
-    return Guide(
+def _answer(record: dict[str, Any]) -> Document:
+    return Document(
         id=record["_id"],
         title=record["content"].get("title"),
         content=record["content"]["url"],
@@ -77,9 +77,9 @@ def _answer(record: dict[str, Any]) -> Guide:
 
 
 @router.post("", status_code=fastapi.status.HTTP_201_CREATED)
-async def create_guide(
-    new: NewGuide, database: Database, response: fastapi.Response
-) -> Guide:
+async def create_document(
+    new: NewDocument, database: Database, response: fastapi.Response
+) -> Document:
     """Convert an uploaded document and record the guide it becomes.
 
     Converting the same upload twice answers the guide it made the first time,
@@ -111,14 +111,14 @@ async def create_guide(
     logger.info(
         "Converted %s into guide %s: %d sections, %d images",
         new.source.url,
-        stored.guide_id,
+        stored.document_id,
         stored.sections,
         stored.images,
     )
 
     record = await records.create(
         database,
-        stored.guide_id,
+        stored.document_id,
         metadata=new.metadata,
         source=new.source.model_dump(by_alias=True),
         content={
@@ -128,36 +128,38 @@ async def create_guide(
         },
         created_by=new.created_by,
     )
-    response.headers["Location"] = f"/guides/{stored.guide_id}"
+    response.headers["Location"] = f"/guides/{stored.document_id}"
     return _answer(record)
 
 
-@router.get("/{guide_id}")
-async def read_guide(guide_id: str, database: Database) -> Guide:
+@router.get("/{document_id}")
+async def read_document(document_id: str, database: Database) -> Document:
     """One guide: what it is, and where its content is."""
-    record = await records.find(database, guide_id)
+    record = await records.find(database, document_id)
     if record is None:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_404_NOT_FOUND,
-            detail=f"No guide {guide_id}",
+            detail=f"No guide {document_id}",
         )
 
     return _answer(record)
 
 
-@router.get("/{guide_id}/content", response_class=fastapi.responses.PlainTextResponse)
-async def read_content(guide_id: str, database: Database) -> str:
+@router.get(
+    "/{document_id}/content", response_class=fastapi.responses.PlainTextResponse
+)
+async def read_content(document_id: str, database: Database) -> str:
     """A guide's Markdown, as it is stored.
 
     Answered as it was written rather than re-rendered: the stored file addresses
     its pictures absolutely, so what a reader gets here needs nothing else to make
     sense of it.
     """
-    record = await records.find(database, guide_id)
+    record = await records.find(database, document_id)
     if record is None:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_404_NOT_FOUND,
-            detail=f"No guide {guide_id}",
+            detail=f"No guide {document_id}",
         )
 
     content = await run_in_threadpool(store.read, record["content"]["url"])
@@ -166,7 +168,7 @@ async def read_content(guide_id: str, database: Database) -> str:
         # a bucket emptied under it. Not a 404 for the guide, which does exist.
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_502_BAD_GATEWAY,
-            detail=f"Guide {guide_id} is recorded but its content is missing",
+            detail=f"Document {document_id} is recorded but its content is missing",
         )
 
     return content.decode("utf-8")

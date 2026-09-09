@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
 
-COLLECTION = "guides"
+COLLECTION = "documents"
 
 # The upload a guide was converted from, and the only thing that says two requests
 # mean the same guide.
@@ -49,18 +49,18 @@ async def find_by_upload(
 
 
 async def find(
-    database: pymongo.asynchronous.database.AsyncDatabase, guide_id: str
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: str
 ) -> dict[str, Any] | None:
     """One guide by its id."""
     found: dict[str, Any] | None = await database[COLLECTION].find_one(
-        {"_id": guide_id}
+        {"_id": document_id}
     )
     return found
 
 
 async def create(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    guide_id: str,
+    document_id: str,
     *,
     metadata: dict[str, Any],
     source: dict[str, Any],
@@ -69,7 +69,7 @@ async def create(
 ) -> dict[str, Any]:
     """Record a converted guide, answering the record as it was written."""
     record = {
-        "_id": guide_id,
+        "_id": document_id,
         "metadata": metadata,
         "source": source,
         "content": content,
