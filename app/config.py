@@ -4,6 +4,8 @@ from typing import Annotated
 import pydantic
 import pydantic_settings
 
+from app.reference import models as reference_models
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +77,34 @@ def _parse_bedrock_model_config(v: str) -> BedrockModelConfig:
         raise ValueError(msg) from e
 
 
+def _parse_reference_options(v: str) -> list[reference_models.ReferenceOption]:
+    """Parse a packed 'value1:Label One,value2:Label Two' string.
+
+    Expected format: comma-separated entries, each 'value:label'.
+    """
+    if not isinstance(v, str):
+        msg = "Reference option list must be a string in the format 'value1:Label One,value2:Label Two'"
+        raise ValueError(msg)
+
+    if not v.strip():
+        msg = "Reference option list must contain at least one entry"
+        raise ValueError(msg)
+
+    options = []
+
+    for entry in v.split(","):
+        (value, separator, label) = entry.partition(":")
+        value, label = value.strip(), label.strip()
+
+        if not separator or not value or not label:
+            msg = f"invalid reference option entry {entry.strip()!r}; expected 'value:label'"
+            raise ValueError(msg)
+
+        options.append(reference_models.ReferenceOption(value=value, label=label))
+
+    return options
+
+
 class AppConfig(pydantic_settings.BaseSettings):
     model_config = pydantic_settings.SettingsConfigDict()
     python_env: str | None = None
@@ -94,6 +124,18 @@ class AppConfig(pydantic_settings.BaseSettings):
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode
     ] = pydantic.Field(..., validation_alias="CLAUDE_SONNET_MODEL_CONFIG")
+    reference_schemes: Annotated[
+        list[reference_models.ReferenceOption], pydantic_settings.NoDecode
+    ] = pydantic.Field(..., validation_alias="REFERENCE_SCHEMES")
+    reference_audiences: Annotated[
+        list[reference_models.ReferenceOption], pydantic_settings.NoDecode
+    ] = pydantic.Field(..., validation_alias="REFERENCE_AUDIENCES")
+    reference_systems: Annotated[
+        list[reference_models.ReferenceOption], pydantic_settings.NoDecode
+    ] = pydantic.Field(..., validation_alias="REFERENCE_SYSTEMS")
+    reference_guidance_types: Annotated[
+        list[reference_models.ReferenceOption], pydantic_settings.NoDecode
+    ] = pydantic.Field(..., validation_alias="REFERENCE_GUIDANCE_TYPES")
 
     @pydantic.field_validator("claude_sonnet_model_config", mode="before")
     @classmethod
@@ -101,6 +143,19 @@ class AppConfig(pydantic_settings.BaseSettings):
         cls: type[AppConfig], v: str
     ) -> BedrockModelConfig:
         return _parse_bedrock_model_config(v)
+
+    @pydantic.field_validator(
+        "reference_schemes",
+        "reference_audiences",
+        "reference_systems",
+        "reference_guidance_types",
+        mode="before",
+    )
+    @classmethod
+    def validate_reference_options(
+        cls: type[AppConfig], v: str
+    ) -> list[reference_models.ReferenceOption]:
+        return _parse_reference_options(v)
 
     @pydantic.computed_field  # type: ignore[misc]
     def bedrock(self) -> BedrockConfig:
