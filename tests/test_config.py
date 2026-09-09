@@ -117,16 +117,15 @@ class TestParseReferenceOptions:
             "basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific"
         )
 
-        assert parsed[0].value == "basic-payment-scheme"
-        assert parsed[0].label == "Basic Payment Scheme"
-        assert parsed[1].value == "not-specific"
-        assert parsed[1].label == "Not scheme-specific"
+        assert parsed == [
+            {"value": "basic-payment-scheme", "label": "Basic Payment Scheme"},
+            {"value": "not-specific", "label": "Not scheme-specific"},
+        ]
 
     def test_strips_whitespace_around_each_part(self):
         parsed = config._parse_reference_options("  siti-agri : Siti Agri  ")
 
-        assert parsed[0].value == "siti-agri"
-        assert parsed[0].label == "Siti Agri"
+        assert parsed == [{"value": "siti-agri", "label": "Siti Agri"}]
 
     def test_rejects_non_string_input(self):
         with pytest.raises(ValueError, match="must be a string"):
@@ -193,10 +192,19 @@ class TestAppConfig:
             **VALID_REFERENCE_KWARGS,
         )
 
-        assert cfg.reference_schemes[0].value == "basic-payment-scheme"
-        assert cfg.reference_audiences[0].value == "caseworker"
-        assert cfg.reference_systems[0].value == "siti-agri"
-        assert cfg.reference_guidance_types[0].value == "process-guide"
+        assert cfg.reference_schemes[0] == {
+            "value": "basic-payment-scheme",
+            "label": "Basic Payment Scheme",
+        }
+        assert cfg.reference_audiences[0] == {
+            "value": "caseworker",
+            "label": "Caseworker",
+        }
+        assert cfg.reference_systems[0] == {"value": "siti-agri", "label": "Siti Agri"}
+        assert cfg.reference_guidance_types[0] == {
+            "value": "process-guide",
+            "label": "Process guide",
+        }
 
 
 @pytest.mark.usefixtures("unset_config_singleton")
