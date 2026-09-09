@@ -3,13 +3,29 @@
 Two collections, because two different things change at two different rates.
 
 `documents` holds what a document *is* to the people using it - the title an author
-typed, who it is for, who owns it. None of that is a property of any one conversion,
-and re-converting must not disturb it.
+typed, who it is for, who owns it - and where it came from. The upload is the
+document's own: one .docx became one document, and every version after the first is
+an edit of that rather than another upload of it.
 
-`document_versions` holds what a conversion produced: where the Markdown went, the
-upload it came from, and who was signed in when it was made. One document has many,
-and the newest is only the newest by `createdAt` - a version id is a uuid and says
-nothing about order.
+`document_versions` holds what one conversion produced: where its Markdown went, and
+who was signed in when it was made. One document has many, and the newest is only the
+newest by `createdAt` - a version id is a uuid and says nothing about order.
+
+**A version records its content URL and nothing else about where it is.** That URL is
+enough to restore the document, and the pictures are named by the document itself, in
+addresses relative to that very URL - so a second field pointing at them would be a
+copy of something the file already says, free to disagree with it.
+
+The title is the exception, and deliberately so. It is copied out of the document the
+version stored, and reading a version back takes the title from the content rather
+than from here - so this field is never the answer to "what is it called?". What it
+answers is "what was it called *then*", which nothing else can: a document retitled
+between versions leaves a trail here, and the copy differing from the content is the
+whole of the information rather than a fault in it.
+
+The ids are the ones the object store uses. `documents._id` is the prefix a document
+is written under and a version's `_id` is the prefix beneath that, so a record and a
+key are two spellings of one address rather than two facts to keep in step.
 
 **An owner and a version's creator are not the same thing and are not stored
 together.** An owner is metadata: a person or a team named on the form, possibly
@@ -36,8 +52,8 @@ if TYPE_CHECKING:
 DOCUMENTS = "documents"
 VERSIONS = "document_versions"
 
-# The upload a version was converted from, and the only thing that says two requests
-# mean the same version.
+# The upload a document was converted from, and the only thing that says two requests
+# mean the same document.
 _UPLOAD_ID = "source.uploadId"
 
 # The document a version belongs to: the many end of the one-to-many. Public because
@@ -58,15 +74,15 @@ async def ensure_indexes(
     only appears once something has been written is an index that was not there for
     whatever raced it.
     """
-    await database[VERSIONS].create_index(_UPLOAD_ID, unique=True)
+    await database[DOCUMENTS].create_index(_UPLOAD_ID, unique=True)
     await database[VERSIONS].create_index([(DOCUMENT_ID, 1), *_NEWEST])
 
 
-async def find_version_by_upload(
+async def find_by_upload(
     database: pymongo.asynchronous.database.AsyncDatabase, upload_id: str
 ) -> dict[str, Any] | None:
-    """The version already converted from `upload_id`, if there is one."""
-    found: dict[str, Any] | None = await database[VERSIONS].find_one(
+    """The document already converted from `upload_id`, if there is one."""
+    found: dict[str, Any] | None = await database[DOCUMENTS].find_one(
         {_UPLOAD_ID: upload_id}
     )
     return found
@@ -110,8 +126,11 @@ async def create(
     document_id: str,
     *,
     metadata: dict[str, Any],
+    source: dict[str, Any],
 ) -> dict[str, Any]:
     """Record a document, answering the record as it was written.
+
+    `document_id` is the prefix the document is stored under, not an id minted here.
 
     `metadata` is what the journey collected, owners included: this service does not
     interpret it, because what an author is asked about a document is a question for
@@ -120,6 +139,7 @@ async def create(
     record = {
         "_id": document_id,
         "metadata": metadata,
+        "source": source,
         "createdAt": dt.datetime.now(tz=dt.UTC),
     }
     await database[DOCUMENTS].insert_one(record)
@@ -131,11 +151,18 @@ async def create_version(
     version_id: str,
     *,
     document_id: str,
-    source: dict[str, Any],
-    content: dict[str, Any],
+    content_url: str,
+    title: str | None = None,
     created_by: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record one version of a document, answering the record as it was written.
+
+    `version_id` is the prefix this version was stored under, and `content_url` names
+    the file inside it - the whole of what is needed to read the version back.
+
+    `title` is the document's own title as this version had it, kept so a person can
+    see what a version was called without fetching it. See the module docstring for
+    why a copy is the point here and would be a fault anywhere else.
 
     `created_by` is who was signed in, not who owns the document - see the module
     docstring. It is optional because the endpoint is not yet authenticated, and a
@@ -144,8 +171,8 @@ async def create_version(
     record = {
         "_id": version_id,
         DOCUMENT_ID: document_id,
-        "source": source,
-        "content": content,
+        "contentUrl": content_url,
+        "title": title,
         "createdBy": created_by,
         "createdAt": dt.datetime.now(tz=dt.UTC),
     }

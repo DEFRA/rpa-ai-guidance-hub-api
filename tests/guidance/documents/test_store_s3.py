@@ -130,9 +130,7 @@ class TestStoringAGuideInABucket:
 
         store.save(document, GUIDE, assets)
 
-        picture = next(
-            put for put in fake.puts if put["Bucket"] == "other-docs"
-        )
+        picture = next(put for put in fake.puts if put["Bucket"] == "other-docs")
         stored = next(put for put in fake.puts if put["Bucket"] == "docs")
         assert picture["Key"] == "01JBQ8/a3f9.png"
         assert f"![]({assets}/a3f9.png)".encode() in stored["Body"]

@@ -27,7 +27,10 @@ KEY = f"{UPLOAD}/{FILE}"
 DOCUMENT = "01JBQ8"
 VERSION = "01JBQ9"
 CONTENT = f"s3://rpa-ai-guidance-hub-docs/{DOCUMENT}/{VERSION}/content.md"
-ASSETS = f"s3://rpa-ai-guidance-hub-docs/{DOCUMENT}/assets/"
+
+# What the stored document calls itself, which is not what the author typed on the
+# form: one is the cover of the .docx, the other is METADATA["title"].
+COVER_TITLE = "CS Revenue Claims Processing to Final Payment Guide"
 
 METADATA = {
     "guidanceType": "process",
@@ -161,8 +164,7 @@ def converts(mocker):
             document_id=DOCUMENT,
             version_id=VERSION,
             content=CONTENT,
-            assets=ASSETS,
-            title="CS Revenue Claims",
+            title=COVER_TITLE,
             sections=23,
             images=45,
         ),
@@ -187,8 +189,7 @@ class TestCreatingADocument:
         assert response.status_code == 201
         assert response.json()["id"] == DOCUMENT
         assert [version["id"] for version in response.json()["versions"]] == [VERSION]
-        assert response.json()["versions"][0]["content"] == CONTENT
-        assert response.json()["versions"][0]["assets"] == ASSETS
+        assert response.json()["versions"][0]["contentUrl"] == CONTENT
 
     def test_where_the_document_can_be_read_from_afterwards(self, client):
         response = client.post("/guides", json=_request())
@@ -205,6 +206,7 @@ class TestCreatingADocument:
         record = documents.documents[0]
         assert record["_id"] == DOCUMENT
         assert record["metadata"] == METADATA
+        assert record["source"]["uploadId"] == UPLOAD
         assert "createdAt" in record
 
     def test_where_the_content_went_is_recorded_against_the_version(
@@ -215,9 +217,36 @@ class TestCreatingADocument:
         record = versions.documents[0]
         assert record["_id"] == VERSION
         assert record[records.DOCUMENT_ID] == DOCUMENT
-        assert record["source"]["uploadId"] == UPLOAD
-        assert record["content"]["url"] == CONTENT
+        assert record["contentUrl"] == CONTENT
         assert "createdAt" in record
+        assert "source" not in record
+
+    def test_what_the_document_called_itself_is_kept_beside_the_version(
+        self, client, versions
+    ):
+        """A copy of the stored document's own title, so a list of versions reads as
+        something a person can follow. Reading a version back takes the title from the
+        content; this is what it was called *then*, which nothing else records."""
+        client.post("/guides", json=_request())
+
+        assert versions.documents[0]["title"] == COVER_TITLE
+        assert versions.documents[0]["title"] != METADATA["title"]
+
+    def test_the_ids_are_the_ones_the_object_store_used(
+        self, client, documents, versions
+    ):
+        """A record and a key are two spellings of one address. The document's id is
+        the prefix it was written under and the version's id is the prefix beneath
+        that, so a content URL can be read straight off the pair."""
+        client.post("/guides", json=_request())
+
+        document_id = documents.documents[0]["_id"]
+        version_id = versions.documents[0]["_id"]
+
+        assert versions.documents[0][records.DOCUMENT_ID] == document_id
+        assert versions.documents[0]["contentUrl"] == (
+            f"s3://rpa-ai-guidance-hub-docs/{document_id}/{version_id}/content.md"
+        )
 
     def test_who_was_signed_in_is_recorded_against_the_version(self, client, versions):
         """The version's creator, which the document's owners are not: one is who

@@ -62,7 +62,6 @@ class StoredDocument:
     document_id: str
     version_id: str
     content: str
-    assets: str
     title: str
     sections: int
     images: int
@@ -104,7 +103,6 @@ def convert(
         document_id=document_id,
         version_id=version_id,
         content=store.save(document, into, _ASSETS),
-        assets=store.assets_url(into, _ASSETS),
         title=document.title,
         sections=len(document.sections),
         images=len(document.images),
