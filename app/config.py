@@ -92,13 +92,9 @@ class AppConfig(pydantic_settings.BaseSettings):
         default="rpa-ai-guidance-hub-source-docs",
         description="Bucket cdp-uploader delivers an uploaded .docx to",
     )
-    managed_docs_s3_bucket: str = pydantic.Field(
-        default="rpa-ai-guidance-hub-managed-docs",
-        description="Bucket a converted guide's Markdown is stored in",
-    )
-    managed_doc_assets_s3_bucket: str = pydantic.Field(
-        default="rpa-ai-guidance-hub-managed-doc-assets",
-        description="Bucket the pictures a converted guide draws are stored in",
+    docs_s3_bucket: str = pydantic.Field(
+        default="rpa-ai-guidance-hub-docs",
+        description="Bucket a converted document and its pictures are stored in",
     )
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False

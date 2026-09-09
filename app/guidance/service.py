@@ -1,15 +1,24 @@
-"""Turning an uploaded .docx into a stored guide.
+"""Turning an uploaded .docx into a stored version of a document.
 
 One operation, in the order the pieces become known: read the document cdp-uploader
-delivered, parse it, and store the guide it makes. What comes back is where the guide
-went, which is what the record in the database points at.
+delivered, parse it, and store the version it makes. What comes back is where that
+version went, which is what the record in the database points at.
 
-The three buckets are three different things and are configured apart. The source
-bucket is somebody else's layout - cdp-uploader owns those keys - and is only ever
-read. The managed bucket holds a guide's Markdown. The asset bucket holds the
-pictures, and the document addresses them absolutely so that the stored file
-describes itself: read it from anywhere and its pictures can be fetched without
-knowing anything about this service.
+Two buckets, and they are different kinds of thing. The source bucket is somebody
+else's layout - cdp-uploader owns those keys - and is only ever read. The docs bucket
+is this service's, and holds a document laid out so that its versions share one set
+of pictures:
+
+    s3://<docs>/<document id>/assets/<digest>.<ext>
+    s3://<docs>/<document id>/<version id>/content.md
+
+The pictures sit above the versions because they belong to the document rather than
+to any one version of it: a picture is named by the digest of its own bytes, so two
+versions drawing the same picture name the same file, and converting a document again
+rewrites the Markdown without duplicating a single image. What makes that work is the
+`../assets` the stored file carries - a *relative* address, resolving to the same
+place from every version - and `store.resolved` is what turns it back into an S3 key
+for anything that has to fetch one.
 """
 
 from __future__ import annotations
@@ -32,6 +41,12 @@ _UPLOADER_KEY = re.compile(
 )
 
 
+# What a stored version calls its pictures. Relative, and one step up, so that every
+# version of a document resolves it to the same place: the pictures are the
+# document's, not the version's.
+_ASSETS = "../assets"
+
+
 class SourceRefusedError(ValueError):
     """Raised for a source location this service will not read."""
 
@@ -45,6 +60,7 @@ class StoredDocument:
     """Where a converted guide went, and what it turned out to be."""
 
     document_id: str
+    version_id: str
     content: str
     assets: str
     title: str
@@ -52,8 +68,12 @@ class StoredDocument:
     images: int
 
 
-def convert(source_url: str, document_id: str | None = None) -> StoredDocument:
-    """Convert the .docx at `source_url` into a stored guide.
+def convert(
+    source_url: str,
+    document_id: str | None = None,
+    version_id: str | None = None,
+) -> StoredDocument:
+    """Convert the .docx at `source_url` into a stored version of a document.
 
     Takes the URL cdp-uploader's status reports rather than a bucket and a key,
     because that is the form it arrives in and taking it apart only to put it back
@@ -75,15 +95,16 @@ def convert(source_url: str, document_id: str | None = None) -> StoredDocument:
     document = parser.parse_docx(source)
 
     document_id = document_id or str(uuid.uuid4())
-    into = store.document_url(f"s3://{settings.managed_docs_s3_bucket}", document_id)
-    assets = store.document_url(
-        f"s3://{settings.managed_doc_assets_s3_bucket}", document_id
-    )
+    version_id = version_id or str(uuid.uuid4())
+
+    document_url = store.document_url(f"s3://{settings.docs_s3_bucket}", document_id)
+    into = store.document_url(document_url, version_id)
 
     return StoredDocument(
         document_id=document_id,
-        content=store.save(document, into, assets),
-        assets=assets,
+        version_id=version_id,
+        content=store.save(document, into, _ASSETS),
+        assets=store.assets_url(into, _ASSETS),
         title=document.title,
         sections=len(document.sections),
         images=len(document.images),

@@ -19,7 +19,7 @@ from botocore.exceptions import ClientError
 from app.guidance.documents import store
 from app.guidance.parsing import models
 
-GUIDE = "s3://managed-docs/guides/01JBQ8"
+GUIDE = "s3://docs/01JBQ8/01JBQ9"
 
 # Pictures beside the document, said the way a document says it. A relative
 # prefix has to resolve to a key rather than to a path with a dot in it.
@@ -66,19 +66,19 @@ class TestAddressing:
     def test_the_bucket_is_the_host_and_the_key_is_the_path(self, s3):
         fake = s3(body=b"# Claims")
 
-        store.read("s3://managed-docs/guides/01JBQ8/content.md")
+        store.read("s3://docs/01JBQ8/01JBQ9/content.md")
 
         assert fake.gets[0] == {
-            "Bucket": "managed-docs",
-            "Key": "guides/01JBQ8/content.md",
+            "Bucket": "docs",
+            "Key": "01JBQ8/01JBQ9/content.md",
         }
 
     def test_what_was_escaped_to_survive_a_url_is_not_part_of_the_key(self, s3):
-        """A guide named after the document it came from is escaped into the URL.
+        """A document named after the file it came from is escaped into the URL.
         The object's key is the name, not the escaping."""
         fake = s3(body=b"")
 
-        store.read("s3://managed-docs/CS%20Revenue%202026/content.md")
+        store.read("s3://docs/CS%20Revenue%202026/content.md")
 
         assert fake.gets[0]["Key"] == "CS Revenue 2026/content.md"
 
@@ -87,8 +87,8 @@ class TestAddressing:
 
         store.save(models.MarkdownDocument(title="Claims"), GUIDE, BESIDE)
 
-        assert fake.puts[0]["Bucket"] == "managed-docs"
-        assert fake.puts[0]["Key"] == "guides/01JBQ8/content.md"
+        assert fake.puts[0]["Bucket"] == "docs"
+        assert fake.puts[0]["Key"] == "01JBQ8/01JBQ9/content.md"
         assert b"# Claims" in fake.puts[0]["Body"]
 
 
@@ -120,7 +120,7 @@ class TestStoringAGuideInABucket:
     def test_the_pictures_go_where_the_document_says_they_are(self, s3):
         """The addresses written into the document and the keys the pictures are
         written to are one answer, not two that have to agree."""
-        assets = "s3://managed-doc-assets/01JBQ8"
+        assets = "s3://other-docs/01JBQ8"
         image = models.Image(name="a3f9.png", content_type="image/png", data=b"\x89PNG")
         section = models.MarkdownSection(
             heading="Evidence", ordinal=1, content="![](a3f9.png)", images=[image]
@@ -131,9 +131,9 @@ class TestStoringAGuideInABucket:
         store.save(document, GUIDE, assets)
 
         picture = next(
-            put for put in fake.puts if put["Bucket"] == "managed-doc-assets"
+            put for put in fake.puts if put["Bucket"] == "other-docs"
         )
-        stored = next(put for put in fake.puts if put["Bucket"] == "managed-docs")
+        stored = next(put for put in fake.puts if put["Bucket"] == "docs")
         assert picture["Key"] == "01JBQ8/a3f9.png"
         assert f"![]({assets}/a3f9.png)".encode() in stored["Body"]
 
@@ -169,3 +169,69 @@ class TestStoringAGuideInABucket:
 
         assert fake.puts[0]["Key"].endswith("a3f9.png")
         assert fake.puts[-1]["Key"].endswith("content.md")
+
+
+class TestAVersionSharingTheDocumentsPictures:
+    """How a document with versions is laid out, and the one thing that makes it
+    work: the address a version writes for its pictures resolves above itself."""
+
+    DOCUMENT = "s3://docs/b6ba5c0f"
+    VERSION = f"{DOCUMENT}/9d4e1a77"
+    UP = "../assets"
+
+    def test_the_pictures_land_under_the_document_not_under_the_version(self, s3):
+        image = models.Image(name="a3f9.png", content_type="image/png", data=b"\x89PNG")
+        section = models.MarkdownSection(
+            heading="Evidence", ordinal=1, content="![](a3f9.png)", images=[image]
+        )
+        document = models.MarkdownDocument(title="Claims", sections=[section])
+        fake = s3()
+
+        store.save(document, self.VERSION, self.UP)
+
+        picture = next(put for put in fake.puts if put["Key"].endswith("a3f9.png"))
+        markdown = next(put for put in fake.puts if put["Key"].endswith("content.md"))
+        assert picture["Key"] == "b6ba5c0f/assets/a3f9.png"
+        assert markdown["Key"] == "b6ba5c0f/9d4e1a77/content.md"
+
+    def test_the_stored_file_says_the_relative_address_not_the_resolved_one(self, s3):
+        """What is written into the file has to be the relative form, because that is
+        what resolves to the same pictures from a version that does not exist yet."""
+        image = models.Image(name="a3f9.png", content_type="image/png", data=b"\x89PNG")
+        section = models.MarkdownSection(
+            heading="Evidence", ordinal=1, content="![](a3f9.png)", images=[image]
+        )
+        fake = s3()
+
+        store.save(
+            models.MarkdownDocument(title="Claims", sections=[section]),
+            self.VERSION,
+            self.UP,
+        )
+
+        stored = next(put for put in fake.puts if put["Key"].endswith("content.md"))
+        assert b"![](../assets/a3f9.png)" in stored["Body"]
+
+    def test_two_versions_write_their_pictures_to_one_key(self, s3):
+        image = models.Image(name="a3f9.png", content_type="image/png", data=b"\x89PNG")
+        section = models.MarkdownSection(
+            heading="Evidence", ordinal=1, content="![](a3f9.png)", images=[image]
+        )
+        document = models.MarkdownDocument(title="Claims", sections=[section])
+        fake = s3()
+
+        store.save(document, self.VERSION, self.UP)
+        store.save(document, f"{self.DOCUMENT}/e177bb03", self.UP)
+
+        pictures = {put["Key"] for put in fake.puts if put["Key"].endswith("a3f9.png")}
+        assert pictures == {"b6ba5c0f/assets/a3f9.png"}
+
+    def test_a_relative_address_becomes_a_key_something_can_actually_fetch(self, s3):
+        """S3 has no notion of a relative key: handed `../assets/a3f9.png` it would
+        look for an object with `..` in its name. This is the resolution that stands
+        between a stored document and reading a picture out of it."""
+        fake = s3(body=b"\x89PNG")
+
+        store.read(store.resolved(f"{self.VERSION}/content.md", "../assets/a3f9.png"))
+
+        assert fake.gets[0] == {"Bucket": "docs", "Key": "b6ba5c0f/assets/a3f9.png"}
