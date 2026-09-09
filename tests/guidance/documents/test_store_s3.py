@@ -21,6 +21,10 @@ from app.guidance.parsing import models
 
 GUIDE = "s3://managed-docs/guides/01JBQ8"
 
+# Pictures beside the document, said the way a document says it. A relative
+# prefix has to resolve to a key rather than to a path with a dot in it.
+BESIDE = "./assets"
+
 
 def _error(code: str) -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": code}}, "GetObject")
@@ -81,7 +85,7 @@ class TestAddressing:
     def test_writing_puts_the_bytes_at_that_bucket_and_key(self, s3):
         fake = s3()
 
-        store.save(models.MarkdownDocument(title="Claims"), GUIDE)
+        store.save(models.MarkdownDocument(title="Claims"), GUIDE, BESIDE)
 
         assert fake.puts[0]["Bucket"] == "managed-docs"
         assert fake.puts[0]["Key"] == "guides/01JBQ8/content.md"
@@ -143,7 +147,9 @@ class TestStoringAGuideInABucket:
         )
         fake = s3()
 
-        store.save(models.MarkdownDocument(title="Claims", sections=[section]), GUIDE)
+        store.save(
+            models.MarkdownDocument(title="Claims", sections=[section]), GUIDE, BESIDE
+        )
 
         picture = next(put for put in fake.puts if put["Key"].endswith("a3f9.png"))
         markdown = next(put for put in fake.puts if put["Key"].endswith("content.md"))
@@ -157,7 +163,9 @@ class TestStoringAGuideInABucket:
         )
         fake = s3()
 
-        store.save(models.MarkdownDocument(title="Claims", sections=[section]), GUIDE)
+        store.save(
+            models.MarkdownDocument(title="Claims", sections=[section]), GUIDE, BESIDE
+        )
 
         assert fake.puts[0]["Key"].endswith("a3f9.png")
         assert fake.puts[-1]["Key"].endswith("content.md")

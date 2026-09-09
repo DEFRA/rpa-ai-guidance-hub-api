@@ -83,7 +83,8 @@ def main() -> int:
         print(f"{source.name}: {error}", file=sys.stderr)
         return 1
 
-    print(store.save(document, store.guide_url(as_url(args.destination), guide_id)))
+    guide = store.guide_url(as_url(args.destination), guide_id)
+    print(store.save(document, guide, f"./{store.ASSET_PREFIX}"))
 
     # To stderr so it stays out of anything reading the location from stdout, and
     # interleaves with the orchestrator's own per-document progress.
