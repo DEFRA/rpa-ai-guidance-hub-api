@@ -47,18 +47,21 @@ _TITLE = re.compile(r"^#\s?(.*)$")
 
 _DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
+# A picture, and whatever the document points at for it. Compiled once: a guide runs
+# to hundreds of sections and the pattern does not depend on any of them.
+_IMAGE = re.compile(r"(!\[[^\]]*\]\()([^)\s]+)\)")
 
-def from_markdown(text: str, image_prefix: str = "") -> models.MarkdownDocument:
+
+def from_markdown(text: str) -> models.MarkdownDocument:
     """The document `text` renders, as the model that would render it again.
 
-    `image_prefix` is the one thing a reader cannot infer: an image path in a stored
-    document is an address in some asset store, and only the caller knows which
-    store it was written for. It is stripped back off, leaving the bare name the
-    model holds.
+    A picture's name is the last segment of whatever the document points at, so a
+    document naming its pictures relatively and one naming them by full URL read
+    alike and nothing has to be told which of the two it is holding.
     """
     lines = text.split("\n")
     title = _title_of(lines)
-    sections = _sections_of(lines, image_prefix)
+    sections = _sections_of(lines)
 
     return models.MarkdownDocument(
         title=title,
@@ -117,7 +120,7 @@ class _OpenSection:
     appendices: int = 0
 
 
-def _sections_of(lines: list[str], image_prefix: str) -> list[models.MarkdownSection]:
+def _sections_of(lines: list[str]) -> list[models.MarkdownSection]:
     """Every section of the document, in the order it prints them."""
     sections: list[models.MarkdownSection] = []
     stack = [_OpenSection()]
@@ -127,7 +130,7 @@ def _sections_of(lines: list[str], image_prefix: str) -> list[models.MarkdownSec
         del stack[level:]
 
         section = _opened_beneath(stack[-1], heading)
-        section.content = _unprefixed(_body(lines, start), image_prefix, section.images)
+        section.content = _unprefixed(_body(lines, start), section.images)
 
         sections.append(section)
         stack.append(_OpenSection(section))
@@ -197,16 +200,15 @@ def _next_number(parent: _OpenSection) -> str:
     return f"{parent.section.number}.{ordinal}"
 
 
-def _unprefixed(content: str, image_prefix: str, images: list[models.Image]) -> str:
+def _unprefixed(content: str, images: list[models.Image]) -> str:
     """Image paths back to bare names, recording each picture on the section.
 
-    Matched as image syntax rather than as "a link starting with the prefix" so that
-    an empty prefix does not turn every link in the document into a picture.
+    Matched as image syntax rather than as "a link with a path in it" so that an
+    ordinary link is not read back as a picture.
     """
-    pattern = re.compile(r"(!\[[^\]]*\]\()" + re.escape(image_prefix) + r"([^)\s]+)\)")
 
     def bare(match: re.Match[str]) -> str:
-        name = match.group(2)
+        name = match.group(2).rsplit("/", 1)[-1]
         images.append(
             models.Image(
                 name=name,
@@ -215,7 +217,7 @@ def _unprefixed(content: str, image_prefix: str, images: list[models.Image]) -> 
         )
         return f"{match.group(1)}{name})"
 
-    return pattern.sub(bare, content)
+    return _IMAGE.sub(bare, content)
 
 
 def _bookmarks_of(

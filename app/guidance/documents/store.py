@@ -1,36 +1,45 @@
 """Where a converted guide is kept, and how it is got back.
 
-A guide lives at a URL, and holds one Markdown file and the pictures it draws:
+A guide is a Markdown file and the pictures it draws, and saving one is told where
+each of them goes:
 
-    <guide url>/content.md
-    <guide url>/assets/<digest>.<ext>
+    <document url prefix>/content.md
+    <assets url prefix>/<digest>.<ext>
 
-That URL is the whole of what a caller has to say. Its scheme says how the guide is
-reached - `file://` today, `s3://` when there is something asking for that - and
-storing is the same operation either way: the layout above, the names, the order the
-writes go in and what the document says about itself do not change with the medium,
-so none of them are written down twice.
+Those two prefixes are the whole of what a caller has to say. Their scheme says how
+the guide is reached - `file://` today, `s3://` when there is something asking for
+that - and storing is the same operation either way: the names, the order the writes
+go in and what the document says about itself do not change with the medium, so none
+of them are written down twice.
 
-Nothing here knows that a guide has an *id*. Keeping guides as `<base>/<id>` is one
-way to arrange them and `guide_url` composes that, but it is the caller's arrangement
-rather than this module's, and a guide put anywhere else is stored and read the same.
+Nothing here decides where a guide lives. Keeping one as `<base>/<id>` with its
+pictures in an `assets/` directory beside it is one arrangement, and `guide_url` and
+`assets_url` compose it, but it is the caller's arrangement rather than this module's:
+pictures put in a bucket of their own are stored and read the same.
 
-The Markdown is standalone. Its image paths are relative - `assets/a3f9....png` - so
-they resolve against wherever the document itself is, and its cross-references point
-at anchors that headings in the same file print. Anything able to read Markdown can
-read a stored guide with nothing else, and `reader.from_markdown` reads it back into
-the model that wrote it.
+The Markdown is standalone. The assets prefix is what the stored document calls its
+pictures, written into the file exactly as it was given, and its cross-references
+point at anchors that headings in the same file print. Anything able to read Markdown
+can read a stored guide with nothing else, and `reader.from_markdown` reads it back
+into the model that wrote it, whichever form the pictures are named in.
 
-**Relative paths inside, an absolute URL outside, and the split is the point.** A
-document that named its pictures `s3://a-bucket/...` or `file:///home/...` would carry
-a bucket name or a machine's directory layout in its text - configuration, written
-into a file that outlives it, and wrong the moment the guide is copied anywhere. A
-relative path names nothing but the document's own neighbourhood. Where that
-neighbourhood *is* belongs to the caller, and is what `base` says.
+**A relative assets prefix is an address in the document, not a place on a disk.**
+`./assets` means "beside the document", and only the document's own URL says where
+that is, so the pictures are written wherever the two prefixes together resolve to.
+An absolute prefix names its place outright and is used as it stands. That is the
+whole of the difference: what the document says is what the caller passed, either
+way, and only the destination of the bytes is worked out.
+
+Which to pass is a real choice with a cost either way. A document that named a
+picture sitting right beside it `file:///home/...` would carry a machine's directory
+layout in its text - configuration, written into a file that outlives it, and wrong
+the moment the guide is copied anywhere. A document whose pictures live in a bucket
+of their own has no neighbour to point at and has to say the whole address.
 """
 
 from __future__ import annotations
 
+import posixpath
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -40,7 +49,7 @@ from app.guidance.parsing import models
 
 _CONTENT = "content.md"
 
-# What a stored document's image paths are written against, and read back off. A
+# The conventional place for a guide's pictures: a directory beside its Markdown. A
 # trailing slash because it is concatenated with a bare name rather than joined.
 ASSET_PREFIX = "assets/"
 
@@ -64,68 +73,102 @@ def guide_url(base: str, guide_id: str) -> str:
     return f"{_directory(base)}{_segment(guide_id)}"
 
 
-def content_url(guide: str) -> str:
+def content_url(document_url_prefix: str) -> str:
     """Where a guide's Markdown lives: one file per guide."""
-    return f"{_directory(guide)}{_CONTENT}"
+    return f"{_directory(document_url_prefix)}{_CONTENT}"
 
 
-def assets_url(guide: str) -> str:
-    """Where a guide keeps its pictures.
+def assets_url(document_url_prefix: str, assets_url_prefix: str) -> str:
+    """Where a guide's pictures actually go.
 
-    Built from `ASSET_PREFIX` against the guide's own URL, which is the statement
-    that the relative path a stored document carries resolves to exactly this: the
-    two cannot drift, because there is only one of them.
+    A relative assets prefix is an address in the document rather than a place: it
+    says where the pictures are *from the document*, so the document's own URL is
+    what turns it into somewhere to write. An absolute one already names its place
+    and is answered unchanged.
+
+    The path is normalised, so a prefix written the way a document would write it -
+    `./assets`, or `../shared` for pictures a sibling guide also draws - names the
+    same location as the plain form rather than a directory with a dot in its name.
     """
-    return f"{_directory(guide)}{ASSET_PREFIX}"
+    if urllib.parse.urlsplit(assets_url_prefix).scheme:
+        return _directory(assets_url_prefix)
+
+    beneath = urllib.parse.urlsplit(
+        f"{_directory(document_url_prefix)}{assets_url_prefix}"
+    )
+    resolved = beneath._replace(path=posixpath.normpath(beneath.path))
+
+    return _directory(urllib.parse.urlunsplit(resolved))
 
 
-def asset_url(guide: str, name: str) -> str:
+def asset_url(document_url_prefix: str, assets_url_prefix: str, name: str) -> str:
     """Where one of a guide's pictures lives.
 
-    Beside the document that draws it, and named for its content, so that converting
-    the same document twice writes the same file rather than a second copy of it.
+    Named for its content, so that converting the same document twice writes the same
+    file rather than a second copy of it.
     """
-    return f"{assets_url(guide)}{_segment(name)}"
+    return f"{assets_url(document_url_prefix, assets_url_prefix)}{_segment(name)}"
 
 
-def save(document: models.MarkdownDocument, guide: str) -> str:
-    """Store `document` at `guide`, answering where its Markdown was put.
+def save(
+    document: models.MarkdownDocument,
+    document_url_prefix: str,
+    assets_url_prefix: str,
+) -> str:
+    """Store `document` and its pictures, answering where its Markdown was put.
+
+    `assets_url_prefix` is what the stored document calls its pictures, and it is
+    written into the file as it stands. Where their bytes go is the one thing worked
+    out rather than told: a relative prefix resolves against `document_url_prefix`,
+    an absolute one names its own place. So a caller says `./assets` for a guide that
+    is one movable directory and a bucket URL for pictures kept apart from it, and
+    says it once either way.
 
     The pictures go first. A document naming a picture that is not there yet is a
     broken document for as long as the gap lasts, and the gap is avoidable by
     ordering the writes.
     """
+    into = assets_url(document_url_prefix, assets_url_prefix)
     for image in _unique(document.images):
-        _save_asset(image, guide)
+        _save_asset(image, into)
 
-    url = content_url(guide)
-    _write(url, document.markdown(ASSET_PREFIX).encode("utf-8"))
+    url = content_url(document_url_prefix)
+    _write(url, document.markdown(_directory(assets_url_prefix)).encode("utf-8"))
     return url
 
 
-def load(guide: str) -> models.MarkdownDocument | None:
-    """The guide at `guide` as the model that wrote it, or None if there is none.
+def load(document_url_prefix: str) -> models.MarkdownDocument | None:
+    """The guide stored there as the model that wrote it, or None if there is none.
+
+    Takes no account of where the pictures went: a name is the last segment of
+    whatever the document points at, so this reads a document naming them relatively
+    and one naming them by full URL alike.
 
     "No such guide" is an ordinary answer to an ordinary question, so it is an answer
     rather than an exception a caller has to know to catch.
     """
-    stored = _read(content_url(guide))
+    stored = _read(content_url(document_url_prefix))
     if stored is None:
         return None
 
-    return reader.from_markdown(stored.decode("utf-8"), ASSET_PREFIX)
+    return reader.from_markdown(stored.decode("utf-8"))
 
 
-def load_asset(guide: str, name: str) -> bytes | None:
+def load_asset(
+    document_url_prefix: str, assets_url_prefix: str, name: str
+) -> bytes | None:
     """The bytes of one of a guide's pictures.
+
+    Takes the same pair `save` was given, so that reading a picture back never asks
+    a caller to resolve an address the store resolved when it wrote it.
 
     Fetched only when something asks. A document read back carries its pictures by
     name, which is all that rendering it needs.
     """
-    return _read(asset_url(guide, name))
+    return _read(asset_url(document_url_prefix, assets_url_prefix, name))
 
 
-def _save_asset(image: models.Image, guide: str) -> None:
+def _save_asset(image: models.Image, into: str) -> None:
     """Write one picture, where its bytes are here to write.
 
     A picture read back out of a store carries no bytes - they are already in it,
@@ -135,7 +178,7 @@ def _save_asset(image: models.Image, guide: str) -> None:
     if image.data is None:
         return
 
-    _write(asset_url(guide, image.name), image.data)
+    _write(f"{into}{_segment(image.name)}", image.data)
 
 
 def _unique(images: list[models.Image]) -> list[models.Image]:
