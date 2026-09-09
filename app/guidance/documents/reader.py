@@ -47,17 +47,19 @@ _TITLE = re.compile(r"^#\s?(.*)$")
 
 _DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
-# A picture, and whatever the document points at for it. Compiled once: a guide runs
-# to hundreds of sections and the pattern does not depend on any of them.
+# A picture as a stored document writes it: image syntax, then whatever address the
+# document was rendered with. The `!` is what tells it from an ordinary link.
 _IMAGE = re.compile(r"(!\[[^\]]*\]\()([^)\s]+)\)")
 
 
 def from_markdown(text: str) -> models.MarkdownDocument:
     """The document `text` renders, as the model that would render it again.
 
-    A picture's name is the last segment of whatever the document points at, so a
-    document naming its pictures relatively and one naming them by full URL read
-    alike and nothing has to be told which of the two it is holding.
+    Nothing has to be told to this. A picture's name is the last segment of whatever
+    the document points at, so `assets/a3f9.png` and
+    `s3://a-bucket/01JBQ8/a3f9.png` both name `a3f9.png` and a stored document can be
+    read without knowing where it was written for - which is the whole point of the
+    file carrying absolute addresses.
     """
     lines = text.split("\n")
     title = _title_of(lines)
@@ -203,8 +205,10 @@ def _next_number(parent: _OpenSection) -> str:
 def _unprefixed(content: str, images: list[models.Image]) -> str:
     """Image paths back to bare names, recording each picture on the section.
 
-    Matched as image syntax rather than as "a link with a path in it" so that an
-    ordinary link is not read back as a picture.
+    The name is the last segment of the path, whatever stands in front of it: a
+    relative `assets/`, an `s3://` address, or nothing at all. Matched as image
+    syntax rather than as "a link with a path in it", so a link to a document
+    elsewhere is not read as a picture.
     """
 
     def bare(match: re.Match[str]) -> str:

@@ -163,8 +163,11 @@ class TestWhereAGuideLives:
     def test_a_scheme_this_store_cannot_reach_says_so(self):
         """Naming the schemes it does speak, because writing the wrong URL is a
         configuration mistake and the fix is to write a different one."""
-        with pytest.raises(store.UnsupportedSchemeError, match="file://"):
-            store.load("s3://a-bucket/guides/01JBQ8")
+        with pytest.raises(store.UnsupportedSchemeError) as refused:
+            store.load("https://example.org/guides/01JBQ8")
+
+        assert "file://" in str(refused.value)
+        assert "s3://" in str(refused.value)
 
     def test_composing_a_guide_url_escapes_the_id(self, tmp_path):
         """The one place an id is escaped. The dev tooling names a guide after the
@@ -240,6 +243,17 @@ class TestPicturesKeptElsewhere:
         stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
         assert "![](../shared/a3f9.png)" in stored
         assert (tmp_path / "shared" / "a3f9.png").read_bytes() == PNG
+
+    def test_the_address_the_document_gives_is_the_one_that_answers(self, tmp_path):
+        """Following the URL in the file reaches the picture, with nothing working
+        out where it ought to have been."""
+        guide = _guide(tmp_path)
+        store.save(_document(_picture()), guide, _elsewhere(tmp_path))
+
+        stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
+        addressed = _IMAGE.search(stored).group(1)
+
+        assert store.read(addressed) == PNG
 
     @pytest.mark.parametrize("prefix", [RELATIVE, "assets", "../shared"])
     def test_what_the_document_says_resolves_to_where_the_picture_went(
