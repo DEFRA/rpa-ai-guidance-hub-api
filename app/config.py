@@ -88,6 +88,14 @@ class AppConfig(pydantic_settings.BaseSettings):
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )
+    source_docs_s3_bucket: str = pydantic.Field(
+        default="rpa-ai-guidance-hub-source-docs",
+        description="Bucket cdp-uploader delivers an uploaded .docx to",
+    )
+    docs_s3_bucket: str = pydantic.Field(
+        default="rpa-ai-guidance-hub-docs",
+        description="Bucket a converted document and its pictures are stored in",
+    )
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     tracing_header: str = "x-cdp-request-id"
