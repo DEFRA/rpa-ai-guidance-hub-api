@@ -23,6 +23,7 @@ from app.guidance.parsing import (
     textboxes,
 )
 from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing.models import MinimalDocumentInfo
 from app.guidance.parsing.ooxml import W_PPR, is_toggle_on
 
 if TYPE_CHECKING:
@@ -73,6 +74,30 @@ def parse_docx(source: bytes) -> models.MarkdownDocument:
         title=_extract_title(document),
         sections=sections,
         bookmarks=bookmarks,
+    )
+
+
+def parse_minimal(source: bytes) -> MinimalDocumentInfo:
+    """The title, version and last-modified date `source` carries, if any.
+
+    Reuses the same cover-page title heuristic a full parse uses, so the two never
+    disagree about what a document is called. Version and last-modified come
+    straight off the package's own core properties - `cp:version` and
+    `dcterms:modified` - because unlike the title, Word gives an author nowhere
+    else to put either one.
+
+    Raises:
+        DocumentParseError: if `source` cannot be opened as a Word document at
+            all. A field the document simply never set is not this - it is
+            reported back as empty/None, not raised.
+    """
+    document = _open(source)
+    core_properties = document.core_properties
+
+    return MinimalDocumentInfo(
+        title=_extract_title(document),
+        version=(core_properties.version or "").strip(),
+        last_modified=core_properties.modified,
     )
 
 
