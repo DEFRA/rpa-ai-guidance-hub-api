@@ -6,11 +6,13 @@ from app.common import mongo
 
 @pytest.fixture(autouse=True)
 def reset_mongo_client():
+    original_client = mongo.client
+    original_db = mongo.db
     mongo.client = None
     mongo.db = None
     yield
-    mongo.client = None
-    mongo.db = None
+    mongo.client = original_client
+    mongo.db = original_db
 
 
 @pytest.mark.asyncio
