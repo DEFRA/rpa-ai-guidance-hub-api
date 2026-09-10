@@ -22,3 +22,5 @@ os.environ.setdefault(
 os.environ.setdefault("REFERENCE_AUDIENCES", "caseworker:Caseworker,customer:Customer")
 os.environ.setdefault("REFERENCE_SYSTEMS", "siti-agri:Siti Agri,crm:CRM")
 os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "process-guide:Process guide")
+
+pytest_plugins = ["tests.support.mongo"]

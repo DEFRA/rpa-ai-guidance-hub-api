@@ -62,10 +62,10 @@ async def handle_callback(
 async def get_draft(
     file_id: str,
     drafts: service.DraftService = fastapi.Depends(get_draft_service),
-) -> schemas.DraftStatusResponse:
+) -> schemas.DraftResponse:
     draft = await drafts.get_draft(file_id)
 
     if not draft:
         raise fastapi.HTTPException(status_code=fastapi.status.HTTP_404_NOT_FOUND)
 
-    return schemas.DraftStatusResponse.from_guide_draft(draft)
+    return schemas.DraftResponse.from_guide_draft(draft)

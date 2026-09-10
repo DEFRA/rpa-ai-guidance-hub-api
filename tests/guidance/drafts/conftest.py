@@ -10,61 +10,13 @@ carry several files, each claimed and tracked independently.
 
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import UTC, datetime
-
 import pytest
 
-from app.guidance.drafts.models import GuideDraft, ParsingStatus
-from app.guidance.parsing.models import MinimalDocumentInfo
+from tests.fakes.draft_store import InMemoryDraftStore
 
-
-class FakeDraftStore:
-    def __init__(self) -> None:
-        self.records: dict[str, GuideDraft] = {}
-
-    async def claim(self, file_id: str, path: str) -> bool:
-        existing = self.records.get(file_id)
-        if existing is not None and existing.parsing_status != ParsingStatus.PENDING:
-            return False
-
-        now = datetime.now(UTC)
-        if existing is None:
-            existing = GuideDraft(
-                file_id=file_id,
-                parsing_status=ParsingStatus.PENDING,
-                path=path,
-                created_at=now,
-                updated_at=now,
-            )
-
-        self.records[file_id] = replace(
-            existing, parsing_status=ParsingStatus.IN_PROGRESS, updated_at=now
-        )
-        return True
-
-    async def mark_complete(self, file_id: str, info: MinimalDocumentInfo) -> None:
-        self.records[file_id] = replace(
-            self.records[file_id],
-            parsing_status=ParsingStatus.COMPLETE,
-            title=info.title,
-            version=info.version,
-            last_modified=info.last_modified,
-            updated_at=datetime.now(UTC),
-        )
-
-    async def mark_failed(self, file_id: str, reason: str) -> None:
-        self.records[file_id] = replace(
-            self.records[file_id],
-            parsing_status=ParsingStatus.FAILED,
-            parse_error=reason,
-            updated_at=datetime.now(UTC),
-        )
-
-    async def get(self, file_id: str) -> GuideDraft | None:
-        return self.records.get(file_id)
+FakeDraftStore = InMemoryDraftStore
 
 
 @pytest.fixture
-def fake_draft_store() -> FakeDraftStore:
-    return FakeDraftStore()
+def fake_draft_store() -> InMemoryDraftStore:
+    return InMemoryDraftStore()

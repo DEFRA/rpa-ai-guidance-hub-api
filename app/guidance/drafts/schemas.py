@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import pydantic
@@ -56,17 +57,23 @@ class UploadCallbackPayload(pydantic.BaseModel):
         return documents
 
 
-class DraftStatusResponse(pydantic.BaseModel):
+class DraftResponse(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     file_id: str
     parsing_status: models.ParsingStatus
     parsing_error: str | None = None
+    title: str | None = None
+    version: str | None = None
+    last_modified: datetime | None = None
 
     @classmethod
-    def from_guide_draft(cls, draft: models.GuideDraft) -> DraftStatusResponse:
+    def from_guide_draft(cls, draft: models.GuideDraft) -> DraftResponse:
         return cls(
             file_id=draft.file_id,
             parsing_status=draft.parsing_status,
             parsing_error=draft.parse_error,
+            title=draft.title,
+            version=draft.version,
+            last_modified=draft.last_modified,
         )

@@ -1,55 +1,56 @@
-import pytest
+from unittest.mock import MagicMock
+
+import boto3
 
 from app.common import s3
 
 
-@pytest.fixture(autouse=True)
-def reset_s3_client():
-    s3.client = None
-    yield
-    s3.client = None
+class TestGetS3Client:
+    def test_creates_working_client_against_configured_endpoint_and_region(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(s3, "client", None)
+        mock_config = MagicMock()
+        mock_config.floci_endpoint_url = "http://floci:4566"
+        mock_config.aws_region = "eu-west-2"
+        monkeypatch.setattr("app.config.get_config", lambda: mock_config)
 
+        mock_boto3_client = MagicMock()
+        monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
-def test_get_s3_client_creates_one_against_the_configured_endpoint(mocker):
-    mock_config = mocker.Mock()
-    mock_config.floci_endpoint_url = "http://floci:4566"
-    mock_config.aws_region = "eu-west-2"
-    mocker.patch("app.config.get_config", return_value=mock_config)
+        client = s3.get_s3_client()
 
-    mock_boto3_client = mocker.patch("app.common.s3.boto3.client")
+        assert client is mock_boto3_client.return_value
+        mock_boto3_client.assert_called_once_with(
+            "s3",
+            endpoint_url="http://floci:4566",
+            region_name="eu-west-2",
+        )
 
-    client = s3.get_s3_client()
+    def test_passes_none_endpoint_when_unconfigured(self, monkeypatch):
+        """No floci_endpoint_url: falls through to default endpoint resolution."""
+        monkeypatch.setattr(s3, "client", None)
+        mock_config = MagicMock()
+        mock_config.floci_endpoint_url = None
+        mock_config.aws_region = "eu-west-2"
+        monkeypatch.setattr("app.config.get_config", lambda: mock_config)
 
-    assert client == mock_boto3_client.return_value
-    mock_boto3_client.assert_called_once_with(
-        "s3", endpoint_url="http://floci:4566", region_name="eu-west-2"
-    )
+        mock_boto3_client = MagicMock()
+        monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
+        client = s3.get_s3_client()
 
-def test_get_s3_client_passes_none_endpoint_when_unconfigured(mocker):
-    """No floci_endpoint_url: boto3 falls through to its normal AWS resolution,
-    which is what talking to real AWS in CDP needs."""
-    mock_config = mocker.Mock()
-    mock_config.floci_endpoint_url = None
-    mock_config.aws_region = "eu-west-2"
-    mocker.patch("app.config.get_config", return_value=mock_config)
+        assert client is mock_boto3_client.return_value
+        mock_boto3_client.assert_called_once_with(
+            "s3",
+            endpoint_url=None,
+            region_name="eu-west-2",
+        )
 
-    mock_boto3_client = mocker.patch("app.common.s3.boto3.client")
+    def test_returns_existing_cached_singleton_instance(self, monkeypatch):
+        sentinel_client = object()
+        monkeypatch.setattr(s3, "client", sentinel_client)
 
-    s3.get_s3_client()
+        result = s3.get_s3_client()
 
-    mock_boto3_client.assert_called_once_with(
-        "s3", endpoint_url=None, region_name="eu-west-2"
-    )
-
-
-def test_get_s3_client_returns_existing(mocker):
-    existing_client = mocker.Mock()
-    s3.client = existing_client
-
-    mock_boto3_client = mocker.patch("app.common.s3.boto3.client")
-
-    result = s3.get_s3_client()
-
-    assert result == existing_client
-    mock_boto3_client.assert_not_called()
+        assert result is sentinel_client
