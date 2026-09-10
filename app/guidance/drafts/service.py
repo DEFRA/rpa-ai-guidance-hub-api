@@ -39,7 +39,7 @@ class DraftService:
 
         await self._store.mark_complete(document.file_id, info)
 
-    async def get_status(self, file_id: str) -> GuideDraft | None:
+    async def get_draft(self, file_id: str) -> GuideDraft | None:
         return await self._store.get(file_id)
 
     async def _get_object_bytes(self, document: UploadedDocument) -> bytes:

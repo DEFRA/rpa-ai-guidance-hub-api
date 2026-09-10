@@ -68,4 +68,4 @@ async def get_draft(
     if not draft:
         raise fastapi.HTTPException(status_code=fastapi.status.HTTP_404_NOT_FOUND)
 
-    return schemas.DraftStatusResponse(draft=draft)
+    return schemas.DraftStatusResponse.from_guide_draft(draft)

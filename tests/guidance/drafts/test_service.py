@@ -69,8 +69,8 @@ class TestMultiFileUpload:
         await draft_service.minimal_parse(first)
         await draft_service.minimal_parse(second)
 
-        first_status = await draft_service.get_status("first-file")
-        second_status = await draft_service.get_status("second-file")
+        first_status = await draft_service.get_draft("first-file")
+        second_status = await draft_service.get_draft("second-file")
 
         assert first_status is not None
         assert first_status.title == "First"
@@ -99,8 +99,8 @@ class TestMultiFileUpload:
         await draft_service.minimal_parse(first)
         await draft_service.minimal_parse(second)
 
-        first_status = await draft_service.get_status("first-file")
-        second_status = await draft_service.get_status("second-file")
+        first_status = await draft_service.get_draft("first-file")
+        second_status = await draft_service.get_draft("second-file")
 
         assert first_status is not None
         assert first_status.parsing_status == ParsingStatus.FAILED
