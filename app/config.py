@@ -118,12 +118,19 @@ class AppConfig(pydantic_settings.BaseSettings):
     mongo_database: str = "rpa-ai-guidance-hub-api"
     mongo_truststore: str = "TRUSTSTORE_CDP_ROOT_CA"
     floci_endpoint_url: str | None = None
+    source_docs_s3_bucket: str = pydantic.Field(
+        ..., description="Bucket cdp-uploader deposits scanned source documents into"
+    )
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     tracing_header: str = "x-cdp-request-id"
+    draft_retention_seconds: int = pydantic.Field(
+        default=14400,  # 4 hours in seconds
+        description="Number of seconds to retain a guide draft's minimal parse while awaiting user action",
+    )
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode
     ] = pydantic.Field(..., validation_alias="CLAUDE_SONNET_MODEL_CONFIG")

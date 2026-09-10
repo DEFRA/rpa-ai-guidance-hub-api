@@ -167,6 +167,9 @@ class TestAppConfig:
         assert cfg.tracing_header == "x-cdp-request-id"
         assert cfg.enable_metrics is False
         assert cfg.floci_endpoint_url is None
+        # Required, so read back from the env default conftest.py seeds, not a
+        # field default - source_docs_s3_bucket has none.
+        assert cfg.source_docs_s3_bucket == "rpa-ai-guidance-hub-source-docs"
         assert cfg.http_proxy is None
 
     def test_validator_parses_the_packed_model_config(self):
