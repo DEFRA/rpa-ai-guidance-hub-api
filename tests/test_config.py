@@ -12,6 +12,15 @@ VALID_PROFILE = (
 )
 VALID_MODEL = "anthropic.claude-sonnet-4-6"
 
+# The four reference-data fields are all required, so every direct AppConfig(...)
+# construction below needs these too - spread this in alongside CLAUDE_SONNET_MODEL_CONFIG.
+VALID_REFERENCE_KWARGS = {
+    "REFERENCE_SCHEMES": "basic-payment-scheme:Basic Payment Scheme",
+    "REFERENCE_AUDIENCES": "caseworker:Caseworker",
+    "REFERENCE_SYSTEMS": "siti-agri:Siti Agri",
+    "REFERENCE_GUIDANCE_TYPES": "process-guide:Process guide",
+}
+
 # One id per branch of the BedrockGuardrailConfig.id pattern, including the
 # colon-bearing forms the pattern permits.
 GUARDRAIL_IDS = [
@@ -100,12 +109,54 @@ class TestParseBedrockModelConfig:
             )
 
 
+class TestParseReferenceOptions:
+    """The packed 'value1:Label One,value2:Label Two' string."""
+
+    def test_parses_an_ordered_list_of_value_label_pairs(self):
+        parsed = config._parse_reference_options(
+            "basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific"
+        )
+
+        assert parsed == [
+            {"value": "basic-payment-scheme", "label": "Basic Payment Scheme"},
+            {"value": "not-specific", "label": "Not scheme-specific"},
+        ]
+
+    def test_strips_whitespace_around_each_part(self):
+        parsed = config._parse_reference_options("  siti-agri : Siti Agri  ")
+
+        assert parsed == [{"value": "siti-agri", "label": "Siti Agri"}]
+
+    def test_rejects_non_string_input(self):
+        with pytest.raises(ValueError, match="must be a string"):
+            config._parse_reference_options(1234)
+
+    def test_rejects_an_empty_string(self):
+        with pytest.raises(ValueError, match="at least one entry"):
+            config._parse_reference_options("")
+
+    def test_rejects_an_entry_missing_its_colon(self):
+        with pytest.raises(ValueError, match="expected 'value:label'"):
+            config._parse_reference_options("no-colon-here")
+
+    @pytest.mark.parametrize("entry", [":Label With No Value", "value-with-no-label:"])
+    def test_rejects_an_entry_with_an_empty_value_or_label(self, entry):
+        with pytest.raises(ValueError, match="expected 'value:label'"):
+            config._parse_reference_options(entry)
+
+    def test_one_malformed_entry_fails_the_whole_value(self):
+        """Fail-fast, not partial recovery - a bad entry never silently vanishes."""
+        with pytest.raises(ValueError, match="expected 'value:label'"):
+            config._parse_reference_options("siti-agri:Siti Agri,no-colon-here,crm:CRM")
+
+
 class TestAppConfig:
     """Field defaults and the derived Bedrock configuration."""
 
     def test_defaults(self):
         cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}"
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
         )
 
         assert cfg.host == "127.0.0.1"
@@ -120,18 +171,40 @@ class TestAppConfig:
 
     def test_validator_parses_the_packed_model_config(self):
         cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}"
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
         )
 
         assert cfg.claude_sonnet_model_config.model_id == VALID_MODEL
 
     def test_bedrock_exposes_the_claude_sonnet_model(self):
         cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}"
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
         )
 
         assert cfg.bedrock.claude_sonnet.model_id == VALID_MODEL
         assert cfg.bedrock.claude_sonnet.inference_profile == VALID_PROFILE
+
+    def test_validator_parses_each_reference_option_list(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
+        )
+
+        assert cfg.reference_schemes[0] == {
+            "value": "basic-payment-scheme",
+            "label": "Basic Payment Scheme",
+        }
+        assert cfg.reference_audiences[0] == {
+            "value": "caseworker",
+            "label": "Caseworker",
+        }
+        assert cfg.reference_systems[0] == {"value": "siti-agri", "label": "Siti Agri"}
+        assert cfg.reference_guidance_types[0] == {
+            "value": "process-guide",
+            "label": "Process guide",
+        }
 
 
 @pytest.mark.usefixtures("unset_config_singleton")
@@ -181,3 +254,20 @@ class TestGetConfig:
             config.get_config()
 
         assert config._config is None
+
+    def test_raises_when_a_reference_option_list_is_missing(self, monkeypatch):
+        monkeypatch.delenv("REFERENCE_SCHEMES", raising=False)
+
+        with pytest.raises(RuntimeError, match="Config validation failed") as exc_info:
+            config.get_config()
+
+        assert "REFERENCE_SCHEMES" in str(exc_info.value)
+        assert "Field required" in str(exc_info.value)
+
+    def test_raises_when_a_reference_option_list_is_malformed(self, monkeypatch):
+        monkeypatch.setenv("REFERENCE_SCHEMES", "no-colon-here")
+
+        with pytest.raises(RuntimeError, match="Config validation failed") as exc_info:
+            config.get_config()
+
+        assert "REFERENCE_SCHEMES" in str(exc_info.value)

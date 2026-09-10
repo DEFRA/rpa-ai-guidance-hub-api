@@ -9,6 +9,7 @@ import uvicorn
 from app import config as app_config
 from app.common import mongo, tracing
 from app.health import router as health_router
+from app.reference import router as reference_router
 from app.review import router as review_router
 
 logger = getLogger(__name__)
@@ -31,6 +32,7 @@ app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")
 app.add_middleware(tracing.TraceIdMiddleware)
 
 app.include_router(health_router.router)
+app.include_router(reference_router.router)
 app.include_router(review_router.router)
 
 

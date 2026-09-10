@@ -14,3 +14,10 @@ os.environ.setdefault(
     "CLAUDE_SONNET_MODEL_CONFIG",
     "anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test",
 )
+os.environ.setdefault(
+    "REFERENCE_SCHEMES",
+    "basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific",
+)
+os.environ.setdefault("REFERENCE_AUDIENCES", "caseworker:Caseworker,customer:Customer")
+os.environ.setdefault("REFERENCE_SYSTEMS", "siti-agri:Siti Agri,crm:CRM")
+os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "process-guide:Process guide")

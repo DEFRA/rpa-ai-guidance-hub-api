@@ -65,6 +65,24 @@ The application uses AWS Bedrock for LLM access. The following environment varia
 
 The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardrail_id:guardrail_version]`
 
+#### Reference Data Configuration
+
+The `/reference/*` endpoints (see [API endpoints](#api-endpoints)) serve the option lists for the
+metadata capture journey's radio/checkbox questions. Each list is config/env-var driven only - no
+database, no admin UI. The following environment variables are **required**; like
+`CLAUDE_SONNET_MODEL_CONFIG`, the application refuses to start if one is missing or malformed:
+
+| Variable | Description | Example |
+| --- | --- | --- |
+| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific` |
+| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `caseworker:Caseworker,customer:Customer` |
+| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `siti-agri:Siti Agri,crm:CRM` |
+| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `process-guide:Process guide` |
+
+Each variable's format is a comma-separated list of `value:label` pairs, in display order. Each
+endpoint returns that list unchanged, as `[{"value": ..., "label": ...}, ...]` - see `/docs` for the
+generated OpenAPI schema.
+
 ### Linting and Formatting
 
 This project uses [Ruff](https://github.com/astral-sh/ruff) for linting and formatting Python code.
@@ -205,6 +223,10 @@ uv run pytest
 |:--------------------------------| :----------------------------- |
 | `GET: /docs`                    | Automatic API Swagger docs     |
 | `GET: /health`                  | Health check endpoint          |
+| `GET: /reference/schemes`       | Scheme options for the "Which scheme does this guidance relate to?" radios |
+| `GET: /reference/audiences`     | Audience options for the "Who is this for?" checkboxes |
+| `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
+| `GET: /reference/guidance-types`| Guidance type options |
 | `GET: /review/assets`           | Simple example endpoint        |
 
 ## Custom Cloudwatch Metrics
