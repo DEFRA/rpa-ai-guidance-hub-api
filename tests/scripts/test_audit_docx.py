@@ -1,0 +1,608 @@
+"""What the conversion audit reads off the Word side of a document.
+
+The audit is the oracle, so a mark it credits to the page that Word never draws is
+not reported as a fault of its own: it is reported as a mark the parser lost, and
+the search for it starts in the parser. These cases are about the Word side saying
+what Word says and no more.
+
+All fixture text is invented, as everywhere in the suite.
+"""
+
+from collections import Counter
+from typing import Any
+
+import audit_docx
+import docx
+from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml.ns import qn
+from docx.oxml.shared import OxmlElement
+from docx.text.paragraph import Paragraph
+
+
+def _text_box(*runs: tuple[str, str]) -> Any:
+    """A w:txbxContent holding one paragraph of runs, each with a colour or "" ."""
+    box = OxmlElement("w:txbxContent")
+    paragraph = OxmlElement("w:p")
+    for text, colour in runs:
+        run = OxmlElement("w:r")
+        if colour:
+            run.append(_colour(colour))
+        element = OxmlElement("w:t")
+        element.text = text
+        run.append(element)
+        paragraph.append(run)
+    box.append(paragraph)
+    return box
+
+
+def _colour(value: str) -> Any:
+    """The run properties that paint a run one colour."""
+    properties = OxmlElement("w:rPr")
+    element = OxmlElement("w:color")
+    element.set(qn("w:val"), value)
+    properties.append(element)
+    return properties
+
+
+def _in_style(document: Any, text: str, style_name: str) -> None:
+    """Add a paragraph in a named style, defining the style if the template lacks it.
+
+    python-docx will only apply a style the template already knows, and the styles
+    worth testing against here - the contents styles a guide actually carries - are
+    exactly the ones it does not have.
+    """
+    if all(style.name != style_name for style in document.styles):
+        document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+    document.add_paragraph(text, style=style_name)
+
+
+def _border(paragraph: Paragraph, *sides: str, value: str = "single") -> Paragraph:
+    """Draw a border on the sides named, or on all four when none are."""
+    border = OxmlElement("w:pBdr")
+    for side in sides or ("w:top", "w:left", "w:bottom", "w:right"):
+        edge = OxmlElement(side)
+        edge.set(qn("w:val"), value)
+        border.append(edge)
+
+    paragraph._p.get_or_add_pPr().append(border)
+    return paragraph
+
+
+def _bulleted(paragraph: Paragraph) -> None:
+    """Put numbering on a paragraph, which is the whole of what makes it an item.
+
+    The list itself is left undeclared: with no numbering part to read a format
+    from, a bullet is what the audit reads, which is what Word draws when it has
+    nothing else to draw.
+    """
+    numbering = paragraph._p.get_or_add_pPr().get_or_add_numPr()
+    numbering.get_or_add_numId().set(qn("w:val"), "1")
+
+
+def _at_column(paragraph: Paragraph, left: int) -> None:
+    """Draw a paragraph at a given indent, the way dragging one in Word does."""
+    indent = paragraph._p.get_or_add_pPr().get_or_add_ind()
+    indent.set(qn("w:left"), str(left))
+
+
+def _item(document: Any, text: str, left: int) -> None:
+    """A bulleted paragraph drawn at a given column, which is one list item."""
+    paragraph = document.add_paragraph(text)
+    _bulleted(paragraph)
+    _at_column(paragraph, left)
+
+
+def _anchor(paragraph: Paragraph, box: Any, colour: str = "") -> None:
+    """Hang a text box off a run of the paragraph, the way a drawing does.
+
+    Only the nesting matters to the walk, not the shape around it, so the w:drawing
+    is written without the DrawingML that would tell Word how big to draw it.
+    """
+    run = paragraph.add_run()
+    if colour:
+        run._r.append(_colour(colour))
+    drawing = OxmlElement("w:drawing")
+    drawing.append(box)
+    run._r.append(drawing)
+
+
+class TestTextBoxMarks:
+    def test_a_box_does_not_wear_the_marks_of_the_run_anchoring_it(self):
+        """Word colours the anchor character, not the story the box holds.
+
+        A real guide anchors a case note off a red run, and every word of the note
+        is then read as red here while the page shows two of them that way. The
+        parser marks up what the page shows, so the difference is charged to it: one
+        section of that guide loses a seventh of its marks to a loss nobody made.
+        """
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        _anchor(
+            paragraph,
+            _text_box(("Case closed. ", ""), ("<input the date>", "FF0000")),
+            colour="FF0000",
+        )
+
+        bag = audit_docx.Bag()
+        audit_docx.mark_paragraph(bag, paragraph, frozenset())
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.RED) == Counter(
+            {"input": 1, "the": 1, "date": 1}
+        )
+
+    def test_a_box_is_not_an_item_of_the_list_its_anchor_is_in(self):
+        """A bulleted paragraph draws one bullet, and none on the box it anchors.
+
+        A real guide bullets "Update the case note ... following the below template."
+        and hangs the case note itself off that paragraph as a text box. Word draws
+        no bullet on the box: its paragraphs carry no numbering of their own, and the
+        same box drawn as a one-cell table - the same box, by this file's own
+        reckoning of what a box is - is credited with no list at all. Inherited, the
+        anchor's bullet charges the parser with seventy list marks that section never
+        drew, in the one section of that guide scoring below 100%.
+        """
+        document = docx.Document()
+        paragraph = document.add_paragraph("Update the case note.")
+        _bulleted(paragraph)
+        _anchor(paragraph, _text_box(("Example: Parcel ABC 1234.", "")))
+
+        section = audit_docx.Section("Amending the agreement")
+        audit_docx.absorb(section, paragraph, audit_docx.ListRun())
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST) == Counter(
+            {"update": 1, "the": 1, "case": 1, "note": 1}
+        )
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.BOX) == Counter(
+            {"example": 1, "parcel": 1, "abc": 1, "1234": 1}
+        )
+
+    def test_a_box_does_not_weld_its_text_onto_the_prose_it_is_tethered_to(self):
+        """A floating box has no place in the line, only a paragraph it hangs off.
+
+        Word draws such a box wherever its coordinates say and tethers it at the head
+        of a paragraph however far from there it lands. Read as though it were a run,
+        its text runs into the first word of the prose, and the page is credited with
+        a word it never says - which, this side being the oracle, is a word the
+        parser is charged with having lost.
+        """
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        _anchor(paragraph, _text_box(("4", "")))
+        _anchor(paragraph, _text_box(("9", "")))
+        paragraph.add_run("Steps to above are drawn on the plan.")
+
+        bag = audit_docx.Bag()
+        bag.add_text(audit_docx.rendered_text(paragraph))
+
+        assert bag.words == Counter(
+            {
+                "4": 1,
+                "9": 1,
+                "steps": 1,
+                "to": 1,
+                "above": 1,
+                "are": 1,
+                "drawn": 1,
+                "on": 1,
+                "the": 1,
+                "plan": 1,
+            }
+        )
+
+    def test_two_boxes_in_a_row_are_two_stories_rather_than_one_word(self):
+        """Each box is its own story, and neither edge of one is a place to read on."""
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        _anchor(paragraph, _text_box(("4", "")))
+        _anchor(paragraph, _text_box(("9", "")))
+
+        bag = audit_docx.Bag()
+        audit_docx.mark_paragraph(bag, paragraph, frozenset())
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.BOX) == Counter(
+            {"4": 1, "9": 1}
+        )
+
+
+class TestContentsEntries:
+    def test_a_stray_contents_entry_does_not_end_the_section(self):
+        """A contents entry is navigation wherever it turns up, and no more than that.
+
+        One guide carries an empty paragraph styled "Contents RPA" in the middle of a
+        section. Ending the section there drops every paragraph after it up to the
+        next heading - eighty-five words the page really shows, and every mark on
+        them - so nothing is reported missing, because the Word side never claimed
+        them, and the parser is charged instead with sixty-five marks it invented.
+        An oracle that under-counts accuses; it does not report itself.
+
+        Across all nineteen guides only this one paragraph carries a contents style
+        after the first body heading. Every real contents entry sits ahead of it,
+        where there is no open section to end, so closing one here was never the
+        rule doing its job. `parser._body_paragraph` states the rule the other way
+        round and is right: contents entries are left out wherever they turn up.
+        """
+        document = docx.Document()
+        document.add_heading("Applying", level=1)
+        document.add_paragraph("Before the entry.")
+        _in_style(document, "", "Contents Entry")
+        document.add_paragraph("After the entry.")
+
+        sections = audit_docx.word_sections(document)
+
+        assert [section.heading for section in sections] == ["Applying"]
+        assert sections[0].bag.words == Counter(
+            {"applying": 1, "before": 1, "the": 2, "entry": 2, "after": 1}
+        )
+
+
+class TestListSteps:
+    """What one item did relative to the item before it.
+
+    Depth itself is not scored, and cannot be: Word measures a level in twips and
+    Markdown in columns, and both sides read depth relatively, so no absolute level
+    on one side names the same thing as a level on the other. The step between two
+    neighbouring items is the one statement each side can make in its own units, so
+    it is the one the two are compared on.
+    """
+
+    def test_an_item_drawn_past_the_one_before_it_steps_in(self):
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        _item(document, "Open the register", 1440)
+        _item(document, "Read the status", 1440)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
+            Counter({"open": 1, "the": 1, "register": 1})
+        )
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+
+    def test_an_item_drawn_back_towards_the_margin_steps_out(self):
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        _item(document, "Open the register", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT) == (
+            Counter({"if": 1, "no": 1})
+        )
+
+    def test_an_item_dragged_a_little_is_still_in_its_neighbour_column(self):
+        """Two lists pasted from different documents sit a few twips apart at the
+        same depth. Read as a step, every such pair would report a nesting the page
+        does not show, and the parser would be charged with flattening it."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 714)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT)
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+
+    def test_an_empty_paragraph_does_not_close_the_run(self):
+        """Word spaces its lists with empty paragraphs and the parser writes no line
+        for one, so a run closed here and not there puts the step on one side only -
+        and the mark is then charged to whichever side was still counting."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        document.add_paragraph("")
+        _item(document, "Open the register", 1440)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
+            Counter({"open": 1, "the": 1, "register": 1})
+        )
+
+    def test_the_markdown_side_reads_a_step_from_the_marker_column(self):
+        bag = audit_docx.markdown_bag("- If yes,\n  - Open the register\n- If no,")
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_INDENT) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_OUTDENT) == Counter(
+            {"if": 1, "no": 1}
+        )
+
+    def test_a_blank_line_does_not_close_the_markdown_run(self):
+        """A blank line inside a list makes it loose rather than ending it, which is
+        the same reason the Word side holds its run open across an empty paragraph."""
+        bag = audit_docx.markdown_bag("- If yes,\n\n  - Open the register")
+
+        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_INDENT) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+
+
+class TestTheBulletWordDraws:
+    """The depth rule, read off the markers rather than off the columns alone.
+
+    `ListRun` is asked directly here: what a marker *is* comes from the numbering a
+    document declares, which `item_marker` reads and the guides exercise, while what
+    a marker *does* is this - and it is what decides every step this file counts.
+    """
+
+    ROUND = ("Symbol:\uf0b7", 0)
+    HOLLOW = ("Courier New:o", 1)
+
+    def steps(self, *items):
+        """The step each of a run's items made, given (marker, column) for each."""
+        run = audit_docx.ListRun(nudge=180)
+        return [run.stepped("an item", column, marker) for marker, column in items]
+
+    def test_a_bullet_one_step_down_is_a_step_in_however_far_left_it_is_drawn(self):
+        """Word writes its bullet sequence only when an item is demoted, so a hollow
+        bullet under a filled one is nested however far left the author dragged it.
+        Read by the column alone it is a step out, and the page is credited with a
+        step out the parser is then charged with having lost."""
+        assert self.steps(
+            (self.ROUND, 2203), (self.HOLLOW, 643), (self.HOLLOW, 643)
+        ) == [
+            frozenset(),
+            frozenset({audit_docx.LIST_INDENT}),
+            frozenset(),
+        ]
+
+    def test_an_item_returns_to_the_depth_wearing_its_bullet_in_its_column(self):
+        """Only the column and the bullet together say so: by position alone the
+        second branch is further right than the sub-list it follows, and reads as a
+        step in rather than the step out back to its own question."""
+        assert self.steps(
+            (self.ROUND, 2203), (self.HOLLOW, 643), (self.ROUND, 2203)
+        ) == [
+            frozenset(),
+            frozenset({audit_docx.LIST_INDENT}),
+            frozenset({audit_docx.LIST_OUTDENT}),
+        ]
+
+    def test_a_bullet_enclosing_another_neither_closes_nor_takes_it_in(self):
+        """A hollow bullet is inside a filled one wherever the two are drawn, so an
+        item stepping left of its own sub-list rejoins that sub-list - and does not
+        step out to the filled bullet it is still inside of."""
+        assert self.steps(
+            (self.ROUND, 2203), (self.HOLLOW, 1145), (self.HOLLOW, 643)
+        ) == [
+            frozenset(),
+            frozenset({audit_docx.LIST_INDENT}),
+            frozenset(),
+        ]
+
+    def test_a_run_stepping_left_of_everything_it_has_drawn_has_not_stepped(self):
+        """Markdown has no column to the left of the one a list begins in, and
+        neither has the reading: an item left of every depth open closes them all
+        and stands at the first. Both sides draw it at the margin, so there is no
+        step for either to lose - which is why this is no longer held out as a limit
+        of the format, as it was while this side read the columns alone."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "Open the register", 1440)
+        _item(document, "Read the status", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
+        assert not section.bag.limits
+
+
+class TestKnownLimits:
+    """What the page shows that no Markdown could carry.
+
+    Held out of the marks and counted apart, because the score exists to point at a
+    difference somebody can go and fix. A loss the format makes unavoidable, left in
+    the coverage column, reads as a fault nobody can repair and sits beside the ones
+    that are real. `--missing` names each of these instead.
+    """
+
+    def test_a_list_in_a_table_cell_is_a_limit_rather_than_a_lost_mark(self):
+        """A GFM pipe row cannot hold a newline, so `tables` joins a cell's blocks
+        with <br> and its bullets become hyphens in the cell's text. No parser can
+        do otherwise, and three of the guides would carry the shortfall for ever."""
+        document = docx.Document()
+        table = document.add_table(rows=1, cols=2)
+        _bulleted(table.cell(0, 0).paragraphs[0])
+        table.cell(0, 0).paragraphs[0].add_run("Open the register")
+
+        section = audit_docx.Section("Working the case")
+        audit_docx.absorb(
+            section,
+            table.cell(0, 0).paragraphs[0],
+            audit_docx.ListRun(),
+            frozenset({audit_docx.TABLE}),
+        )
+
+        assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST)
+        assert audit_docx.marks_of(section.bag.limits, audit_docx.IN_A_CELL) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+
+    def test_a_list_in_a_callout_is_not_a_limit(self):
+        """A box is a blockquote, and a blockquote holds blocks of its own - so a
+        list inside one survives, and a shortfall there is the parser's to answer
+        for. Only a pipe cell cannot carry it."""
+        document = docx.Document()
+        paragraph = document.add_paragraph("Open the register")
+        _bulleted(paragraph)
+
+        section = audit_docx.Section("Working the case")
+        audit_docx.absorb(
+            section, paragraph, audit_docx.ListRun(), frozenset({audit_docx.BOX})
+        )
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST) == Counter(
+            {"open": 1, "the": 1, "register": 1}
+        )
+        assert not section.bag.limits
+
+    def test_a_step_out_from_deeper_is_drawn_however_far_left_it_lands(self):
+        """It is the item being left that decides. Leaving one drawn deeper than the
+        run began, Markdown has an indent to bring back, and it draws the step even
+        where the item arriving is further left than the run's own first item -
+        because everything at or left of that is the margin, and the step from an
+        indent to the margin is a step. Read the other way round, the audit calls a
+        loss on eighty-eight marks the viewer plainly shows."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 926)
+        _item(document, "Open the register", 2203)
+        _item(document, "If no,", 643)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.LIST_OUTDENT
+        ) == Counter({"if": 1, "no": 1})
+        assert not section.bag.limits
+
+    def test_a_step_out_to_a_column_the_run_has_used_is_not_a_limit(self):
+        """The run has been there, so Markdown has a depth to step back to and the
+        parser is expected to draw it. This is the half that is still a fault."""
+        document = docx.Document()
+        document.add_heading("Working the case", level=1)
+        _item(document, "If yes,", 720)
+        _item(document, "Open the register", 1440)
+        _item(document, "If no,", 720)
+
+        [section] = audit_docx.word_sections(document)
+
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.LIST_OUTDENT
+        ) == Counter({"if": 1, "no": 1})
+        assert not section.bag.limits
+
+
+class TestUncAddresses:
+    r"""One address, two spellings, and the escape that separates them.
+
+    Word writes `file:///\\host\share`; RFC 8089 writes `file://host/share`. They
+    name one file, so the audit folds them together - otherwise a parser that spells
+    an address correctly is scored as having lost it. What it must not fold is the
+    address a renderer actually follows: `\\` between brackets is one backslash to
+    CommonMark, so the characters written and the place they point are not the same
+    thing, and reading them raw is how a broken link scores as a whole one.
+    """
+
+    def test_the_two_spellings_of_one_address_are_one_url(self):
+        word = r"file:///\\server.example\share\Draft%20Letter"
+        markdown = "file://server.example/share/Draft%20Letter"
+
+        assert audit_docx.normalise_url(word) == audit_docx.normalise_url(markdown)
+
+    def test_an_address_naming_another_file_is_another_url(self):
+        word = r"file:///\\server.example\share\Draft%20Letter"
+
+        assert audit_docx.normalise_url(word) != audit_docx.normalise_url(
+            "file://server.example/share/Other%20Letter"
+        )
+
+    def test_the_canonical_spelling_matches_the_address_word_wrote(self):
+        """What the parser now writes, scored against what Word holds."""
+        word = r"file:///\\server.example\share\Draft%20Letter"
+        bag = audit_docx.markdown_bag(
+            "[Draft folder](file://server.example/share/Draft%20Letter)"
+        )
+
+        assert list(bag.urls) == [audit_docx.normalise_url(word)]
+
+    def test_a_destination_is_read_with_its_escapes_spent(self):
+        """The address is the one a reader is sent to, not the characters typed."""
+        bag = audit_docx.markdown_bag(
+            r"[Draft folder](file:///\\server.example\share\Draft%20Letter)"
+        )
+
+        assert list(bag.urls) == [r"file:///\server.example\share\draft%20letter"]
+
+    def test_a_destination_a_renderer_mangles_is_not_the_address_word_wrote(self):
+        """The loss the raw reading hid: one backslash short of the right server."""
+        word = r"file:///\\server.example\share\Draft%20Letter"
+        bag = audit_docx.markdown_bag(
+            r"[Draft folder](file:///\\server.example\share\Draft%20Letter)"
+        )
+
+        assert list(bag.urls) != [audit_docx.normalise_url(word)]
+
+
+class TestTheBoxWordDrawsWithABorder:
+    """A box drawn by bordering the paragraphs themselves.
+
+    The third form, and the only one with no container to be read from. It is what
+    these guides use for text the reader is meant to copy rather than follow, so
+    what it costs to miss is the boundary between a template and the guidance that
+    resumes underneath it.
+    """
+
+    def test_a_four_sided_border_is_a_box(self):
+        """A reader sees the same box a one-cell table and a text box draw, so it
+        earns the same BOX."""
+        document = docx.Document()
+        paragraph = _border(document.add_paragraph("Claim reference: xxxxx"))
+
+        assert audit_docx.is_bordered(paragraph)
+
+    def test_a_border_on_one_side_is_a_rule(self):
+        """Word's own Title style underlines itself with a bottom border, and a
+        heading quoted for it would be a loss reported as a gain."""
+        document = docx.Document()
+        paragraph = _border(document.add_paragraph("Section summary"), "w:bottom")
+
+        assert not audit_docx.is_bordered(paragraph)
+
+    def test_a_side_turned_off_is_not_a_line(self):
+        """Word writes the side and says none rather than dropping the element, so
+        four sides present is not four sides drawn."""
+        document = docx.Document()
+        paragraph = _border(document.add_paragraph("Section summary"), value="none")
+
+        assert not audit_docx.is_bordered(paragraph)
+
+    def test_a_bordered_heading_is_not_part_of_a_box(self):
+        """A border round a heading is emphasis. Taken into a box the heading stops
+        opening a section, and the section's words go missing from this side alone -
+        which reads as the parser having invented every one of them."""
+        document = docx.Document()
+        paragraph = _border(document.add_heading("Rework required", level=2))
+
+        assert audit_docx.is_bordered(paragraph)
+        assert not audit_docx.belongs_to_a_box(paragraph)
+
+    def test_a_bordered_paragraph_wears_box(self):
+        """What the border says about the words, which is the whole point of
+        reading it: every word inside is a word inside a box."""
+        document = docx.Document()
+        section = audit_docx.Section("Rework required")
+        audit_docx.absorb_box(
+            section, [_border(document.add_paragraph("Claim reference: xxxxx"))]
+        )
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.BOX) == Counter(
+            {"claim": 1, "reference": 1, "xxxxx": 1}
+        )
+
+    def test_a_box_is_a_list_of_its_own(self):
+        """Its items step from each other and from nothing outside it, exactly as a
+        cell's do - so a box holding one item is not a step in from the item the
+        page drew before the box."""
+        document = docx.Document()
+        section = audit_docx.Section("Rework required")
+        outside = document.add_paragraph("Send the form")
+        _bulleted(outside)
+        _at_column(outside, 0)
+        inside = _border(document.add_paragraph("Include the version"))
+        _bulleted(inside)
+        _at_column(inside, 720)
+
+        run = audit_docx.ListRun(nudge=180)
+        audit_docx.absorb(section, outside, run)
+        audit_docx.absorb_box(section, [inside])
+
+        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
+            Counter()
+        )
