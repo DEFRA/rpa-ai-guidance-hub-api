@@ -13,9 +13,18 @@ def test_lifespan(mocker):
     mock_get_mongo = mocker.patch(
         "app.common.mongo.get_mongo_client", return_value=mock_mongo_client
     )
+    mocker.patch(
+        "app.common.mongo.get_db", mocker.AsyncMock(return_value=mocker.MagicMock())
+    )
+    # Startup also makes the index a guide's uniqueness rests on, so that whatever
+    # races the first two requests is racing an index that already exists.
+    ensure_indexes = mocker.patch(
+        "app.guidance.records.ensure_indexes", mocker.AsyncMock()
+    )
 
     with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
         mock_get_mongo.assert_called_once()
+        ensure_indexes.assert_awaited_once()
 
     mock_mongo_client.close.assert_awaited_once()
 

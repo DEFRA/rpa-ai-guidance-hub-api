@@ -7,13 +7,13 @@ each of them goes:
     <assets url prefix>/<digest>.<ext>
 
 Those two prefixes are the whole of what a caller has to say. Their scheme says how
-the guide is reached - `file://` today, `s3://` when there is something asking for
-that - and storing is the same operation either way: the names, the order the writes
-go in and what the document says about itself do not change with the medium, so none
-of them are written down twice.
+the guide is reached - `file://` for a directory, `s3://` for a bucket - and storing
+is the same operation either way: the names, the order the writes go in and what the
+document says about itself do not change with the medium, so none of them are
+written down twice.
 
 Nothing here decides where a guide lives. Keeping one as `<base>/<id>` with its
-pictures in an `assets/` directory beside it is one arrangement, and `guide_url` and
+pictures in an `assets/` directory beside it is one arrangement, and `document_url` and
 `assets_url` compose it, but it is the caller's arrangement rather than this module's:
 pictures put in a bucket of their own are stored and read the same.
 
@@ -43,34 +43,44 @@ import posixpath
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import boto3
+from botocore.exceptions import ClientError
+
+from app import config
 from app.guidance.documents import reader
 from app.guidance.parsing import models
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 _CONTENT = "content.md"
+_MARKDOWN = "text/markdown; charset=utf-8"
 
 # The conventional place for a guide's pictures: a directory beside its Markdown. A
 # trailing slash because it is concatenated with a bare name rather than joined.
 ASSET_PREFIX = "assets/"
 
-# The schemes this knows how to reach. Named in the error rather than left to a
-# stack trace, because getting one wrong is a configuration mistake and the fix is
-# to write a different URL.
-_SCHEMES = ("file",)
+# What S3 says when an object is not there. A missing *bucket* is deliberately not
+# among them: it means this service is pointed somewhere that does not exist, and
+# answering "no such guide" to every question is how a mistyped bucket name looks
+# exactly like an empty store.
+_MISSING = ("NoSuchKey", "404")
 
 
 class UnsupportedSchemeError(ValueError):
     """Raised for a location this cannot reach."""
 
 
-def guide_url(base: str, guide_id: str) -> str:
-    """The URL of the guide `guide_id` names beneath `base`.
+def document_url(base: str, document_id: str) -> str:
+    """The URL of the document `document_id` names beneath `base`.
 
     A convenience for callers that keep guides as `<base>/<id>`, and the one place
     an id is escaped: the dev tooling names a guide after the document it converted,
     and those hold spaces - a `#` in one would truncate every URL built from it.
     """
-    return f"{_directory(base)}{_segment(guide_id)}"
+    return f"{_directory(base)}{_segment(document_id)}"
 
 
 def content_url(document_url_prefix: str) -> str:
@@ -78,27 +88,57 @@ def content_url(document_url_prefix: str) -> str:
     return f"{_directory(document_url_prefix)}{_CONTENT}"
 
 
+def resolved(base: str, reference: str) -> str:
+    """The address a reference inside a stored document points at.
+
+    A stored document says `../assets/a3f9.png`, and a Markdown reader resolves that
+    against the document's own URL. An object store does not: `s3://` has no notion
+    of a relative key, and a `..` handed to it is a literal segment in a name, so
+    every reference has to become an address before anything can be fetched. This is
+    the one place that happens, which is what lets a picture be read by the address
+    the document gives whatever form the document gave it in.
+
+    `base` is a document's own URL and is resolved against the way every reader of a
+    URL resolves one: against everything up to its last `/`. So the address a record
+    keeps - the `content.md` itself - resolves as the file's own reader would, and a
+    base already naming a directory is used as it stands.
+
+    An absolute reference is already an address and is answered unchanged.
+    """
+    if urllib.parse.urlsplit(reference).scheme:
+        return reference
+
+    against = urllib.parse.urlsplit(f"{_within(base)}{reference}")
+
+    return urllib.parse.urlunsplit(
+        against._replace(path=posixpath.normpath(against.path))
+    )
+
+
+def _within(url: str) -> str:
+    """The neighbourhood `url` sits in: everything up to and including its last `/`.
+
+    Taken off the path rather than the whole URL, so that the `//` in a scheme is
+    never mistaken for the separator being looked for.
+    """
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path
+
+    return urllib.parse.urlunsplit(
+        parts._replace(path=path[: path.rindex("/") + 1] if "/" in path else "/")
+    )
+
+
 def assets_url(document_url_prefix: str, assets_url_prefix: str) -> str:
-    """Where a guide's pictures actually go.
+    """Where a document's pictures actually go.
 
     A relative assets prefix is an address in the document rather than a place: it
     says where the pictures are *from the document*, so the document's own URL is
-    what turns it into somewhere to write. An absolute one already names its place
-    and is answered unchanged.
-
-    The path is normalised, so a prefix written the way a document would write it -
-    `./assets`, or `../shared` for pictures a sibling guide also draws - names the
-    same location as the plain form rather than a directory with a dot in its name.
+    what turns it into somewhere to write. `../assets` is what keeps one set of
+    pictures shared between every version of a document, each of which is written
+    beneath the same document but under a version of its own.
     """
-    if urllib.parse.urlsplit(assets_url_prefix).scheme:
-        return _directory(assets_url_prefix)
-
-    beneath = urllib.parse.urlsplit(
-        f"{_directory(document_url_prefix)}{assets_url_prefix}"
-    )
-    resolved = beneath._replace(path=posixpath.normpath(beneath.path))
-
-    return _directory(urllib.parse.urlunsplit(resolved))
+    return _directory(resolved(_directory(document_url_prefix), assets_url_prefix))
 
 
 def asset_url(document_url_prefix: str, assets_url_prefix: str, name: str) -> str:
@@ -133,7 +173,8 @@ def save(
         _save_asset(image, into)
 
     url = content_url(document_url_prefix)
-    _write(url, document.markdown(_directory(assets_url_prefix)).encode("utf-8"))
+    markdown = document.markdown(_directory(assets_url_prefix))
+    _write(url, markdown.encode("utf-8"), _MARKDOWN)
     return url
 
 
@@ -147,11 +188,22 @@ def load(document_url_prefix: str) -> models.MarkdownDocument | None:
     "No such guide" is an ordinary answer to an ordinary question, so it is an answer
     rather than an exception a caller has to know to catch.
     """
-    stored = _read(content_url(document_url_prefix))
+    stored = read(content_url(document_url_prefix))
     if stored is None:
         return None
 
     return reader.from_markdown(stored.decode("utf-8"))
+
+
+def read(url: str) -> bytes | None:
+    """The bytes at `url`, or None where there is nothing there.
+
+    Public because not everything this service reads is a guide: the .docx a guide
+    is converted from is an object in someone else's layout, and a picture a stored
+    document names absolutely is reached by the address the document gives rather
+    than by working out where it ought to be.
+    """
+    return _read(url)
 
 
 def load_asset(
@@ -178,7 +230,7 @@ def _save_asset(image: models.Image, into: str) -> None:
     if image.data is None:
         return
 
-    _write(f"{into}{_segment(image.name)}", image.data)
+    _write(f"{into}{_segment(image.name)}", image.data, image.content_type)
 
 
 def _unique(images: list[models.Image]) -> list[models.Image]:
@@ -209,31 +261,115 @@ def _segment(name: str) -> str:
 
 def _read(url: str) -> bytes | None:
     """The bytes at `url`, or None where there is nothing there."""
-    path = _local_path(url)
+    scheme, location = _reached(url)
+    return _READERS[scheme](location)
+
+
+def _write(url: str, data: bytes, content_type: str) -> None:
+    """Put `data` at `url`, making whatever has to exist to hold it.
+
+    `content_type` is carried because a stored document names its pictures by URL
+    and something else will fetch them: a picture answered as
+    `application/octet-stream` is one a browser will not draw. A filesystem has
+    nowhere to record it and drops it; a bucket keeps it.
+    """
+    scheme, location = _reached(url)
+    _WRITERS[scheme](location, data, content_type)
+
+
+def _reached(url: str) -> tuple[str, urllib.parse.SplitResult]:
+    """`url`'s scheme and its parts, or a refusal naming what can be reached.
+
+    The one place a URL becomes a way of reaching something. Everything above it
+    works in guides and pictures and says where they are; only this says how to get
+    there, which is what lets a second scheme be a pair of functions rather than a
+    second store.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in _READERS:
+        message = (
+            f"Cannot reach {url!r}: this store speaks "
+            f"{', '.join(f'{scheme}://' for scheme in sorted(_READERS))} "
+            f"and nothing else."
+        )
+        raise UnsupportedSchemeError(message)
+
+    return parsed.scheme, parsed
+
+
+def _file_path(location: urllib.parse.SplitResult) -> Path:
+    """The file a `file://` URL names.
+
+    `url2pathname` rather than taking `.path` as it stands, because a URL escapes
+    the characters a path is allowed to contain and a guide's directory is named by
+    whatever minted its id.
+    """
+    return Path(urllib.request.url2pathname(location.path))
+
+
+def _read_file(location: urllib.parse.SplitResult) -> bytes | None:
+    path = _file_path(location)
     return path.read_bytes() if path.is_file() else None
 
 
-def _write(url: str, data: bytes) -> None:
-    """Put `data` at `url`, making whatever has to exist to hold it."""
-    path = _local_path(url)
+def _write_file(
+    location: urllib.parse.SplitResult, data: bytes, _content_type: str
+) -> None:
+    """A file has no room for a type of its own: its name carries the extension,
+    and whatever serves it decides from that."""
+    path = _file_path(location)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
 
 
-def _local_path(url: str) -> Path:
-    """The file `url` names.
+def _bucket_and_key(location: urllib.parse.SplitResult) -> tuple[str, str]:
+    """The bucket and key an `s3://` URL names.
 
-    The one place a URL becomes a way of reaching something, and so the one place a
-    second scheme would be answered. `url2pathname` rather than taking `.path` as it
-    stands, because a URL escapes the characters a path is allowed to contain and a
-    guide's directory is named by whatever minted its id.
+    The bucket is the host and the key is the path without its leading slash, and
+    the key is unquoted for the same reason a file path is: what was escaped to
+    survive being a URL is not part of the name.
     """
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme not in _SCHEMES:
-        message = (
-            f"Cannot reach {url!r}: this store speaks "
-            f"{', '.join(f'{scheme}://' for scheme in _SCHEMES)} and nothing else."
-        )
-        raise UnsupportedSchemeError(message)
+    return location.netloc, urllib.parse.unquote(location.path.lstrip("/"))
 
-    return Path(urllib.request.url2pathname(parsed.path))
+
+def _read_s3(location: urllib.parse.SplitResult) -> bytes | None:
+    bucket, key = _bucket_and_key(location)
+    try:
+        response = _s3().get_object(Bucket=bucket, Key=key)
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") in _MISSING:
+            return None
+        raise
+
+    body: bytes = response["Body"].read()
+    return body
+
+
+def _write_s3(
+    location: urllib.parse.SplitResult, data: bytes, content_type: str
+) -> None:
+    bucket, key = _bucket_and_key(location)
+    _s3().put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+
+
+def _s3() -> Any:
+    """A client pointed at floci where one is configured, and at AWS where not."""
+    settings = config.get_config()
+    return boto3.client(
+        "s3",
+        region_name=settings.aws_region,
+        endpoint_url=settings.floci_endpoint_url,
+    )
+
+
+# How each scheme is reached. Adding one is a pair of functions and an entry here,
+# because nothing above knows a scheme exists.
+_READERS: dict[str, Callable[[urllib.parse.SplitResult], bytes | None]] = {
+    "file": _read_file,
+    "s3": _read_s3,
+}
+
+_WRITERS: dict[str, Callable[[urllib.parse.SplitResult, bytes, str], None]] = {
+    "file": _write_file,
+    "s3": _write_s3,
+}

@@ -9,13 +9,13 @@ Nothing else in the service is involved. ``app.guidance.parsing`` imports only t
 standard library and python-docx, and the store speaks ``file://``, so no
 configuration, database, object store or Bedrock access is needed.
 
-The destination is a URL -- ``file:///var/guides`` -- and a plain path is accepted
-and turned into one, because naming a directory is the obvious thing to type. The
-guide's own id names the directory beneath it, and defaults to the document's name so
-that a converted document can be found again by the name it went in under.
+The destination is a URL -- ``file:///var/documents`` -- and a plain path is
+accepted and turned into one, because naming a directory is the obvious thing to
+type. The document's own name names the directory beneath it, so that a converted
+document can be found again by the name it went in under.
 
 Usage:
-  uv run scripts/parse_docx.py <document.docx> <directory-or-url> [--guide-id ID]
+  uv run scripts/parse_docx.py <document.docx> <directory-or-url>
 
 Called directly, or by ``scripts/convert_doc.py`` in the local-dev orchestrator
 repository, which resolves paths and converts several documents at once.
@@ -64,18 +64,13 @@ def parse_args() -> argparse.Namespace:
         "destination",
         help="Where to store the guide: a directory, or a file:// URL.",
     )
-    argument_parser.add_argument(
-        "--guide-id",
-        default=None,
-        help="Store under this id (default: the document's own name).",
-    )
     return argument_parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     source = Path(args.document)
-    guide_id = args.guide_id or source.stem
+    document_id = source.stem
 
     try:
         document = parser.parse_docx(source.read_bytes())
@@ -83,7 +78,7 @@ def main() -> int:
         print(f"{source.name}: {error}", file=sys.stderr)
         return 1
 
-    guide = store.guide_url(as_url(args.destination), guide_id)
+    guide = store.document_url(as_url(args.destination), document_id)
     print(store.save(document, guide, f"./{store.ASSET_PREFIX}"))
 
     # To stderr so it stays out of anything reading the location from stdout, and
