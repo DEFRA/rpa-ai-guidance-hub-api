@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import Any
+from typing import Any, Annotated
 
 import fastapi
 import pymongo
@@ -14,29 +14,26 @@ router = fastapi.APIRouter(prefix="/guide/staging")
 logger = getLogger(__name__)
 
 
-async def get_staging_store(
-    db: pymongo.asynchronous.database.AsyncDatabase = fastapi.Depends(mongo.get_db),
+def get_staging_store(
+    db: Annotated[
+        pymongo.asynchronous.database.AsyncDatabase, fastapi.Depends(mongo.get_db)
+    ],
 ) -> store.StagingStore:
-    # Index creation happens once, in mongo.get_db(), not here - this dependency
-    # runs on every request, and re-issuing create_index per-request would be
-    # pure duplication.
     return store.MongoStagingStore(db, config.staging_retention_seconds)
 
 
-async def get_staging_service(
-    staging_store: store.StagingStore = fastapi.Depends(get_staging_store),
-    s3_client: Any = fastapi.Depends(s3.get_s3_client),
+def get_staging_service(
+    staging_store: Annotated[store.StagingStore, fastapi.Depends(get_staging_store)],
+    s3_client: Annotated[Any, fastapi.Depends(s3.get_s3_client)],
 ) -> service.StagingService:
-    return service.StagingService(
-        staging_store, config.source_docs_s3_bucket, s3_client
-    )
+    return service.StagingService(staging_store, config.source_docs_s3_bucket, s3_client)
 
 
 @router.post("/callback", status_code=fastapi.status.HTTP_202_ACCEPTED)
 async def handle_callback(
     payload: schemas.UploadCallbackPayload,
     background_tasks: fastapi.BackgroundTasks,
-    staging: service.StagingService = fastapi.Depends(get_staging_service),
+    staging: Annotated[service.StagingService, fastapi.Depends(get_staging_service)],
 ) -> fastapi.Response:
     documents = payload.uploaded_documents()
 
@@ -62,7 +59,7 @@ async def handle_callback(
 @router.get("/{file_id}")
 async def get_staged_document(
     file_id: str,
-    staging: service.StagingService = fastapi.Depends(get_staging_service),
+    staging: Annotated[service.StagingService, fastapi.Depends(get_staging_service)],
 ) -> schemas.StagedDocumentResponse:
     staged_document = await staging.get_staged_doc(file_id)
 
