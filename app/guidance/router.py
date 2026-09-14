@@ -166,9 +166,10 @@ async def create_document(
 
     stored = await _converted(new.source.url)
 
+    sanitized_url = new.source.url.replace("\r", "").replace("\n", "")
     logger.info(
         "Converted %s into document %s version %s: %d sections, %d images",
-        new.source.url,
+        sanitized_url,
         stored.document_id,
         stored.version_id,
         stored.sections,
