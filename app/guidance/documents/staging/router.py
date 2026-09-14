@@ -6,36 +6,37 @@ import pymongo
 
 from app import config as app_config
 from app.common import mongo, s3
-from app.guidance.drafts import schemas, service, store
+from app.guidance.documents.staging import schemas, service, store
 
 config = app_config.get_config()
 
-router = fastapi.APIRouter(prefix="/guidance/drafts")
+router = fastapi.APIRouter(prefix="/guide/staging")
 logger = getLogger(__name__)
 
 
-async def get_draft_store(
+async def get_staging_store(
     db: pymongo.asynchronous.database.AsyncDatabase = fastapi.Depends(mongo.get_db),
-) -> store.DraftStore:
-    draft_store = store.MongoDraftStore(db, config.draft_retention_seconds)
+) -> store.StagingStore:
+    # Index creation happens once, in mongo.get_db(), not here - this dependency
+    # runs on every request, and re-issuing create_index per-request would be
+    # pure duplication.
+    return store.MongoStagingStore(db, config.staging_retention_seconds)
 
-    await draft_store.ensure_indexes()
 
-    return draft_store
-
-
-async def get_draft_service(
-    draft_store: store.DraftStore = fastapi.Depends(get_draft_store),
+async def get_staging_service(
+    staging_store: store.StagingStore = fastapi.Depends(get_staging_store),
     s3_client: Any = fastapi.Depends(s3.get_s3_client),
-) -> service.DraftService:
-    return service.DraftService(draft_store, config.source_docs_s3_bucket, s3_client)
+) -> service.StagingService:
+    return service.StagingService(
+        staging_store, config.source_docs_s3_bucket, s3_client
+    )
 
 
 @router.post("/callback", status_code=fastapi.status.HTTP_202_ACCEPTED)
 async def handle_callback(
     payload: schemas.UploadCallbackPayload,
     background_tasks: fastapi.BackgroundTasks,
-    drafts: service.DraftService = fastapi.Depends(get_draft_service),
+    staging: service.StagingService = fastapi.Depends(get_staging_service),
 ) -> fastapi.Response:
     documents = payload.uploaded_documents()
 
@@ -44,7 +45,7 @@ async def handle_callback(
         raise fastapi.HTTPException(status_code=fastapi.status.HTTP_204_NO_CONTENT)
 
     for document in documents:
-        claimed = await drafts.handle_callback(document)
+        claimed = await staging.handle_callback(document)
 
         if not claimed:
             logger.info(
@@ -53,19 +54,19 @@ async def handle_callback(
             )
             continue
 
-        background_tasks.add_task(drafts.minimal_parse, document)
+        background_tasks.add_task(staging.minimal_parse, document)
 
     return fastapi.Response(status_code=fastapi.status.HTTP_202_ACCEPTED)
 
 
 @router.get("/{file_id}")
-async def get_draft(
+async def get_staged_document(
     file_id: str,
-    drafts: service.DraftService = fastapi.Depends(get_draft_service),
-) -> schemas.DraftResponse:
-    draft = await drafts.get_draft(file_id)
+    staging: service.StagingService = fastapi.Depends(get_staging_service),
+) -> schemas.StagedDocumentResponse:
+    staged_document = await staging.get_staged_doc(file_id)
 
-    if not draft:
+    if not staged_document:
         raise fastapi.HTTPException(status_code=fastapi.status.HTTP_404_NOT_FOUND)
 
-    return schemas.DraftResponse.from_guide_draft(draft)
+    return schemas.StagedDocumentResponse.from_staged_document(staged_document)

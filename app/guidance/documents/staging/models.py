@@ -15,7 +15,7 @@ class ParsingStatus(StrEnum):
 
 
 @dataclass(frozen=True)
-class GuideDraft:
+class StagedDocument:
     file_id: str
     parsing_status: ParsingStatus
     path: str
@@ -40,7 +40,7 @@ class GuideDraft:
         }
 
     @classmethod
-    def from_document(cls, document: Mapping[str, Any]) -> GuideDraft:
+    def from_document(cls, document: Mapping[str, Any]) -> StagedDocument:
         created_at = document["created_at"]
         if isinstance(created_at, datetime) and created_at.tzinfo is None:
             created_at = created_at.replace(

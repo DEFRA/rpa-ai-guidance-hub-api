@@ -1,4 +1,4 @@
-"""A fake `store.DraftStore`, so `service.DraftService` (and `router.py`, via
+"""A fake `store.StagingStore`, so `service.StagingService` (and `router.py`, via
 `app.dependency_overrides`) can be tested without a real Mongo connection.
 
 Keeps the same PENDING -> IN_PROGRESS -> {COMPLETE,FAILED} invariant `claim`
@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.fakes.draft_store import InMemoryDraftStore
-
-FakeDraftStore = InMemoryDraftStore
+from tests.fakes import staging_store as staging_store_fake
 
 
 @pytest.fixture
-def fake_draft_store() -> InMemoryDraftStore:
-    return InMemoryDraftStore()
+def staging_store() -> staging_store_fake.InMemoryStagingStore:
+    return staging_store_fake.InMemoryStagingStore()

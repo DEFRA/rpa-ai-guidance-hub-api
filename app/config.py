@@ -127,9 +127,9 @@ class AppConfig(pydantic_settings.BaseSettings):
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     tracing_header: str = "x-cdp-request-id"
-    draft_retention_seconds: int = pydantic.Field(
+    staging_retention_seconds: int = pydantic.Field(
         default=14400,  # 4 hours in seconds
-        description="Number of seconds to retain a guide draft's minimal parse while awaiting user action",
+        description="Number of seconds to retain a staged document's minimal parse while awaiting user action",
     )
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode

@@ -7,7 +7,7 @@ from typing import Any
 import pydantic
 from pydantic.alias_generators import to_camel
 
-from app.guidance.drafts import models
+from app.guidance.documents.staging import models
 
 # The only fileStatus a completed scan lands on - cdp-uploader's "clean and
 # copied to the destination bucket" answer. Anything else (pending, rejected)
@@ -57,7 +57,7 @@ class UploadCallbackPayload(pydantic.BaseModel):
         return documents
 
 
-class DraftResponse(pydantic.BaseModel):
+class StagedDocumentResponse(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     file_id: str
@@ -68,12 +68,14 @@ class DraftResponse(pydantic.BaseModel):
     last_modified: datetime | None = None
 
     @classmethod
-    def from_guide_draft(cls, draft: models.GuideDraft) -> DraftResponse:
+    def from_staged_document(
+        cls, staged_document: models.StagedDocument
+    ) -> StagedDocumentResponse:
         return cls(
-            file_id=draft.file_id,
-            parsing_status=draft.parsing_status,
-            parsing_error=draft.parse_error,
-            title=draft.title,
-            version=draft.version,
-            last_modified=draft.last_modified,
+            file_id=staged_document.file_id,
+            parsing_status=staged_document.parsing_status,
+            parsing_error=staged_document.parse_error,
+            title=staged_document.title,
+            version=staged_document.version,
+            last_modified=staged_document.last_modified,
         )
