@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 import fastapi
 import pymongo
@@ -26,7 +26,9 @@ def get_staging_service(
     staging_store: Annotated[store.StagingStore, fastapi.Depends(get_staging_store)],
     s3_client: Annotated[Any, fastapi.Depends(s3.get_s3_client)],
 ) -> service.StagingService:
-    return service.StagingService(staging_store, config.source_docs_s3_bucket, s3_client)
+    return service.StagingService(
+        staging_store, config.source_docs_s3_bucket, s3_client
+    )
 
 
 @router.post("/callback", status_code=fastapi.status.HTTP_202_ACCEPTED)
