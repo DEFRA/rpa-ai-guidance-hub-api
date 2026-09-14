@@ -162,7 +162,7 @@ class TestStagingDependencies:
         mock_db = mocker.MagicMock()
         mock_s3 = mocker.MagicMock()
 
-        staging_store = await router.get_staging_store(db=mock_db)
+        staging_store = router.get_staging_store(db=mock_db)
         assert isinstance(staging_store, store.MongoStagingStore)
 
         staging_service = await router.get_staging_service(
