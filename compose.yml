@@ -59,6 +59,9 @@ services:
       FLOCI_ENDPOINT_URL: http://floci:4566
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/}
       HOST: ${HOST:-0.0.0.0}
+      # Same bucket name whether run on host or in the container - only the
+      # endpoint differs, and that's AWS_ENDPOINT_URL/FLOCI_ENDPOINT_URL above.
+      SOURCE_DOCS_S3_BUCKET: ${SOURCE_DOCS_S3_BUCKET:-rpa-ai-guidance-hub-source-docs}
     develop:
       watch:
         - action: sync

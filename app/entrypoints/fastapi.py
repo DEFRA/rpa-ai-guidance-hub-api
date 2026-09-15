@@ -8,6 +8,7 @@ import uvicorn
 
 from app import config as app_config
 from app.common import mongo, tracing
+from app.guidance.documents.staging import router as staging_router
 from app.health import router as health_router
 from app.reference import router as reference_router
 from app.review import router as review_router
@@ -34,6 +35,7 @@ app.add_middleware(tracing.TraceIdMiddleware)
 app.include_router(health_router.router)
 app.include_router(reference_router.router)
 app.include_router(review_router.router)
+app.include_router(staging_router.router)
 
 
 def main() -> None:  # pragma: no cover
