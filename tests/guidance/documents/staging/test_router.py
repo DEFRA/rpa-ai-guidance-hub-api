@@ -158,14 +158,14 @@ class TestGetStagedDocument:
 
 
 class TestStagingDependencies:
-    async def test_get_staging_store_and_service_wiring(self, mocker):
+    def test_get_staging_store_and_service_wiring(self, mocker):
         mock_db = mocker.MagicMock()
         mock_s3 = mocker.MagicMock()
 
         staging_store = router.get_staging_store(db=mock_db)
         assert isinstance(staging_store, store.MongoStagingStore)
 
-        staging_service = await router.get_staging_service(
+        staging_service = router.get_staging_service(
             staging_store=staging_store, s3_client=mock_s3
         )
         assert isinstance(staging_service, service.StagingService)
