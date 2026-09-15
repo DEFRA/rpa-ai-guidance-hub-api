@@ -10,7 +10,7 @@ from app.guidance.documents.staging import schemas, service, store
 
 config = app_config.get_config()
 
-router = fastapi.APIRouter(prefix="/guide/staging")
+router = fastapi.APIRouter(prefix="/guides/staging")
 logger = getLogger(__name__)
 
 

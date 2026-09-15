@@ -44,7 +44,7 @@ class TestHandleCallback:
 
         payload = cdp_uploader.cdp_callback_payload()
 
-        response = client.post("/guide/staging/callback", json=payload)
+        response = client.post("/guides/staging/callback", json=payload)
 
         assert response.status_code == 202
         assert mock_parse.await_count == 1
@@ -56,7 +56,7 @@ class TestHandleCallback:
             cdp_uploader.uploaded_file_entry(file_status="pending")
         )
 
-        response = client.post("/guide/staging/callback", json=payload)
+        response = client.post("/guides/staging/callback", json=payload)
 
         assert response.status_code == 204
 
@@ -68,8 +68,8 @@ class TestHandleCallback:
 
         payload = cdp_uploader.cdp_callback_payload()
 
-        first = client.post("/guide/staging/callback", json=payload)
-        second = client.post("/guide/staging/callback", json=payload)
+        first = client.post("/guides/staging/callback", json=payload)
+        second = client.post("/guides/staging/callback", json=payload)
 
         assert first.status_code == 202
         assert second.status_code == 202
@@ -77,7 +77,7 @@ class TestHandleCallback:
         assert mock_parse.await_count == 1
 
     def test_rejects_malformed_payload_with_422(self, client):
-        response = client.post("/guide/staging/callback", json={"invalid": "payload"})
+        response = client.post("/guides/staging/callback", json={"invalid": "payload"})
 
         assert response.status_code == 422
 
@@ -96,7 +96,7 @@ class TestHandleCallback:
             },
         }
 
-        response = client.post("/guide/staging/callback", json=body)
+        response = client.post("/guides/staging/callback", json=body)
 
         assert response.status_code == 202
 
@@ -119,7 +119,7 @@ class TestGetStagedDocument:
         )
         staging_store.records["guide-123"] = staged_document
 
-        response = client.get("/guide/staging/guide-123")
+        response = client.get("/guides/staging/guide-123")
 
         assert response.status_code == 200
         data = response.json()
@@ -143,7 +143,7 @@ class TestGetStagedDocument:
         )
         staging_store.records["guide-failed"] = staged_document
 
-        response = client.get("/guide/staging/guide-failed")
+        response = client.get("/guides/staging/guide-failed")
 
         assert response.status_code == 200
         data = response.json()
@@ -152,7 +152,7 @@ class TestGetStagedDocument:
         assert data["parsingError"] == "Invalid docx document"
 
     def test_returns_404_when_document_does_not_exist(self, client):
-        response = client.get("/guide/staging/missing-guide-id")
+        response = client.get("/guides/staging/missing-guide-id")
 
         assert response.status_code == 404
 
