@@ -2,18 +2,20 @@ import pytest
 
 from app import config as app_config
 from app.common import mongo
+from app.guidance.documents.staging import store
 
 
 @pytest.fixture(autouse=True)
 def reset_mongo_client():
+    original_client = mongo.client
+    original_db = mongo.db
     mongo.client = None
     mongo.db = None
     yield
-    mongo.client = None
-    mongo.db = None
+    mongo.client = original_client
+    mongo.db = original_db
 
 
-@pytest.mark.asyncio
 async def test_get_mongo_client_initialization(mocker):
     mock_client_cls = mocker.patch("app.common.mongo.pymongo.AsyncMongoClient")
     mock_instance = mock_client_cls.return_value
@@ -21,6 +23,7 @@ async def test_get_mongo_client_initialization(mocker):
     mock_db = mocker.MagicMock()
     mock_instance.get_database.return_value = mock_db
     mock_db.command = mocker.AsyncMock(return_value={"ok": 1})
+    mock_db[store.COLLECTION_NAME].create_index = mocker.AsyncMock()
 
     client = await mongo.get_mongo_client()
 
@@ -31,7 +34,6 @@ async def test_get_mongo_client_initialization(mocker):
     mock_db.command.assert_awaited_once_with("ping")
 
 
-@pytest.mark.asyncio
 async def test_get_mongo_client_with_custom_tls(mocker):
     mock_config = mocker.Mock()
     mock_config.mongo_truststore = "custom-cert-key"
@@ -49,6 +51,7 @@ async def test_get_mongo_client_with_custom_tls(mocker):
     mock_db = mocker.MagicMock()
     mock_instance.get_database.return_value = mock_db
     mock_db.command = mocker.AsyncMock(return_value={"ok": 1})
+    mock_db[store.COLLECTION_NAME].create_index = mocker.AsyncMock()
 
     await mongo.get_mongo_client()
 
@@ -59,7 +62,6 @@ async def test_get_mongo_client_with_custom_tls(mocker):
     )
 
 
-@pytest.mark.asyncio
 async def test_get_mongo_client_returns_existing(mocker):
     existing_client = mocker.Mock()
     mongo.client = existing_client
@@ -72,10 +74,10 @@ async def test_get_mongo_client_returns_existing(mocker):
     mock_client_cls.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_get_db(mocker):
     mock_client = mocker.MagicMock()
-    mock_db = mocker.Mock()
+    mock_db = mocker.MagicMock()
+    mock_db[store.COLLECTION_NAME].create_index = mocker.AsyncMock()
     mock_client.get_database.return_value = mock_db
 
     result = await mongo.get_db(mock_client)

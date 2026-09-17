@@ -75,6 +75,39 @@ def _parse_bedrock_model_config(v: str) -> BedrockModelConfig:
         raise ValueError(msg) from e
 
 
+def _parse_reference_options(v: str) -> list[dict[str, str]]:
+    """Parse a packed 'value1:Label One,value2:Label Two' string into {value, label} dicts.
+
+    Expected format: comma-separated entries, each 'value:label'. Returns plain
+    dicts rather than a pydantic model deliberately - this is config-parsing
+    output, not the API response shape (see app.reference.schemas.ReferenceOption
+    for that), so config.py has no reason to know about a feature package. The
+    keys match ReferenceOption's fields, so a router can return this list as-is
+    and FastAPI's declared response type does the validation/shaping for free.
+    """
+    if not isinstance(v, str):
+        msg = "Reference option list must be a string in the format 'value1:Label One,value2:Label Two'"
+        raise ValueError(msg)
+
+    if not v.strip():
+        msg = "Reference option list must contain at least one entry"
+        raise ValueError(msg)
+
+    options = []
+
+    for entry in v.split(","):
+        (value, separator, label) = entry.partition(":")
+        value, label = value.strip(), label.strip()
+
+        if not separator or not value or not label:
+            msg = f"invalid reference option entry {entry.strip()!r}; expected 'value:label'"
+            raise ValueError(msg)
+
+        options.append({"value": value, "label": label})
+
+    return options
+
+
 class AppConfig(pydantic_settings.BaseSettings):
     model_config = pydantic_settings.SettingsConfigDict()
     python_env: str | None = None
@@ -89,19 +122,33 @@ class AppConfig(pydantic_settings.BaseSettings):
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )
     source_docs_s3_bucket: str = pydantic.Field(
-        default="rpa-ai-guidance-hub-source-docs",
-        description="Bucket cdp-uploader delivers an uploaded .docx to",
+        ..., description="Bucket cdp-uploader deposits scanned source documents into"
     )
     docs_s3_bucket: str = pydantic.Field(
-        default="rpa-ai-guidance-hub-docs",
-        description="Bucket a converted document and its pictures are stored in",
+        ..., description="Bucket a converted document and its pictures are stored in"
     )
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     tracing_header: str = "x-cdp-request-id"
+    staging_retention_seconds: int = pydantic.Field(
+        default=14400,  # 4 hours in seconds
+        description="Number of seconds to retain a staged document's minimal parse while awaiting user action",
+    )
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode
     ] = pydantic.Field(..., validation_alias="CLAUDE_SONNET_MODEL_CONFIG")
+    reference_schemes: Annotated[list[dict[str, str]], pydantic_settings.NoDecode] = (
+        pydantic.Field(..., validation_alias="REFERENCE_SCHEMES")
+    )
+    reference_audiences: Annotated[list[dict[str, str]], pydantic_settings.NoDecode] = (
+        pydantic.Field(..., validation_alias="REFERENCE_AUDIENCES")
+    )
+    reference_systems: Annotated[list[dict[str, str]], pydantic_settings.NoDecode] = (
+        pydantic.Field(..., validation_alias="REFERENCE_SYSTEMS")
+    )
+    reference_guidance_types: Annotated[
+        list[dict[str, str]], pydantic_settings.NoDecode
+    ] = pydantic.Field(..., validation_alias="REFERENCE_GUIDANCE_TYPES")
 
     @pydantic.field_validator("claude_sonnet_model_config", mode="before")
     @classmethod
@@ -109,6 +156,19 @@ class AppConfig(pydantic_settings.BaseSettings):
         cls: type[AppConfig], v: str
     ) -> BedrockModelConfig:
         return _parse_bedrock_model_config(v)
+
+    @pydantic.field_validator(
+        "reference_schemes",
+        "reference_audiences",
+        "reference_systems",
+        "reference_guidance_types",
+        mode="before",
+    )
+    @classmethod
+    def validate_reference_options(
+        cls: type[AppConfig], v: str
+    ) -> list[dict[str, str]]:
+        return _parse_reference_options(v)
 
     @pydantic.computed_field  # type: ignore[misc]
     def bedrock(self) -> BedrockConfig:

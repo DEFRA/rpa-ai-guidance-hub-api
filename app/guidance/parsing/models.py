@@ -20,6 +20,7 @@ the structure.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.guidance.parsing import alignment, anchors
 
@@ -216,3 +217,22 @@ class MarkdownDocument:
             for name, section in self.bookmarks.items()
             if id(section) in of_section
         }
+
+
+@dataclass(frozen=True)
+class MinimalDocumentInfo:
+    """The handful of fields `capture-guide-details` wants pre-populated.
+
+    Deliberately not `MarkdownDocument`: this is read before a designer has chosen
+    to convert anything, and the two never carry the same information at the same
+    time - the full parse costs walking the whole body, and nothing here needs it.
+
+    Every field can be empty. A document is free to leave its cover with no
+    version marking, or its author properties untouched, and that is a normal
+    document rather than a defect in this one - each field says what it found,
+    independently of what the others did.
+    """
+
+    title: str = "Unavailable"
+    version: str = "Unavailable"
+    last_modified: datetime | None = None
