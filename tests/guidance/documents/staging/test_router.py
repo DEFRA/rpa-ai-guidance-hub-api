@@ -32,8 +32,12 @@ def client(
     fastapi_app = app.entrypoints.fastapi.app
     fastapi_app.dependency_overrides[router.get_staging_service] = lambda: mock_service
     fastapi_app.dependency_overrides[router.get_staging_store] = lambda: staging_store
-    with fastapi.testclient.TestClient(fastapi_app) as test_client:
-        yield test_client
+    # Deliberately not entered as a context manager, so the app's lifespan does not
+    # run: it connects to MongoDB and makes indexes, on whatever loop TestClient
+    # brings, while the session-scoped test client is bound to the session's. These
+    # cases are about the endpoint rather than about the service coming up.
+    test_client = fastapi.testclient.TestClient(fastapi_app)
+    yield test_client
     fastapi_app.dependency_overrides.clear()
 
 
