@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from pymongo import AsyncMongoClient
-from testcontainers.mongodb import MongoDbContainer
+from testcontainers.community.mongodb import MongoDbContainer
 
 
 @pytest.fixture(scope="session")
