@@ -5,6 +5,7 @@ import pymongo
 
 from app import config as app_config
 from app.common import tls
+from app.guidance.documents.staging import store
 
 logger = getLogger(__name__)
 
@@ -44,6 +45,8 @@ async def get_db(
     global db
     if db is None:
         db = client.get_database(app_config.get_config().mongo_database)
+
+        await _ensure_indexes(db)
     return db
 
 
@@ -51,3 +54,7 @@ async def check_connection(client: pymongo.AsyncMongoClient) -> None:
     database = await get_db(client)
     response = await database.command("ping")
     logger.info("MongoDB PING %s", response)
+
+
+async def _ensure_indexes(db: pymongo.asynchronous.database.AsyncDatabase) -> None:
+    await db[store.COLLECTION_NAME].create_index("expires_at", expireAfterSeconds=0)
