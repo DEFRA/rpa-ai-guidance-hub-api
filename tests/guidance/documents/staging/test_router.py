@@ -28,12 +28,25 @@ def mock_service(
 def client(
     mock_service: service.StagingService,
     staging_store: staging_store_fake.InMemoryStagingStore,
+    mocker,
 ):
+    # These tests exercise the router with fakes for storage, so the app
+    # lifespan's real Mongo probe is stubbed out. Otherwise each fresh
+    # `with TestClient(...)` here spins up its own event loop (via a new
+    # anyio portal) and rebinds the session-wide real AsyncMongoClient to
+    # it, breaking that client for every other test that touches it.
+    mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
+    mocker.patch(
+        "app.common.mongo.get_db", mocker.AsyncMock(return_value=mocker.MagicMock())
+    )
+    mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
+
     fastapi_app = app.entrypoints.fastapi.app
     fastapi_app.dependency_overrides[router.get_staging_service] = lambda: mock_service
     fastapi_app.dependency_overrides[router.get_staging_store] = lambda: staging_store
     with fastapi.testclient.TestClient(fastapi_app) as test_client:
         yield test_client
+    fastapi_app.dependency_overrides.clear()
     fastapi_app.dependency_overrides.clear()
 
 

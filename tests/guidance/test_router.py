@@ -364,3 +364,11 @@ class TestReadingADocumentBack:
         response = client.get(f"/guides/{DOCUMENT}/content")
 
         assert response.status_code == 502
+
+
+class TestGuidanceDependencies:
+    def test_get_guidance_service_wiring(self, mocker):
+        mock_s3 = mocker.MagicMock()
+        guidance_svc = router.get_guidance_service(s3_client=mock_s3)
+        assert isinstance(guidance_svc, service.GuidanceService)
+        assert guidance_svc._s3 is mock_s3

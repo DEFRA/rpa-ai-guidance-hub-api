@@ -50,7 +50,7 @@ class TestWhereAConvertedDocumentGoes:
     def test_the_markdown_goes_under_the_document_and_then_its_version(self, stored):
         converted = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
 
-        assert stored["into"] == "s3://rpa-ai-guidance-hub-docs/01JBQ8/01JBQ9"
+        assert stored["into"] == "s3://rpa-ai-guidance-hub-managed-docs/01JBQ8/01JBQ9"
         assert converted.content == f"{stored['into']}/content.md"
 
     def test_the_document_is_told_to_call_its_pictures_relatively(self, stored):
@@ -66,7 +66,7 @@ class TestWhereAConvertedDocumentGoes:
         service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
 
         assert store.assets_url(stored["into"], stored["assets"]) == (
-            "s3://rpa-ai-guidance-hub-docs/01JBQ8/assets/"
+            "s3://rpa-ai-guidance-hub-managed-docs/01JBQ8/assets/"
         )
 
     def test_two_versions_of_one_document_share_its_pictures(self, stored):
@@ -149,3 +149,39 @@ class TestWhenTheDocumentIsNotThere:
 
         with pytest.raises(service.SourceMissingError, match="No document at"):
             service.convert(SOURCE)
+
+
+class TestGuidanceService:
+    def test_guidance_service_passes_s3_client_to_convert(self, mocker):
+        mock_client = mocker.MagicMock()
+        mock_convert = mocker.patch.object(service, "convert")
+
+        guidance_svc = service.GuidanceService(s3_client=mock_client)
+        guidance_svc.convert(SOURCE, document_id="doc1", version_id="v1")
+
+        mock_convert.assert_called_once_with(
+            SOURCE,
+            document_id="doc1",
+            version_id="v1",
+            s3_client=mock_client,
+        )
+
+    def test_convert_passes_s3_client_to_store(self, mocker):
+        mock_client = mocker.MagicMock()
+        mock_read = mocker.patch.object(store, "read", return_value=b"fake-bytes")
+        mock_save = mocker.patch.object(
+            store, "save", return_value="s3://docs/doc1/v1/content.md"
+        )
+        mocker.patch.object(
+            service.parser,
+            "parse_docx",
+            return_value=models.MarkdownDocument(title="Doc", sections=[]),
+        )
+
+        service.convert(
+            SOURCE, document_id="doc1", version_id="v1", s3_client=mock_client
+        )
+
+        mock_read.assert_called_once_with(SOURCE, s3_client=mock_client)
+        mock_save.assert_called_once()
+        assert mock_save.call_args.kwargs["s3_client"] is mock_client

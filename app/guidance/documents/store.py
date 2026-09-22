@@ -45,10 +45,9 @@ import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import boto3
 from botocore.exceptions import ClientError
 
-from app import config
+from app.common import s3
 from app.guidance.documents import reader
 from app.guidance.parsing import models
 
@@ -154,6 +153,7 @@ def save(
     document: models.MarkdownDocument,
     document_url_prefix: str,
     assets_url_prefix: str,
+    s3_client: Any = None,
 ) -> str:
     """Store `document` and its pictures, answering where its Markdown was put.
 
@@ -170,15 +170,17 @@ def save(
     """
     into = assets_url(document_url_prefix, assets_url_prefix)
     for image in _unique(document.images):
-        _save_asset(image, into)
+        _save_asset(image, into, s3_client=s3_client)
 
     url = content_url(document_url_prefix)
     markdown = document.markdown(_directory(assets_url_prefix))
-    _write(url, markdown.encode("utf-8"), _MARKDOWN)
+    _write(url, markdown.encode("utf-8"), _MARKDOWN, s3_client=s3_client)
     return url
 
 
-def load(document_url_prefix: str) -> models.MarkdownDocument | None:
+def load(
+    document_url_prefix: str, s3_client: Any = None
+) -> models.MarkdownDocument | None:
     """The guide stored there as the model that wrote it, or None if there is none.
 
     Takes no account of where the pictures went: a name is the last segment of
@@ -188,14 +190,14 @@ def load(document_url_prefix: str) -> models.MarkdownDocument | None:
     "No such guide" is an ordinary answer to an ordinary question, so it is an answer
     rather than an exception a caller has to know to catch.
     """
-    stored = read(content_url(document_url_prefix))
+    stored = read(content_url(document_url_prefix), s3_client=s3_client)
     if stored is None:
         return None
 
     return reader.from_markdown(stored.decode("utf-8"))
 
 
-def read(url: str) -> bytes | None:
+def read(url: str, s3_client: Any = None) -> bytes | None:
     """The bytes at `url`, or None where there is nothing there.
 
     Public because not everything this service reads is a guide: the .docx a guide
@@ -203,11 +205,14 @@ def read(url: str) -> bytes | None:
     document names absolutely is reached by the address the document gives rather
     than by working out where it ought to be.
     """
-    return _read(url)
+    return _read(url, s3_client=s3_client)
 
 
 def load_asset(
-    document_url_prefix: str, assets_url_prefix: str, name: str
+    document_url_prefix: str,
+    assets_url_prefix: str,
+    name: str,
+    s3_client: Any = None,
 ) -> bytes | None:
     """The bytes of one of a guide's pictures.
 
@@ -217,10 +222,13 @@ def load_asset(
     Fetched only when something asks. A document read back carries its pictures by
     name, which is all that rendering it needs.
     """
-    return _read(asset_url(document_url_prefix, assets_url_prefix, name))
+    return _read(
+        asset_url(document_url_prefix, assets_url_prefix, name),
+        s3_client=s3_client,
+    )
 
 
-def _save_asset(image: models.Image, into: str) -> None:
+def _save_asset(image: models.Image, into: str, s3_client: Any = None) -> None:
     """Write one picture, where its bytes are here to write.
 
     A picture read back out of a store carries no bytes - they are already in it,
@@ -230,7 +238,12 @@ def _save_asset(image: models.Image, into: str) -> None:
     if image.data is None:
         return
 
-    _write(f"{into}{_segment(image.name)}", image.data, image.content_type)
+    _write(
+        f"{into}{_segment(image.name)}",
+        image.data,
+        image.content_type,
+        s3_client=s3_client,
+    )
 
 
 def _unique(images: list[models.Image]) -> list[models.Image]:
@@ -259,13 +272,20 @@ def _segment(name: str) -> str:
     return urllib.parse.quote(name, safe="")
 
 
-def _read(url: str) -> bytes | None:
+def _read(url: str, s3_client: Any = None) -> bytes | None:
     """The bytes at `url`, or None where there is nothing there."""
     scheme, location = _reached(url)
+    if scheme == "s3":
+        return _read_s3(location, s3_client=s3_client)
     return _READERS[scheme](location)
 
 
-def _write(url: str, data: bytes, content_type: str) -> None:
+def _write(
+    url: str,
+    data: bytes,
+    content_type: str,
+    s3_client: Any = None,
+) -> None:
     """Put `data` at `url`, making whatever has to exist to hold it.
 
     `content_type` is carried because a stored document names its pictures by URL
@@ -274,7 +294,10 @@ def _write(url: str, data: bytes, content_type: str) -> None:
     nowhere to record it and drops it; a bucket keeps it.
     """
     scheme, location = _reached(url)
-    _WRITERS[scheme](location, data, content_type)
+    if scheme == "s3":
+        _write_s3(location, data, content_type, s3_client=s3_client)
+    else:
+        _WRITERS[scheme](location, data, content_type)
 
 
 def _reached(url: str) -> tuple[str, urllib.parse.SplitResult]:
@@ -332,10 +355,11 @@ def _bucket_and_key(location: urllib.parse.SplitResult) -> tuple[str, str]:
     return location.netloc, urllib.parse.unquote(location.path.lstrip("/"))
 
 
-def _read_s3(location: urllib.parse.SplitResult) -> bytes | None:
+def _read_s3(location: urllib.parse.SplitResult, s3_client: Any = None) -> bytes | None:
     bucket, key = _bucket_and_key(location)
+    client = s3_client if s3_client is not None else _s3()
     try:
-        response = _s3().get_object(Bucket=bucket, Key=key)
+        response = client.get_object(Bucket=bucket, Key=key)
     except ClientError as error:
         if error.response.get("Error", {}).get("Code") in _MISSING:
             return None
@@ -346,20 +370,19 @@ def _read_s3(location: urllib.parse.SplitResult) -> bytes | None:
 
 
 def _write_s3(
-    location: urllib.parse.SplitResult, data: bytes, content_type: str
+    location: urllib.parse.SplitResult,
+    data: bytes,
+    content_type: str,
+    s3_client: Any = None,
 ) -> None:
     bucket, key = _bucket_and_key(location)
-    _s3().put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+    client = s3_client if s3_client is not None else _s3()
+    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
 
 
 def _s3() -> Any:
-    """A client pointed at floci where one is configured, and at AWS where not."""
-    settings = config.get_config()
-    return boto3.client(
-        "s3",
-        region_name=settings.aws_region,
-        endpoint_url=settings.floci_endpoint_url,
-    )
+    """The shared S3 client from app.common.s3."""
+    return s3.get_s3_client()
 
 
 # How each scheme is reached. Adding one is a pair of functions and an entry here,

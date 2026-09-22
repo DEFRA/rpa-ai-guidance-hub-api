@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError
 
+from app.common import s3 as common_s3
 from app.guidance.documents import store
 from app.guidance.parsing import models
 
@@ -236,3 +237,27 @@ class TestAVersionSharingTheDocumentsPictures:
         )
 
         assert content == b"\x89PNG"
+
+
+class TestStoreS3ClientUsage:
+    def test_default_client_uses_common_s3_get_client(self, mocker: Any) -> None:
+        mock_get_s3 = mocker.patch.object(common_s3, "get_s3_client")
+        client = store._s3()
+        assert client is mock_get_s3.return_value
+        mock_get_s3.assert_called_once()
+
+    def test_explicit_s3_client_used_for_read_and_save(self, mocker: Any) -> None:
+        mock_client = mocker.MagicMock()
+        mock_client.get_object.return_value = {
+            "Body": mocker.MagicMock(read=lambda: b"# Custom S3")
+        }
+
+        result = store.read("s3://docs/custom/content.md", s3_client=mock_client)
+        assert result == b"# Custom S3"
+        mock_client.get_object.assert_called_once_with(
+            Bucket="docs", Key="custom/content.md"
+        )
+
+        doc = models.MarkdownDocument(title="Custom")
+        store.save(doc, "s3://docs/custom", "./assets", s3_client=mock_client)
+        mock_client.put_object.assert_called()

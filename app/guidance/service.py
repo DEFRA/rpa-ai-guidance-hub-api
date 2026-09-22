@@ -27,6 +27,7 @@ import re
 import urllib.parse
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from app import config
 from app.guidance.documents import store
@@ -67,10 +68,29 @@ class StoredDocument:
     images: int
 
 
+class GuidanceService:
+    def __init__(self, s3_client: Any = None) -> None:
+        self._s3 = s3_client
+
+    def convert(
+        self,
+        source_url: str,
+        document_id: str | None = None,
+        version_id: str | None = None,
+    ) -> StoredDocument:
+        return convert(
+            source_url,
+            document_id=document_id,
+            version_id=version_id,
+            s3_client=self._s3,
+        )
+
+
 def convert(
     source_url: str,
     document_id: str | None = None,
     version_id: str | None = None,
+    s3_client: Any = None,
 ) -> StoredDocument:
     """Convert the .docx at `source_url` into a stored version of a document.
 
@@ -86,7 +106,11 @@ def convert(
     settings = config.get_config()
     _refuse_anything_but_an_upload(source_url, settings.source_docs_s3_bucket)
 
-    source = store.read(source_url)
+    source = (
+        store.read(source_url, s3_client=s3_client)
+        if s3_client is not None
+        else store.read(source_url)
+    )
     if source is None:
         message = f"No document at {source_url}"
         raise SourceMissingError(message)
@@ -96,13 +120,21 @@ def convert(
     document_id = document_id or str(uuid.uuid4())
     version_id = version_id or str(uuid.uuid4())
 
-    document_url = store.document_url(f"s3://{settings.docs_s3_bucket}", document_id)
+    document_url = store.document_url(
+        f"s3://{settings.managed_docs_s3_bucket}", document_id
+    )
     into = store.document_url(document_url, version_id)
+
+    content = (
+        store.save(document, into, _ASSETS, s3_client=s3_client)
+        if s3_client is not None
+        else store.save(document, into, _ASSETS)
+    )
 
     return StoredDocument(
         document_id=document_id,
         version_id=version_id,
-        content=store.save(document, into, _ASSETS),
+        content=content,
         title=document.title,
         sections=len(document.sections),
         images=len(document.images),

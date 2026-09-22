@@ -24,7 +24,7 @@ import fastapi
 import pydantic
 from fastapi.concurrency import run_in_threadpool
 
-from app.common import mongo
+from app.common import mongo, s3
 from app.guidance import records, service
 from app.guidance.documents import store
 from app.guidance.parsing.errors import DocumentParseError
@@ -38,6 +38,13 @@ logger = getLogger(__name__)
 Database = Annotated[
     "pymongo.asynchronous.database.AsyncDatabase", fastapi.Depends(mongo.get_db)
 ]
+S3Client = Annotated[Any, fastapi.Depends(s3.get_s3_client)]
+
+
+def get_guidance_service(
+    s3_client: S3Client,
+) -> service.GuidanceService:
+    return service.GuidanceService(s3_client=s3_client)
 
 
 class Source(pydantic.BaseModel):
@@ -150,7 +157,10 @@ async def _answered(
 
 @router.post("", status_code=fastapi.status.HTTP_201_CREATED)
 async def create_document(
-    new: NewDocument, database: Database, response: fastapi.Response
+    new: NewDocument,
+    database: Database,
+    response: fastapi.Response,
+    guidance: Annotated[service.GuidanceService, fastapi.Depends(get_guidance_service)],
 ) -> Document:
     """Convert an upload and record the document it becomes.
 
@@ -164,7 +174,7 @@ async def create_document(
         response.status_code = fastapi.status.HTTP_200_OK
         return await _answered(database, already["_id"])
 
-    stored = await _converted(new.source.url)
+    stored = await _converted(guidance, new.source.url)
 
     sanitized_url = new.source.url.replace("\r", "").replace("\n", "")
     logger.info(
@@ -206,7 +216,11 @@ async def read_document(document_id: str, database: Database) -> Document:
 @router.get(
     "/{document_id}/content", response_class=fastapi.responses.PlainTextResponse
 )
-async def read_content(document_id: str, database: Database) -> str:
+async def read_content(
+    document_id: str,
+    database: Database,
+    s3_client: S3Client,
+) -> str:
     """The Markdown of a document's newest version, as it is stored.
 
     Answered as it was written rather than re-rendered. What it says about its
@@ -221,7 +235,9 @@ async def read_content(document_id: str, database: Database) -> str:
             detail=f"No guide {document_id}",
         )
 
-    content = await run_in_threadpool(store.read, version["contentUrl"])
+    content = await run_in_threadpool(
+        store.read, version["contentUrl"], s3_client=s3_client
+    )
     if content is None:
         # The record points at something that is not there: a version half-deleted,
         # or a bucket emptied under it. Not a 404, which would say the document does
@@ -234,10 +250,12 @@ async def read_content(document_id: str, database: Database) -> str:
     return content.decode("utf-8")
 
 
-async def _converted(source_url: str) -> service.StoredDocument:
+async def _converted(
+    guidance: service.GuidanceService, source_url: str
+) -> service.StoredDocument:
     """Convert the upload, answering the caller's mistakes as their status codes."""
     try:
-        return await run_in_threadpool(service.convert, source_url)
+        return await run_in_threadpool(guidance.convert, source_url)
     except service.SourceRefusedError as refused:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_400_BAD_REQUEST, detail=str(refused)
