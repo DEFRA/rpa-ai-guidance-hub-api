@@ -38,9 +38,9 @@ def client(
 
 
 class TestHandleCallback:
-    def test_enqueues_minimal_parse_when_file_claimed(self, client, mocker):
+    def test_enqueues_validate_and_parse_when_file_claimed(self, client, mocker):
         mock_parse = mocker.AsyncMock()
-        mocker.patch.object(service.StagingService, "minimal_parse", mock_parse)
+        mocker.patch.object(service.StagingService, "validate_and_parse", mock_parse)
 
         payload = cdp_uploader.cdp_callback_payload()
 
@@ -64,7 +64,7 @@ class TestHandleCallback:
         self, client, mocker
     ):
         mock_parse = mocker.AsyncMock()
-        mocker.patch.object(service.StagingService, "minimal_parse", mock_parse)
+        mocker.patch.object(service.StagingService, "validate_and_parse", mock_parse)
 
         payload = cdp_uploader.cdp_callback_payload()
 
@@ -73,7 +73,7 @@ class TestHandleCallback:
 
         assert first.status_code == 202
         assert second.status_code == 202
-        # Only claimed once, so minimal_parse was enqueued exactly once
+        # Only claimed once, so validate_and_parse was enqueued exactly once
         assert mock_parse.await_count == 1
 
     def test_rejects_malformed_payload_with_422(self, client):
@@ -83,7 +83,7 @@ class TestHandleCallback:
 
     def test_accepts_camel_case_cdp_uploader_contract(self, client, mocker):
         mock_parse = mocker.AsyncMock()
-        mocker.patch.object(service.StagingService, "minimal_parse", mock_parse)
+        mocker.patch.object(service.StagingService, "validate_and_parse", mock_parse)
 
         body = {
             "uploadStatus": "ready",

@@ -53,7 +53,7 @@ async def handle_callback(
             )
             continue
 
-        background_tasks.add_task(staging.minimal_parse, document)
+        background_tasks.add_task(staging.validate_and_parse, document)
 
     return fastapi.Response(status_code=fastapi.status.HTTP_202_ACCEPTED)
 
