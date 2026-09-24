@@ -33,13 +33,13 @@ class StagingService:
             # Both this and parse_minimal below only ever fail via the same
             # open-the-package check, so a corrupted file is caught here and
             # parse_minimal below is never reached for one.
-            parser.parse_docx(doc_bytes)
+            await asyncio.to_thread(parser.parse_docx, doc_bytes)
         except errors.DocumentParseError as exc:
             logger.warning("Failed to validate file %s: %s", document.file_id, exc)
             await self._store.mark_failed(document.file_id, str(exc))
             return
 
-        info = parser.parse_minimal(doc_bytes)
+        info = await asyncio.to_thread(parser.parse_minimal, doc_bytes)
         await self._store.mark_complete(document.file_id, info)
 
     async def get_staged_doc(self, file_id: str) -> models.StagedDocument | None:
