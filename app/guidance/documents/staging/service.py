@@ -24,16 +24,22 @@ class StagingService:
     async def handle_callback(self, document: schemas.UploadedDocument) -> bool:
         return await self._store.claim(document.file_id, document.s3_key)
 
-    async def minimal_parse(self, document: schemas.UploadedDocument) -> None:
+    async def validate_and_parse(self, document: schemas.UploadedDocument) -> None:
         doc_bytes = await self._get_object_bytes(document)
 
         try:
-            info = parser.parse_minimal(doc_bytes)
+            # Full parse is run for validation alone; its output isn't persisted
+            # here (see ticket notes on the future managed-document decision).
+            # Both this and parse_minimal below only ever fail via the same
+            # open-the-package check, so a corrupted file is caught here and
+            # parse_minimal below is never reached for one.
+            await asyncio.to_thread(parser.parse_docx, doc_bytes)
         except errors.DocumentParseError as exc:
-            logger.warning("Failed to parse file %s: %s", document.file_id, exc)
+            logger.warning("Failed to validate file %s: %s", document.file_id, exc)
             await self._store.mark_failed(document.file_id, str(exc))
             return
 
+        info = await asyncio.to_thread(parser.parse_minimal, doc_bytes)
         await self._store.mark_complete(document.file_id, info)
 
     async def get_staged_doc(self, file_id: str) -> models.StagedDocument | None:

@@ -46,7 +46,7 @@ class TestHandleCallback:
         assert await staging_service.handle_callback(document) is False
 
 
-class TestMinimalParse:
+class TestValidateAndParse:
     async def test_parses_bytes_from_s3_and_marks_complete(
         self,
         staging_service,
@@ -55,10 +55,11 @@ class TestMinimalParse:
     ):
         document = schemas.UploadedDocument("file-1", "first.docx")
         info = parsing_models.MinimalDocumentInfo(title="Parsed Title", version="1.0")
+        monkeypatch.setattr(parser, "parse_docx", lambda _source: None)
         monkeypatch.setattr(parser, "parse_minimal", lambda _source: info)
 
         await staging_service.handle_callback(document)
-        await staging_service.minimal_parse(document)
+        await staging_service.validate_and_parse(document)
 
         staged_document = await staging_store.get("file-1")
         assert staged_document is not None
@@ -66,27 +67,33 @@ class TestMinimalParse:
         assert staged_document.title == "Parsed Title"
         assert staged_document.version == "1.0"
 
-    async def test_records_failure_when_document_parse_error_occurs(
+    async def test_records_failure_when_document_cannot_be_fully_parsed(
         self,
         staging_service,
         staging_store: staging_store_fake.InMemoryStagingStore,
         monkeypatch: pytest.MonkeyPatch,
     ):
         document = schemas.UploadedDocument("file-corrupt", "first.docx")
+        parse_minimal_calls: list[bytes] = []
 
-        def _raise_parse_error(_source: bytes) -> parsing_models.MinimalDocumentInfo:
+        def _raise_parse_error(_source: bytes) -> parsing_models.MarkdownDocument:
             msg = "corrupted zip archive"
             raise errors.DocumentParseError(msg)
 
-        monkeypatch.setattr(parser, "parse_minimal", _raise_parse_error)
+        monkeypatch.setattr(parser, "parse_docx", _raise_parse_error)
+        monkeypatch.setattr(
+            parser, "parse_minimal", lambda source: parse_minimal_calls.append(source)
+        )
 
         await staging_service.handle_callback(document)
-        await staging_service.minimal_parse(document)
+        await staging_service.validate_and_parse(document)
 
         staged_document = await staging_store.get("file-corrupt")
         assert staged_document is not None
         assert staged_document.parsing_status == models.ParsingStatus.FAILED
         assert staged_document.parse_error == "corrupted zip archive"
+        # Metadata extraction must not run against a document that failed validation.
+        assert parse_minimal_calls == []
 
 
 class TestMultiFileUpload:
@@ -107,14 +114,15 @@ class TestMultiFileUpload:
             b"first-bytes": parsing_models.MinimalDocumentInfo(title="First"),
             b"second-bytes": parsing_models.MinimalDocumentInfo(title="Second"),
         }
+        monkeypatch.setattr(parser, "parse_docx", lambda _source: None)
         monkeypatch.setattr(
             parser, "parse_minimal", lambda source: info_by_bytes[source]
         )
 
         await staging_service.handle_callback(first)
         await staging_service.handle_callback(second)
-        await staging_service.minimal_parse(first)
-        await staging_service.minimal_parse(second)
+        await staging_service.validate_and_parse(first)
+        await staging_service.validate_and_parse(second)
 
         first_status = await staging_service.get_staged_doc("first-file")
         second_status = await staging_service.get_staged_doc("second-file")
@@ -126,24 +134,29 @@ class TestMultiFileUpload:
         assert second_status.title == "Second"
         assert second_status.parsing_status == models.ParsingStatus.COMPLETE
 
-    async def test_one_file_failing_to_parse_does_not_affect_the_other(
+    async def test_one_file_failing_to_validate_does_not_affect_the_other(
         self, staging_service, monkeypatch: pytest.MonkeyPatch
     ):
         first = schemas.UploadedDocument("first-file", "first.docx")
         second = schemas.UploadedDocument("second-file", "second.docx")
 
-        def _parse_minimal(source: bytes) -> parsing_models.MinimalDocumentInfo:
+        def _parse_docx(source: bytes) -> parsing_models.MarkdownDocument | None:
             if source == b"first-bytes":
                 reason = "not a Word document"
                 raise errors.DocumentParseError(reason)
-            return parsing_models.MinimalDocumentInfo(title="Second")
+            return None
 
-        monkeypatch.setattr(parser, "parse_minimal", _parse_minimal)
+        monkeypatch.setattr(parser, "parse_docx", _parse_docx)
+        monkeypatch.setattr(
+            parser,
+            "parse_minimal",
+            lambda _source: parsing_models.MinimalDocumentInfo(title="Second"),
+        )
 
         await staging_service.handle_callback(first)
         await staging_service.handle_callback(second)
-        await staging_service.minimal_parse(first)
-        await staging_service.minimal_parse(second)
+        await staging_service.validate_and_parse(first)
+        await staging_service.validate_and_parse(second)
 
         first_status = await staging_service.get_staged_doc("first-file")
         second_status = await staging_service.get_staged_doc("second-file")
