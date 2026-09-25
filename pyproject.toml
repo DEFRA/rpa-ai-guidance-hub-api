@@ -7,21 +7,21 @@ requires-python = ">=3.13"
 dependencies = [
     "asgi-logger==0.1.0",
     "aws-embedded-metrics==3.5.0",
-    "boto3==1.43.88",
+    "boto3==1.43.97",
     "dnspython==2.8.0",
     "ecs-logging==2.3.0",
     "fastapi==0.141.1",
     "httpx2==2.13.0",
-    "pydantic-ai-slim[bedrock]==2.38.0",
+    "pydantic-ai-slim[bedrock]==2.45.0",
     "pydantic-settings==2.15.0",
-    "pymongo[aws,encryption,snappy,zstd]==4.18.0",
+    "pymongo[aws,encryption,snappy,zstd]==4.18.1",
     "python-docx==1.2.0",
-    "uvicorn==0.52.4",
+    "uvicorn==0.53.0",
 ]
 
 [dependency-groups]
 dev = [
-    "debugpy==1.8.21",
+    "debugpy==1.8.22",
     "moto[s3]==5.2.3",
     "mypy==2.3.1",
     "pre-commit==4.6.2",
@@ -30,7 +30,7 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-mock==3.15.1",
     "pyyaml==6.0.3",
-    "ruff==0.16.6",
+    "ruff==0.16.8",
     "taskipy==1.14.1",
     "testcontainers==4.15.0",
     "types-aiofiles==25.1.0.20260518",
