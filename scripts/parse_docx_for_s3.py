@@ -102,19 +102,36 @@ def record_version(
     version_id: str,
     document: models.MarkdownDocument,
 ) -> None:
-    """Add one version to the guide named `name`, minting the guide if it is new."""
-    guide = manifest.setdefault(name, {
-        "documentId": document_id,
-        "updatedAt": dt.datetime.now(tz=dt.UTC).isoformat(),
-        "title": document.title,
-        "versions": []
-    })
+    """Add one version to the guide named `name`, minting the guide if it is new.
+
+    A guide's `createdAt` is when it was first parsed and its `updatedAt` when
+    its latest version was; a version is never changed once parsed, so its two
+    are the same.
+    """
+    now = dt.datetime.now(tz=dt.UTC).isoformat()
+    guide = manifest.setdefault(
+        name,
+        {
+            "documentId": document_id,
+            "createdAt": now,
+            "updatedAt": now,
+            "title": document.title,
+            "versions": [],
+        },
+    )
     guide["documentId"] = document_id
+    # Guides minted before createdAt was recorded keep their first version's time.
+    guide.setdefault(
+        "createdAt",
+        guide["versions"][0].get("updatedAt", now) if guide["versions"] else now,
+    )
+    guide["updatedAt"] = now
     guide["versions"].append(
         {
             "version": version_number,
             "versionId": version_id,
-            "updatedAt": dt.datetime.now(tz=dt.UTC).isoformat(),
+            "createdAt": now,
+            "updatedAt": now,
             "sections": len(document.sections),
             "images": len(document.images),
             # The key relative to the bucket, matching what app.guidance.service
