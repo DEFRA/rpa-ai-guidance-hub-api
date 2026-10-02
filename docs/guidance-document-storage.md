@@ -1,0 +1,120 @@
+# How a parsed guide is stored in S3
+
+This documents the layout `app.guidance.service.convert` writes a parsed guide
+under, so anything that reads or writes one directly - a prototype, a support
+script, a one-off inspection - agrees with the API on where things are. The
+authoritative source is `app/guidance/documents/store.py` and
+`app/guidance/service.py`; this is a map of it, not a replacement for reading
+those.
+
+## Buckets
+
+Two buckets, and they are different kinds of thing:
+
+| Bucket (config field)                          | Owner        | Access       |
+| ----------------------------------------------- | ------------ | ------------ |
+| `SOURCE_DOCS_S3_BUCKET` (`source_docs_s3_bucket`) | cdp-uploader | read-only    |
+| `MANAGED_DOCS_S3_BUCKET` (`managed_docs_s3_bucket`) | this service | read + write |
+
+The source bucket holds the .docx a designer uploaded, in cdp-uploader's own
+key layout (`<upload id>/<file id>`, both uuids) - this service only ever reads
+from it, and refuses to read anywhere else (`service._refuse_anything_but_an_upload`).
+The managed-docs bucket is this service's own, and is what the rest of this
+document describes. Locally, both are created by
+`compose/floci/start.d/10-setup-resources.sh` as `rpa-ai-guidance-hub-source-docs`
+and `rpa-ai-guidance-hub-managed-docs`.
+
+## Key layout
+
+A parsed guide is a Markdown file and the pictures it draws, stored as:
+
+```
+s3://<managed-docs bucket>/<document id>/assets/<sha256 of the picture>.<ext>
+s3://<managed-docs bucket>/<document id>/<version id>/content.md
+```
+
+`document id` and `version id` are both uuid4 strings, minted once when a
+document is first converted and then kept - as the Mongo `_id` of a
+`documents` record and a `document_versions` record respectively (see
+`app/guidance/records.py`). Re-converting an existing upload reuses the same
+`document id` and mints a fresh `version id`.
+
+### Why pictures sit above versions
+
+A picture is named after the digest of its own bytes (`images.py`), not after
+where it sits in the document or which version drew it. Combined with keeping
+the `assets/` prefix one level *above* every version's own folder, this means:
+
+- every version of a document shares one pool of pictures, so re-converting a
+  document that keeps a picture never duplicates it;
+- a stored document names its pictures with a *relative* reference
+  (`../assets/<name>`, written into the Markdown as `app.guidance.service._ASSETS`),
+  which resolves to the same place from any version's `content.md`;
+- nothing has to renumber or move a picture when a new version is stored -
+  only the Markdown that references it changes.
+
+### Content types
+
+`content.md` is stored as `text/markdown; charset=utf-8`. Each picture is
+stored under the content type its part in the .docx declared (`Image.content_type`),
+so that whatever serves it back can set the right header - a filesystem has no
+place to keep this and drops it, which is one reason the managed store is S3
+and not a bind-mounted directory.
+
+## Reading it back
+
+`store.load(document_url_prefix)` reads a version's `content.md` back into the
+same `MarkdownDocument` model that wrote it (via `reader.from_markdown`), and
+`store.load_asset(document_url_prefix, assets_url_prefix, name)` fetches one
+picture by the name the Markdown references. Neither needs to be told where
+the pictures live beyond the same `assets_url_prefix` (`../assets`) the write
+used - `store.resolved` is what turns a document's relative reference back
+into a full address.
+
+## Producing this layout without the full stack
+
+`scripts/parse_docx_for_s3.py` parses a local `.docx` with the same
+`app.guidance.parsing.parser.parse_docx` the API uses, and writes it to a
+directory under your home directory laid out exactly the way the bucket is -
+so the result can be read as-is, or copied to S3 by hand (`aws s3 sync`, the
+console, whatever you'd rather use) for prototype testing:
+
+```bash
+uv run scripts/parse_docx_for_s3.py path/to/guide.docx
+```
+
+That writes `~/rpa-ai-guidance-hub/parsed-guides/<document id>/<version id>/content.md`
+and its pictures under `~/rpa-ai-guidance-hub/parsed-guides/<document id>/assets/` -
+sync that `<document id>` directory to the managed-docs bucket and the keys
+line up with what `app.guidance.service.convert` would have written.
+
+A uuid is not a name a prototype can type, so the same output directory also
+gets a `manifest.json`, mapping a guide's own name (its file name, normalised)
+to the document id it was minted under and the ordered list of its versions:
+
+```json
+{
+  "claims-guide": {
+    "documentId": "2403b062-1ca7-4ef7-9df1-87669c51b281",
+    "versions": [
+      { "version": 1, "versionId": "d37b0ccf-...", "contentUrl": "2403b062-.../d37b0ccf-.../content.md", "...": "..." },
+      { "version": 2, "versionId": "08711078-...", "contentUrl": "2403b062-.../08711078-.../content.md", "...": "..." }
+    ],
+    "latestVersion": 2
+  }
+}
+```
+
+`contentUrl` there is the key relative to whichever bucket you sync the output
+directory into (`<document id>/<version id>/content.md`) - the same key
+`app.guidance.service.convert` would have written it under - not a `file://`
+path into your local output directory.
+
+Running the script again with the same name (or the same source file name)
+appends the next version to that guide's list rather than starting a new one,
+so "claims-guide version 2" always resolves to the same `documentId`/`versionId`
+pair the bucket is keyed by.
+
+See the script's own docstring (`uv run scripts/parse_docx_for_s3.py --help`)
+for the full set of options - the guide's name, its document/version id, and
+where the directory goes.
