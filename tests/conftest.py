@@ -24,4 +24,4 @@ os.environ.setdefault("REFERENCE_AUDIENCES", "caseworker:Caseworker,customer:Cus
 os.environ.setdefault("REFERENCE_SYSTEMS", "siti-agri:Siti Agri,crm:CRM")
 os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "process-guide:Process guide")
 
-pytest_plugins = ["tests.support.mongo", "tests.support.s3"]
+pytest_plugins = ["tests.support.mongo", "tests.support.s3", "tests.support.floci"]
