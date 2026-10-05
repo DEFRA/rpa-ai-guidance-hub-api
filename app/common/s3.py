@@ -10,16 +10,34 @@ is what talking to real AWS in CDP needs.
 Typed `Any`, not a boto3 stub type: boto3 clients are generated dynamically at
 runtime and carry no such static type to reference, which is also why `boto3.*` is
 blanket-`ignore_missing_imports`d in `pyproject.toml`.
+
+**Every S3 call is bounded by half a web request.** The front end gives up on a
+call to this service after 5 seconds (the UI's `guidanceApi.timeout`, 5000 ms by
+default and overridden nowhere), so one S3 call is allowed half of that to connect
+and half to answer, and is tried once more if it fails in a way that can be retried
+(standard mode: throttling, timeouts, 5xx). Anything else - and a second failure -
+is raised to the caller.
+
+One client serves every request and thread: boto3 clients are thread-safe, and its
+connection pool (10 by default) is larger than the most writes a store makes at
+once.
 """
 
 from logging import getLogger
 from typing import Any
 
 import boto3
+from botocore.config import Config
 
 from app import config as app_config
 
 logger = getLogger(__name__)
+
+# Half of the UI's 5 second timeout for a call to this service.
+TIMEOUT_SECONDS = 2.5
+
+# The first try and one retry.
+ATTEMPTS = 2
 
 client: Any = None
 
@@ -41,6 +59,11 @@ def get_s3_client() -> Any:
             "s3",
             endpoint_url=config.floci_endpoint_url,
             region_name=config.aws_region,
+            config=Config(
+                connect_timeout=TIMEOUT_SECONDS,
+                read_timeout=TIMEOUT_SECONDS,
+                retries={"total_max_attempts": ATTEMPTS, "mode": "standard"},
+            ),
         )
 
     return client
