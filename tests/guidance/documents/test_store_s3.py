@@ -1,9 +1,10 @@
 """Reaching a guide in a bucket.
 
 boto3 is mocked with moto, so these keep the unit suite's property of needing
-nothing running. What they are for is the two things only this scheme has to get
-right: turning a URL into a bucket and a key, and telling "no such object" from
-"something is wrong" - the second of which can be wrong quietly.
+nothing running. What they are for is the three things only this scheme has to get
+right: turning a URL into a bucket and a key, telling "no such object" from
+"something is wrong" - the second of which can be wrong quietly - and having S3
+itself refuse to replace what is there.
 
 Everything else about storing a guide is the same whatever answers the URL, and is
 tested once against `file://` in `test_store.py`.
@@ -237,6 +238,94 @@ class TestAVersionSharingTheDocumentsPictures:
         )
 
         assert content == b"\x89PNG"
+
+
+def _refused(status: int, code: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}},
+        "PutObject",
+    )
+
+
+class TestNothingIsReplaced:
+    """Every write is create-only: S3 itself refuses to replace what is there, and
+    that refusal is the earlier attempt's work being found, not a fault."""
+
+    def test_saving_again_leaves_the_stored_markdown_as_it_was(self, s3: Any) -> None:
+        store.save(models.MarkdownDocument(title="Claims"), GUIDE, BESIDE)
+
+        saved = store.save(models.MarkdownDocument(title="Other"), GUIDE, BESIDE)
+
+        assert saved == f"{GUIDE}/content.md"
+        stored = s3.get_object(Bucket="docs", Key="01JBQ8/01JBQ9/content.md")
+        assert b"# Claims" in stored["Body"].read()
+
+    def test_every_write_asks_s3_to_create_rather_than_replace(
+        self, s3: Any, mocker: Any
+    ) -> None:
+        image = models.Image(name="a3f9.png", content_type="image/png", data=b"\x89PNG")
+        section = models.MarkdownSection(
+            heading="Evidence", ordinal=1, content="![](a3f9.png)", images=[image]
+        )
+        spy = mocker.spy(s3, "put_object")
+
+        store.save(
+            models.MarkdownDocument(title="Claims", sections=[section]), GUIDE, BESIDE
+        )
+
+        assert [call.kwargs["IfNoneMatch"] for call in spy.call_args_list] == ["*", "*"]
+
+    def test_a_write_still_in_flight_elsewhere_is_asked_about_again(
+        self, mocker: Any
+    ) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = [
+            _refused(409, "ConditionalRequestConflict"),
+            {},
+        ]
+
+        store.save(
+            models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
+        )
+
+        assert client.put_object.call_count == 2
+
+    def test_a_write_in_flight_that_landed_meanwhile_is_found_there(
+        self, mocker: Any
+    ) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = [
+            _refused(409, "ConditionalRequestConflict"),
+            _refused(412, "PreconditionFailed"),
+        ]
+
+        store.save(
+            models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
+        )
+
+        assert client.put_object.call_count == 2
+
+    def test_a_conflict_that_will_not_settle_is_raised(self, mocker: Any) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = _refused(409, "ConditionalRequestConflict")
+
+        with pytest.raises(ClientError):
+            store.save(
+                models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
+            )
+
+        assert client.put_object.call_count == 2
+
+    def test_being_refused_for_any_other_reason_is_raised(self, mocker: Any) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = _refused(403, "AccessDenied")
+
+        with pytest.raises(ClientError):
+            store.save(
+                models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
+            )
+
+        assert client.put_object.call_count == 1
 
 
 class TestStoreS3ClientUsage:
