@@ -106,11 +106,7 @@ def convert(
     settings = config.get_config()
     _refuse_anything_but_an_upload(source_url, settings.source_docs_s3_bucket)
 
-    source = (
-        store.read(source_url, s3_client=s3_client)
-        if s3_client is not None
-        else store.read(source_url)
-    )
+    source = store.read(source_url, s3_client=s3_client)
     if source is None:
         message = f"No document at {source_url}"
         raise SourceMissingError(message)
@@ -125,11 +121,7 @@ def convert(
     )
     into = store.document_url(document_url, version_id)
 
-    content = (
-        store.save(document, into, _ASSETS, s3_client=s3_client)
-        if s3_client is not None
-        else store.save(document, into, _ASSETS)
-    )
+    content = store.save(document, into, _ASSETS, s3_client=s3_client)
 
     return StoredDocument(
         document_id=document_id,
