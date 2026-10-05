@@ -56,6 +56,7 @@ from __future__ import annotations
 import posixpath
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,6 +87,12 @@ _MISSING = ("NoSuchKey", "404")
 # expects; the second settles one way or the other if asked again.
 _ALREADY_THERE = 412
 _IN_FLIGHT = 409
+
+# How many of a document's pictures are written at once. Each write is a blocking
+# call to the store, and this already runs on a worker thread of its own (the
+# router hands conversion to FastAPI's thread pool), so a small pool of threads
+# here is what runs them side by side.
+PARALLEL_WRITES = 5
 
 
 class UnsupportedSchemeError(ValueError):
@@ -184,15 +191,16 @@ def save(
     is one movable directory and a bucket URL for pictures kept apart from it, and
     says it once either way.
 
-    The pictures go first. A document naming a picture that is not there yet is a
-    broken document for as long as the gap lasts, and the gap is avoidable by
-    ordering the writes. In a bucket, where every write creates and none replaces,
-    finding the Markdown already stored means an earlier save of this document
-    finished.
+    The pictures go first, up to `PARALLEL_WRITES` at a time, and the Markdown only
+    once every one of them is stored. A document naming a picture that is not there
+    yet is a broken document for as long as the gap lasts, and the gap is avoidable
+    by ordering the writes. The first picture that fails stops the save: the
+    pictures not yet started are not written, and the error is raised. In a bucket,
+    where every write creates and none replaces, finding the Markdown already stored
+    means an earlier save of this document finished.
     """
     into = assets_url(document_url_prefix, assets_url_prefix)
-    for image in _unique(document.images):
-        _save_asset(image, into, s3_client=s3_client)
+    _save_assets(_unique(document.images), into, s3_client=s3_client)
 
     url = content_url(document_url_prefix)
     markdown = document.markdown(_directory(assets_url_prefix))
@@ -248,6 +256,26 @@ def load_asset(
         asset_url(document_url_prefix, assets_url_prefix, name),
         s3_client=s3_client,
     )
+
+
+def _save_assets(images: list[models.Image], into: str, s3_client: Any = None) -> None:
+    """Write the pictures side by side, raising the first that fails.
+
+    A failure cancels every write not yet started; those already under way are left
+    to finish, since a write cannot be called back half way. Either way the save
+    goes no further, so the Markdown naming them is never written.
+    """
+    with ThreadPoolExecutor(max_workers=PARALLEL_WRITES) as pool:
+        writes = [
+            pool.submit(_save_asset, image, into, s3_client=s3_client)
+            for image in images
+        ]
+        try:
+            for write in as_completed(writes):
+                write.result()
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
 
 
 def _save_asset(image: models.Image, into: str, s3_client: Any = None) -> None:

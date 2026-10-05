@@ -15,6 +15,8 @@ All fixture text is invented, as everywhere in this package.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -326,6 +328,79 @@ class TestNothingIsReplaced:
             )
 
         assert client.put_object.call_count == 1
+
+
+def _with_pictures(count: int) -> models.MarkdownDocument:
+    images = [
+        models.Image(name=f"p{n:02}.png", content_type="image/png", data=b"\x89PNG")
+        for n in range(count)
+    ]
+    section = models.MarkdownSection(
+        heading="Evidence",
+        ordinal=1,
+        content="".join(f"![]({image.name})" for image in images),
+        images=images,
+    )
+    return models.MarkdownDocument(title="Claims", sections=[section])
+
+
+class TestPicturesAreWrittenSideBySide:
+    """A document's pictures go up several at a time, and its Markdown only once
+    every one of them is stored."""
+
+    def test_every_picture_is_stored_and_the_markdown_last(
+        self, s3: Any, mocker: Any
+    ) -> None:
+        spy = mocker.spy(s3, "put_object")
+
+        store.save(_with_pictures(12), GUIDE, BESIDE)
+
+        keys = [call.kwargs["Key"] for call in spy.call_args_list]
+        assert keys[-1] == "01JBQ8/01JBQ9/content.md"
+        assert sorted(keys[:-1]) == [
+            f"01JBQ8/01JBQ9/assets/p{n:02}.png" for n in range(12)
+        ]
+
+    def test_no_more_than_the_pool_are_written_at_once(self, mocker: Any) -> None:
+        in_flight, most = 0, 0
+        lock = threading.Lock()
+
+        def put_object(**_kwargs: Any) -> dict[str, Any]:
+            nonlocal in_flight, most
+            with lock:
+                in_flight += 1
+                most = max(most, in_flight)
+            time.sleep(0.02)
+            with lock:
+                in_flight -= 1
+            return {}
+
+        client = mocker.MagicMock()
+        client.put_object.side_effect = put_object
+
+        store.save(_with_pictures(20), GUIDE, BESIDE, s3_client=client)
+
+        assert 1 < most <= store.PARALLEL_WRITES
+
+    def test_a_picture_that_fails_stops_the_save_before_its_markdown(
+        self, mocker: Any
+    ) -> None:
+        """The error is raised, and the document naming the pictures is never
+        written: a retry finds no Markdown, and writes what is missing."""
+
+        def put_object(**kwargs: Any) -> dict[str, Any]:
+            if kwargs["Key"].endswith("p03.png"):
+                raise _refused(500, "InternalError")
+            return {}
+
+        client = mocker.MagicMock()
+        client.put_object.side_effect = put_object
+
+        with pytest.raises(ClientError):
+            store.save(_with_pictures(8), GUIDE, BESIDE, s3_client=client)
+
+        written = [call.kwargs["Key"] for call in client.put_object.call_args_list]
+        assert not any(key.endswith("content.md") for key in written)
 
 
 class TestStoreS3ClientUsage:
