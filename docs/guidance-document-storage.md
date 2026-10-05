@@ -73,14 +73,14 @@ into a full address.
 
 ## Producing this layout without the full stack
 
-`scripts/parse_docx_for_s3.py` parses a local `.docx` with the same
+`scripts/parse_docx.py` parses a local `.docx` with the same
 `app.guidance.parsing.parser.parse_docx` the API uses, and writes it to a
 directory under your home directory laid out exactly the way the bucket is -
 so the result can be read as-is, or copied to S3 by hand (`aws s3 sync`, the
 console, whatever you'd rather use) for prototype testing:
 
 ```bash
-uv run scripts/parse_docx_for_s3.py path/to/guide.docx
+uv run scripts/parse_docx.py path/to/guide.docx
 ```
 
 That writes `~/rpa-ai-guidance-hub/parsed-guides/<document id>/<version id>/content.md`
@@ -88,33 +88,12 @@ and its pictures under `~/rpa-ai-guidance-hub/parsed-guides/<document id>/assets
 sync that `<document id>` directory to the managed-docs bucket and the keys
 line up with what `app.guidance.service.convert` would have written.
 
-A uuid is not a name a prototype can type, so the same output directory also
-gets a `manifest.json`, mapping a guide's own name (its file name, normalised)
-to the document id it was minted under and the ordered list of its versions:
+Each run makes a new document with one version, under freshly minted uuids, as
+converting an upload does. `--document-id <id>` adds a version to an existing
+document instead, under a fresh version id and sharing its `assets/`. Nothing
+else is written: no manifest or index of what was converted, so which version
+is latest is told by when each was written. The script prints the content location on stdout, and the
+document and version ids on stderr.
 
-```json
-{
-  "claims-guide": {
-    "documentId": "2403b062-1ca7-4ef7-9df1-87669c51b281",
-    "versions": [
-      { "version": 1, "versionId": "d37b0ccf-...", "contentUrl": "2403b062-.../d37b0ccf-.../content.md", "...": "..." },
-      { "version": 2, "versionId": "08711078-...", "contentUrl": "2403b062-.../08711078-.../content.md", "...": "..." }
-    ],
-    "latestVersion": 2
-  }
-}
-```
-
-`contentUrl` there is the key relative to whichever bucket you sync the output
-directory into (`<document id>/<version id>/content.md`) - the same key
-`app.guidance.service.convert` would have written it under - not a `file://`
-path into your local output directory.
-
-Running the script again with the same name (or the same source file name)
-appends the next version to that guide's list rather than starting a new one,
-so "claims-guide version 2" always resolves to the same `documentId`/`versionId`
-pair the bucket is keyed by.
-
-See the script's own docstring (`uv run scripts/parse_docx_for_s3.py --help`)
-for the full set of options - the guide's name, its document/version id, and
-where the directory goes.
+See the script's own docstring (`uv run scripts/parse_docx.py --help`)
+for its options (where the directory goes).

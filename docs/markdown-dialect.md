@@ -229,9 +229,7 @@ What `name` resolves to depends entirely on the URL prefix whoever wrote the
 file passed at render time — `content.md` itself only ever names the bare
 file, never a full URL. See `docs/guidance-document-storage.md` for the
 actual storage layout (`<document id>/assets/<name>`, shared across every
-version of a document) and `scripts/parse_docx_for_s3.py`'s `manifest.json`
-for how a particular document/version/asset id ties back together for the
-prototype's manual-S3-sync workflow.
+version of a document).
 
 ## A worked example
 
