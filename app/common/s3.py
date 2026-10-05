@@ -11,12 +11,13 @@ Typed `Any`, not a boto3 stub type: boto3 clients are generated dynamically at
 runtime and carry no such static type to reference, which is also why `boto3.*` is
 blanket-`ignore_missing_imports`d in `pyproject.toml`.
 
-**Every S3 call is bounded by half a web request.** The front end gives up on a
-call to this service after 5 seconds (the UI's `guidanceApi.timeout`, 5000 ms by
-default and overridden nowhere), so one S3 call is allowed half of that to connect
-and half to answer, and is tried once more if it fails in a way that can be retried
-(standard mode: throttling, timeouts, 5xx). Anything else - and a second failure -
-is raised to the caller.
+**Each S3 call is capped, and tried once more.** A call is given 2.5 seconds to
+connect and 2.5 to answer - half the 5 seconds the front end waits for a whole call
+to this service (the UI's `guidanceApi.timeout`) - so that one stuck call cannot
+hang a request. A failure that can be retried (standard mode: throttling, timeouts,
+5xx) is tried once more; anything else, and a second failure, is raised to the
+caller. The cap is per call, not per request: a request that makes many calls, as
+storing a document does, can take longer than the front end waits.
 
 One client serves every request and thread: boto3 clients are thread-safe, and its
 connection pool (10 by default) is larger than the most writes a store makes at
@@ -33,7 +34,7 @@ from app import config as app_config
 
 logger = getLogger(__name__)
 
-# Half of the UI's 5 second timeout for a call to this service.
+# Half of the 5 seconds the UI waits for a whole call to this service.
 TIMEOUT_SECONDS = 2.5
 
 # The first try and one retry.
