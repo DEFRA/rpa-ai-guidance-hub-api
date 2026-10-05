@@ -25,6 +25,10 @@ class StagedDocument:
     version: str | None = None
     last_modified: datetime | None = None
     parse_error: str | None = None
+    # The ids a document made from this file is stored under, reserved the first
+    # time it is created and reused by every attempt after (see store.reserve_ids).
+    document_id: str | None = None
+    version_id: str | None = None
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -37,6 +41,8 @@ class StagedDocument:
             "version": self.version,
             "last_modified": self.last_modified,
             "parse_error": self.parse_error,
+            "document_id": self.document_id,
+            "version_id": self.version_id,
         }
 
     @classmethod
@@ -69,4 +75,6 @@ class StagedDocument:
             version=document.get("version", None),
             last_modified=last_modified,
             parse_error=document.get("parse_error", None),
+            document_id=document.get("document_id", None),
+            version_id=document.get("version_id", None),
         )

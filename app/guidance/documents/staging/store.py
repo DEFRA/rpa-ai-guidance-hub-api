@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -22,6 +23,10 @@ class StagingStore(Protocol):
     async def mark_failed(self, file_id: str, reason: str) -> None: ...
 
     async def get(self, file_id: str) -> staging_models.StagedDocument | None: ...
+
+    async def reserve_ids(
+        self, file_id: str
+    ) -> staging_models.StagedDocument | None: ...
 
 
 class MongoStagingStore:
@@ -93,3 +98,41 @@ class MongoStagingStore:
             return None
 
         return staging_models.StagedDocument.from_document(document)
+
+    async def reserve_ids(self, file_id: str) -> staging_models.StagedDocument | None:
+        """Reserve the ids a document made from this file is stored under.
+
+        The first call for a parsed file mints them; every later call, including one
+        racing it, gets the same pair back. Set only where none are set yet, in one
+        update, so whichever request lands first decides and the rest read its ids:
+        that is what lets a retried or repeated submission finish one document
+        rather than start another.
+
+        Returns:
+            The staged document with its ids, or None if the file is not staged (or
+            has expired) or its parse is not complete.
+        """
+        await self._collection.update_one(
+            {
+                "_id": file_id,
+                "parsing_status": staging_models.ParsingStatus.COMPLETE.value,
+                "document_id": {"$exists": False},
+            },
+            {
+                "$set": {
+                    "document_id": str(uuid.uuid4()),
+                    "version_id": str(uuid.uuid4()),
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+        )
+
+        staged = await self.get(file_id)
+        if (
+            staged is None
+            or staged.parsing_status != staging_models.ParsingStatus.COMPLETE
+            or staged.document_id is None
+        ):
+            return None
+
+        return staged

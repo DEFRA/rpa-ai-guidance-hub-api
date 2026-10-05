@@ -1,23 +1,29 @@
 """Creating a document from an upload, over HTTP.
 
-The database is a stand-in holding dictionaries, and the conversion is stubbed: what
-these cases are about is the endpoint's own decisions - which status a caller gets,
-what is recorded in which collection, and what happens when the same journey is
-submitted twice.
+The database and the staging store are stand-ins holding dictionaries, and the
+conversion is stubbed: what these cases are about is the endpoint's own decisions -
+which status a caller gets, what is recorded in which collection and in what order,
+and what happens when the same journey is submitted twice or an attempt stopped part
+way.
 
 All fixture text is invented, as everywhere in this package.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import datetime as dt
 from typing import Any
 
+import pymongo.errors
 import pytest
 from fastapi.testclient import TestClient
 
 from app.common import mongo
 from app.entrypoints.fastapi import app
 from app.guidance import records, router, service
+from app.guidance.documents.staging import models as staging_models
+from app.guidance.documents.staging import router as staging_router
 from app.guidance.parsing.errors import DocumentParseError
 
 UPLOAD = "854a1f43-aab4-4579-b166-d708c0aad436"
@@ -47,7 +53,7 @@ def _request(**overrides: Any) -> dict[str, Any]:
     body = {
         "source": {
             "uploadId": UPLOAD,
-            "url": f"s3://rpa-ai-guidance-hub-source-docs/{KEY}",
+            "fileId": FILE,
             "filename": "CS Revenue Claims.docx",
         },
         "metadata": METADATA,
@@ -113,6 +119,10 @@ class FakeCollection:
         return FakeCursor(self._matching(query))
 
     async def insert_one(self, document: dict[str, Any]) -> None:
+        """Refuses a second record under one `_id`, as Mongo does."""
+        if any(stored["_id"] == document["_id"] for stored in self.documents):
+            message = f"duplicate key: {document['_id']}"
+            raise pymongo.errors.DuplicateKeyError(message)
         self.documents.append(document)
 
     def _matching(self, query: dict[str, Any]) -> list[dict[str, Any]]:
@@ -144,6 +154,52 @@ def collections():
     app.dependency_overrides.clear()
 
 
+class FakeStaging:
+    """Staged files by id. Reserving gives every file the same pair of ids, the ones
+    the stubbed conversion answers with."""
+
+    def __init__(self) -> None:
+        self.staged: dict[str, staging_models.StagedDocument] = {}
+
+    def stage(
+        self,
+        file_id: str = FILE,
+        path: str = KEY,
+        status: staging_models.ParsingStatus = staging_models.ParsingStatus.COMPLETE,
+    ) -> None:
+        now = dt.datetime.now(tz=dt.UTC)
+        self.staged[file_id] = staging_models.StagedDocument(
+            file_id=file_id,
+            parsing_status=status,
+            path=path,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def get(self, file_id: str) -> staging_models.StagedDocument | None:
+        return self.staged.get(file_id)
+
+    async def reserve_ids(self, file_id: str) -> staging_models.StagedDocument | None:
+        staged = self.staged.get(file_id)
+        if staged is None or staged.parsing_status != "complete":
+            return None
+        if staged.document_id is None:
+            staged = dataclasses.replace(
+                staged, document_id=DOCUMENT, version_id=VERSION
+            )
+            self.staged[file_id] = staged
+        return staged
+
+
+@pytest.fixture
+def staging(collections):  # noqa: ARG001 - its overrides are cleared with these
+    """A staging store holding the journey's file, parsed."""
+    fake = FakeStaging()
+    fake.stage()
+    app.dependency_overrides[staging_router.get_staging_store] = lambda: fake
+    return fake
+
+
 @pytest.fixture
 def documents(collections):
     return collections[records.DOCUMENTS]
@@ -172,7 +228,7 @@ def converts(mocker):
 
 
 @pytest.fixture
-def client(collections, converts):  # noqa: ARG001 - both are wanted for their effect
+def client(collections, converts, staging):  # noqa: ARG001 - wanted for their effect
     """A client that does not start the app's lifespan.
 
     As the health and main tests build one, and for the same reason: the lifespan
@@ -317,14 +373,114 @@ class TestWhenItCannotBeDone:
     def test_nothing_is_recorded_when_the_conversion_fails(
         self, client, converts, documents, versions
     ):
-        """Neither half: the document is written first, so a conversion that fails
-        before it must leave no record of either."""
+        """Neither half: both records are written only after the content is stored,
+        so a conversion that fails must leave no record of either."""
         converts.side_effect = DocumentParseError("not a .docx")
 
         client.post("/guides", json=_request())
 
         assert documents.documents == []
         assert versions.documents == []
+
+
+class TestTheUploadIsTheStagedOne:
+    """The file is named by its id, and read from its staging record: never from a
+    location the caller supplies."""
+
+    def test_the_file_is_converted_from_where_it_was_staged(self, client, converts):
+        client.post("/guides", json=_request())
+
+        source_url = converts.call_args.args[0]
+        assert source_url.endswith(f"/{KEY}")
+        assert source_url.startswith("s3://")
+
+    def test_a_file_that_was_never_staged_is_not_found(self, client, staging):
+        staging.staged.clear()
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 404
+
+    def test_a_file_from_another_upload_is_a_bad_request(self, client, staging):
+        staging.stage(path=f"another-upload/{FILE}")
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 400
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            staging_models.ParsingStatus.PENDING,
+            staging_models.ParsingStatus.IN_PROGRESS,
+            staging_models.ParsingStatus.FAILED,
+        ],
+    )
+    def test_a_file_that_has_not_parsed_is_a_conflict(
+        self, client, staging, converts, status
+    ):
+        staging.stage(status=status)
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 409
+        converts.assert_not_called()
+
+
+class TestTheIdsAreReservedOnce:
+    """The document and version ids come from the staging record, so every attempt
+    at one upload writes under the same ones."""
+
+    def test_the_content_is_stored_under_the_reserved_ids(self, client, converts):
+        client.post("/guides", json=_request())
+
+        assert converts.call_args.kwargs["document_id"] == DOCUMENT
+        assert converts.call_args.kwargs["version_id"] == VERSION
+
+    def test_the_records_are_written_bottom_up(self, client, mocker):
+        """The version once its content is stored, then the document, which commits
+        it."""
+        order = mocker.Mock()
+        order.attach_mock(mocker.spy(records, "create_version"), "version")
+        order.attach_mock(mocker.spy(records, "create"), "document")
+
+        client.post("/guides", json=_request())
+
+        assert [name for name, *_ in order.mock_calls] == ["version", "document"]
+
+    def test_an_attempt_that_stopped_after_its_version_is_finished(
+        self, client, documents, versions
+    ):
+        """The earlier attempt stored the content and recorded the version, then
+        failed before the document. Submitting again commits the document, and keeps
+        the version it found rather than recording a second."""
+        earlier = {
+            "_id": VERSION,
+            records.DOCUMENT_ID: DOCUMENT,
+            "contentUrl": CONTENT,
+            "title": COVER_TITLE,
+            "createdBy": None,
+            "createdAt": dt.datetime(2026, 10, 5, 9, 0, tzinfo=dt.UTC),
+        }
+        versions.documents.append(earlier)
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 201
+        assert [record["_id"] for record in documents.documents] == [DOCUMENT]
+        assert versions.documents == [earlier]
+
+    def test_a_version_id_taken_by_another_document_is_raised(
+        self, client, versions, documents
+    ):
+        """No attempt at this document could have recorded that, so it is a fault
+        rather than an earlier attempt's work - and nothing is committed."""
+        versions.documents.append({"_id": VERSION, records.DOCUMENT_ID: "another"})
+
+        with pytest.raises(records.MisfiledVersionError):
+            client.post("/guides", json=_request())
+
+        assert documents.documents == []
 
 
 class TestReadingADocumentBack:
