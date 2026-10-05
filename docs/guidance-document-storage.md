@@ -84,9 +84,9 @@ uv run scripts/parse_docx.py path/to/guide.docx
 ```
 
 That writes `~/rpa-ai-guidance-hub/parsed-guides/<document id>/<version id>/content.md`
-and its pictures under `~/rpa-ai-guidance-hub/parsed-guides/<document id>/assets/` -
-sync that `<document id>` directory to the managed-docs bucket and the keys
-line up with what `app.guidance.service.convert` would have written.
+and its pictures under `~/rpa-ai-guidance-hub/parsed-guides/<document id>/assets/`.
+Sync the output root to the managed-docs bucket, or sync that `<document id>`
+directory to `s3://<managed-docs bucket>/<document id>/`, so the keys retain the document prefix.
 
 Each run makes a new document with one version, under freshly minted uuids, as
 converting an upload does. `--document-id <id>` adds a version to an existing
