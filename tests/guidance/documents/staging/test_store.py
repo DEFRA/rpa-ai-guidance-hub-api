@@ -199,3 +199,28 @@ class TestReserveIds:
         assert await staging_store.reserve_ids(file_id) is None
         raw = await mongo_database[store.COLLECTION_NAME].find_one({"_id": file_id})
         assert "document_id" not in raw
+
+
+class TestPromote:
+    async def test_marks_the_file_as_promoted_and_keeps_its_record(self, staging_store):
+        file_id = f"promote-{uuid.uuid4()}"
+        await TestReserveIds()._parsed(staging_store, file_id)
+        reserved = await staging_store.reserve_ids(file_id)
+        before = datetime.now(UTC) - timedelta(seconds=1)
+
+        await staging_store.promote(file_id)
+
+        staged = await staging_store.get(file_id)
+        assert staged is not None
+        assert staged.promoted_at is not None
+        assert staged.promoted_at >= before
+        assert staged.document_id == reserved.document_id
+
+    async def test_a_file_not_yet_promoted_has_no_promotion(self, staging_store):
+        file_id = f"promote-{uuid.uuid4()}"
+        await staging_store.claim(file_id, f"upload/{file_id}")
+
+        assert (await staging_store.get(file_id)).promoted_at is None
+
+    async def test_promoting_a_file_already_gone_is_not_an_error(self, staging_store):
+        await staging_store.promote(f"never-{uuid.uuid4()}")

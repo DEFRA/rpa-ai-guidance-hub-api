@@ -190,6 +190,13 @@ class FakeStaging:
             self.staged[file_id] = staged
         return staged
 
+    async def promote(self, file_id: str) -> None:
+        staged = self.staged.get(file_id)
+        if staged is not None:
+            self.staged[file_id] = dataclasses.replace(
+                staged, promoted_at=dt.datetime.now(tz=dt.UTC)
+            )
+
 
 @pytest.fixture
 def staging(collections):  # noqa: ARG001 - its overrides are cleared with these
@@ -481,6 +488,40 @@ class TestTheIdsAreReservedOnce:
             client.post("/guides", json=_request())
 
         assert documents.documents == []
+
+
+class TestTheStagedFileIsPromoted:
+    """Once the document is committed the staged file has been promoted to it, and
+    its staging record says so - so a record with ids but no promotion is an attempt
+    that never committed."""
+
+    def test_once_the_document_is_committed(self, client, staging):
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 201
+        assert staging.staged[FILE].promoted_at is not None
+
+    def test_failing_to_mark_it_does_not_fail_the_request(
+        self, client, staging, documents, mocker, caplog
+    ):
+        """The document is already safe, and is the upload's record from here on."""
+        mocker.patch.object(staging, "promote", side_effect=RuntimeError("Mongo away"))
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 201
+        assert [record["_id"] for record in documents.documents] == [DOCUMENT]
+        assert "as promoted" in caplog.text
+
+    def test_not_when_the_conversion_fails(self, client, staging, converts):
+        """Nothing was committed: the record keeps its ids for the next attempt, and
+        is not promoted."""
+        converts.side_effect = DocumentParseError("not a .docx")
+
+        client.post("/guides", json=_request())
+
+        assert staging.staged[FILE].document_id == DOCUMENT
+        assert staging.staged[FILE].promoted_at is None
 
 
 class TestReadingADocumentBack:

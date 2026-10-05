@@ -29,6 +29,8 @@ class StagedDocument:
     # time it is created and reused by every attempt after (see store.reserve_ids).
     document_id: str | None = None
     version_id: str | None = None
+    # When the document made from this file was committed (see store.promote).
+    promoted_at: datetime | None = None
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -43,6 +45,7 @@ class StagedDocument:
             "parse_error": self.parse_error,
             "document_id": self.document_id,
             "version_id": self.version_id,
+            "promoted_at": self.promoted_at,
         }
 
     @classmethod
@@ -61,6 +64,10 @@ class StagedDocument:
             )
             updated_at = updated_at.astimezone(UTC)
 
+        promoted_at = document.get("promoted_at", None)
+        if isinstance(promoted_at, datetime) and promoted_at.tzinfo is None:
+            promoted_at = promoted_at.replace(tzinfo=UTC)
+
         last_modified = document.get("last_modified", None)
         if isinstance(last_modified, datetime) and last_modified.tzinfo is None:
             last_modified = last_modified.replace(tzinfo=UTC)
@@ -77,4 +84,5 @@ class StagedDocument:
             parse_error=document.get("parse_error", None),
             document_id=document.get("document_id", None),
             version_id=document.get("version_id", None),
+            promoted_at=promoted_at,
         )

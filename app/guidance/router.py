@@ -228,6 +228,8 @@ async def create_document(
         metadata=new.metadata,
         source=new.source.model_dump(by_alias=True),
     )
+    await _promote_staged(staging, staged.file_id)
+
     response.headers["Location"] = f"/guides/{stored.document_id}"
     return _answer(document, [version])
 
@@ -315,6 +317,22 @@ async def _reserved(
         )
 
     return reserved, reserved.document_id, reserved.version_id
+
+
+async def _promote_staged(staging: staging_store.StagingStore, file_id: str) -> None:
+    """Mark the file's staging record as promoted, now its document is committed.
+
+    Best effort: the document is already safe, and is the upload's record from here
+    on, so failing to mark the staging record must not fail the request.
+    """
+    try:
+        await staging.promote(file_id)
+    except Exception:
+        logger.warning(
+            "Could not mark the staging record for file %s as promoted",
+            file_id,
+            exc_info=True,
+        )
 
 
 async def _converted(

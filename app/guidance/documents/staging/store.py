@@ -28,6 +28,8 @@ class StagingStore(Protocol):
         self, file_id: str
     ) -> staging_models.StagedDocument | None: ...
 
+    async def promote(self, file_id: str) -> None: ...
+
 
 class MongoStagingStore:
     def __init__(
@@ -136,3 +138,18 @@ class MongoStagingStore:
             return None
 
         return staged
+
+    async def promote(self, file_id: str) -> None:
+        """Record that the document made from this file has been committed.
+
+        The file has been promoted from staging to a document under the ids reserved
+        on this record. Marked rather than removed: the record still answers for the
+        upload until it expires, and "ids reserved but not promoted" is what an
+        attempt that never committed looks like. Promoting a file whose record has
+        already gone is not an error.
+        """
+        now = datetime.now(UTC)
+        await self._collection.update_one(
+            {"_id": file_id},
+            {"$set": {"promoted_at": now, "updated_at": now}},
+        )
