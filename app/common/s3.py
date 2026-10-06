@@ -34,10 +34,7 @@ from app import config as app_config
 
 logger = getLogger(__name__)
 
-# Half of the 5 seconds the UI waits for a whole call to this service.
 TIMEOUT_SECONDS = 2.5
-
-# The first try and one retry.
 ATTEMPTS = 2
 
 client: Any = None
