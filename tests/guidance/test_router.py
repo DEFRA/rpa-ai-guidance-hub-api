@@ -483,9 +483,10 @@ class TestTheIdsAreReservedOnce:
         """No attempt at this document could have recorded that, so it is a fault
         rather than an earlier attempt's work - and nothing is committed."""
         versions.documents.append({"_id": VERSION, records.DOCUMENT_ID: "another"})
+        request = _request()
 
         with pytest.raises(records.MisfiledVersionError):
-            client.post("/guides", json=_request())
+            client.post("/guides", json=request)
 
         assert documents.documents == []
 

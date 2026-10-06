@@ -310,22 +310,20 @@ class TestNothingIsReplaced:
     def test_a_conflict_that_will_not_settle_is_raised(self, mocker: Any) -> None:
         client = mocker.MagicMock()
         client.put_object.side_effect = _refused(409, "ConditionalRequestConflict")
+        document = models.MarkdownDocument(title="Claims")
 
         with pytest.raises(ClientError):
-            store.save(
-                models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
-            )
+            store.save(document, GUIDE, BESIDE, s3_client=client)
 
         assert client.put_object.call_count == 2
 
     def test_being_refused_for_any_other_reason_is_raised(self, mocker: Any) -> None:
         client = mocker.MagicMock()
         client.put_object.side_effect = _refused(403, "AccessDenied")
+        document = models.MarkdownDocument(title="Claims")
 
         with pytest.raises(ClientError):
-            store.save(
-                models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
-            )
+            store.save(document, GUIDE, BESIDE, s3_client=client)
 
         assert client.put_object.call_count == 1
 
@@ -395,9 +393,10 @@ class TestPicturesAreWrittenSideBySide:
 
         client = mocker.MagicMock()
         client.put_object.side_effect = put_object
+        document = _with_pictures(8)
 
         with pytest.raises(ClientError):
-            store.save(_with_pictures(8), GUIDE, BESIDE, s3_client=client)
+            store.save(document, GUIDE, BESIDE, s3_client=client)
 
         written = [call.kwargs["Key"] for call in client.put_object.call_args_list]
         assert not any(key.endswith("content.md") for key in written)

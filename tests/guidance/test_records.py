@@ -57,11 +57,10 @@ class TestCreatingADocument:
         await records.create(
             database, str(uuid.uuid4()), metadata={}, source=_source(upload_id)
         )
+        another_id, same_upload = str(uuid.uuid4()), _source(upload_id)
 
         with pytest.raises(pymongo.errors.DuplicateKeyError):
-            await records.create(
-                database, str(uuid.uuid4()), metadata={}, source=_source(upload_id)
-            )
+            await records.create(database, another_id, metadata={}, source=same_upload)
 
 
 class TestCreatingAVersion:
@@ -85,11 +84,12 @@ class TestCreatingAVersion:
         await records.create_version(
             database, version_id, document_id=str(uuid.uuid4()), content_url="s3://d/x"
         )
+        another_document_id = str(uuid.uuid4())
 
         with pytest.raises(records.MisfiledVersionError):
             await records.create_version(
                 database,
                 version_id,
-                document_id=str(uuid.uuid4()),
+                document_id=another_document_id,
                 content_url="s3://d/y",
             )
