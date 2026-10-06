@@ -6,6 +6,8 @@ during claim, update mutations, and round-trip retrieval.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -125,3 +127,100 @@ class TestGet:
         staged_document = await staging_store.get("non-existent-id")
 
         assert staged_document is None
+
+
+class TestReserveIds:
+    """The ids a document made from a file is stored under: minted once, on the
+    file's staging record, and the same for every attempt after."""
+
+    async def _parsed(self, staging_store, file_id: str) -> None:
+        await staging_store.claim(file_id, f"upload/{file_id}")
+        await staging_store.mark_complete(
+            file_id,
+            parsing_models.MinimalDocumentInfo(
+                title="Claims", version="1", last_modified=None
+            ),
+        )
+
+    async def test_reserves_a_pair_of_uuids_on_a_parsed_file(
+        self, staging_store, mongo_database
+    ):
+        file_id = f"reserve-{uuid.uuid4()}"
+        await self._parsed(staging_store, file_id)
+
+        staged = await staging_store.reserve_ids(file_id)
+
+        assert staged is not None
+        assert uuid.UUID(staged.document_id) != uuid.UUID(staged.version_id)
+        raw = await mongo_database[store.COLLECTION_NAME].find_one({"_id": file_id})
+        assert (raw["document_id"], raw["version_id"]) == (
+            staged.document_id,
+            staged.version_id,
+        )
+
+    async def test_reserving_again_gives_the_same_ids(self, staging_store):
+        file_id = f"reserve-{uuid.uuid4()}"
+        await self._parsed(staging_store, file_id)
+
+        first = await staging_store.reserve_ids(file_id)
+        second = await staging_store.reserve_ids(file_id)
+
+        assert first is not None
+        assert second is not None
+        assert (second.document_id, second.version_id) == (
+            first.document_id,
+            first.version_id,
+        )
+
+    async def test_requests_racing_to_reserve_all_get_the_same_ids(self, staging_store):
+        """A double submission: whichever lands first decides, and the rest read
+        its ids rather than minting their own."""
+        file_id = f"reserve-{uuid.uuid4()}"
+        await self._parsed(staging_store, file_id)
+
+        reserved = await asyncio.gather(
+            *(staging_store.reserve_ids(file_id) for _ in range(10))
+        )
+
+        assert len({(s.document_id, s.version_id) for s in reserved}) == 1
+
+    async def test_reserves_nothing_for_a_file_that_is_not_staged(self, staging_store):
+        assert await staging_store.reserve_ids(f"never-{uuid.uuid4()}") is None
+
+    @pytest.mark.parametrize("failed", [False, True])
+    async def test_reserves_nothing_for_a_file_whose_parse_is_not_complete(
+        self, staging_store, mongo_database, failed
+    ):
+        file_id = f"reserve-{uuid.uuid4()}"
+        await staging_store.claim(file_id, f"upload/{file_id}")
+        if failed:
+            await staging_store.mark_failed(file_id, "not a .docx")
+
+        assert await staging_store.reserve_ids(file_id) is None
+        raw = await mongo_database[store.COLLECTION_NAME].find_one({"_id": file_id})
+        assert "document_id" not in raw
+
+
+class TestPromote:
+    async def test_marks_the_file_as_promoted_and_keeps_its_record(self, staging_store):
+        file_id = f"promote-{uuid.uuid4()}"
+        await TestReserveIds()._parsed(staging_store, file_id)
+        reserved = await staging_store.reserve_ids(file_id)
+        before = datetime.now(UTC) - timedelta(seconds=1)
+
+        await staging_store.promote(file_id)
+
+        staged = await staging_store.get(file_id)
+        assert staged is not None
+        assert staged.promoted_at is not None
+        assert staged.promoted_at >= before
+        assert staged.document_id == reserved.document_id
+
+    async def test_a_file_not_yet_promoted_has_no_promotion(self, staging_store):
+        file_id = f"promote-{uuid.uuid4()}"
+        await staging_store.claim(file_id, f"upload/{file_id}")
+
+        assert (await staging_store.get(file_id)).promoted_at is None
+
+    async def test_promoting_a_file_already_gone_is_not_an_error(self, staging_store):
+        await staging_store.promote(f"never-{uuid.uuid4()}")

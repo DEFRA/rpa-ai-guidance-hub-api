@@ -27,6 +27,13 @@ The ids are the ones the object store uses. `documents._id` is the prefix a docu
 is written under and a version's `_id` is the prefix beneath that, so a record and a
 key are two spellings of one address rather than two facts to keep in step.
 
+**Records are created, never replaced, and one already there is kept.** A new
+document's ids are reserved once, on its upload's staging record, so the only thing
+that can already hold one of them is an earlier attempt at the same document. Each
+insert is whole or absent, so finding the record means that attempt got this far,
+and the record found is the answer. A version found under a different document is
+not that, and is raised.
+
 **An owner and a version's creator are not the same thing and are not stored
 together.** An owner is metadata: a person or a team named on the form, possibly
 nobody with an account, and there may be several. A version's creator is the
@@ -46,6 +53,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import TYPE_CHECKING, Any
 
+import pymongo.errors
+
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
 
@@ -59,6 +68,11 @@ _UPLOAD_ID = "source.uploadId"
 # The document a version belongs to: the many end of the one-to-many. Public because
 # a version record read back is how a caller gets from an upload to its document.
 DOCUMENT_ID = "documentId"
+
+
+class MisfiledVersionError(RuntimeError):
+    """Raised when a version id is already taken by a version of another document."""
+
 
 # Newest first. A version id is a uuid, so when a version was made is the only thing
 # that orders one against another.
@@ -135,6 +149,10 @@ async def create(
     `metadata` is what the journey collected, owners included: this service does not
     interpret it, because what an author is asked about a document is a question for
     the journey rather than for the store behind it.
+
+    Writing it is what commits the document, so it goes last, after its first
+    version. If it is already there, an earlier attempt committed it, and that
+    record is answered as it stands.
     """
     record = {
         "_id": document_id,
@@ -142,8 +160,7 @@ async def create(
         "source": source,
         "createdAt": dt.datetime.now(tz=dt.UTC),
     }
-    await database[DOCUMENTS].insert_one(record)
-    return record
+    return await _created(database[DOCUMENTS], record)
 
 
 async def create_version(
@@ -167,6 +184,14 @@ async def create_version(
     `created_by` is who was signed in, not who owns the document - see the module
     docstring. It is optional because the endpoint is not yet authenticated, and a
     version made by nobody is more honest than one attributed to a guess.
+
+    Written only once its content is wholly stored. If it is already there, an
+    earlier attempt wrote it, and that record is answered as it stands - unless it
+    belongs to another document, which no attempt at this one could have done.
+
+    Raises:
+        MisfiledVersionError: if the version id is taken by another document's
+            version.
     """
     record = {
         "_id": version_id,
@@ -176,5 +201,30 @@ async def create_version(
         "createdBy": created_by,
         "createdAt": dt.datetime.now(tz=dt.UTC),
     }
-    await database[VERSIONS].insert_one(record)
+    stored = await _created(database[VERSIONS], record)
+    if stored[DOCUMENT_ID] != document_id:
+        message = (
+            f"Version {version_id} belongs to document {stored[DOCUMENT_ID]}, "
+            f"not {document_id}"
+        )
+        raise MisfiledVersionError(message)
+    return stored
+
+
+async def _created(collection: Any, record: dict[str, Any]) -> dict[str, Any]:
+    """Insert `record`, or answer the one already holding its `_id`.
+
+    Only a clash on `_id` is an earlier attempt's work. A clash on another unique
+    index - an upload already made into a different document - has no record under
+    this id, and is raised as it was.
+    """
+    try:
+        await collection.insert_one(record)
+    except pymongo.errors.DuplicateKeyError:
+        existing: dict[str, Any] | None = await collection.find_one(
+            {"_id": record["_id"]}
+        )
+        if existing is None:
+            raise
+        return existing
     return record

@@ -32,6 +32,9 @@ class TestStagedDocument:
             "version": "1.0.0",
             "last_modified": last_modified,
             "parse_error": None,
+            "document_id": None,
+            "version_id": None,
+            "promoted_at": None,
         }
 
         reconstituted = models.StagedDocument.from_document(doc)

@@ -27,7 +27,7 @@ def stored(mocker):
     """The store, answering with a document and recording what it was asked."""
     calls = {}
 
-    def save(document, document_url_prefix, assets_url_prefix):
+    def save(document, document_url_prefix, assets_url_prefix, s3_client=None):  # noqa: ARG001 - the store's signature
         calls["document"] = document
         calls["into"] = document_url_prefix
         calls["assets"] = assets_url_prefix

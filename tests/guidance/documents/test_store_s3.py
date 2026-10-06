@@ -1,9 +1,10 @@
 """Reaching a guide in a bucket.
 
 boto3 is mocked with moto, so these keep the unit suite's property of needing
-nothing running. What they are for is the two things only this scheme has to get
-right: turning a URL into a bucket and a key, and telling "no such object" from
-"something is wrong" - the second of which can be wrong quietly.
+nothing running. What they are for is the three things only this scheme has to get
+right: turning a URL into a bucket and a key, telling "no such object" from
+"something is wrong" - the second of which can be wrong quietly - and having S3
+itself refuse to replace what is there.
 
 Everything else about storing a guide is the same whatever answers the URL, and is
 tested once against `file://` in `test_store.py`.
@@ -14,6 +15,8 @@ All fixture text is invented, as everywhere in this package.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -237,6 +240,166 @@ class TestAVersionSharingTheDocumentsPictures:
         )
 
         assert content == b"\x89PNG"
+
+
+def _refused(status: int, code: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}},
+        "PutObject",
+    )
+
+
+class TestNothingIsReplaced:
+    """Every write is create-only: S3 itself refuses to replace what is there, and
+    that refusal is the earlier attempt's work being found, not a fault."""
+
+    def test_saving_again_leaves_the_stored_markdown_as_it_was(self, s3: Any) -> None:
+        store.save(models.MarkdownDocument(title="Claims"), GUIDE, BESIDE)
+
+        saved = store.save(models.MarkdownDocument(title="Other"), GUIDE, BESIDE)
+
+        assert saved == f"{GUIDE}/content.md"
+        stored = s3.get_object(Bucket="docs", Key="01JBQ8/01JBQ9/content.md")
+        assert b"# Claims" in stored["Body"].read()
+
+    def test_every_write_asks_s3_to_create_rather_than_replace(
+        self, s3: Any, mocker: Any
+    ) -> None:
+        image = models.Image(name="a3f9.png", content_type="image/png", data=b"\x89PNG")
+        section = models.MarkdownSection(
+            heading="Evidence", ordinal=1, content="![](a3f9.png)", images=[image]
+        )
+        spy = mocker.spy(s3, "put_object")
+
+        store.save(
+            models.MarkdownDocument(title="Claims", sections=[section]), GUIDE, BESIDE
+        )
+
+        assert [call.kwargs["IfNoneMatch"] for call in spy.call_args_list] == ["*", "*"]
+
+    def test_a_write_still_in_flight_elsewhere_is_asked_about_again(
+        self, mocker: Any
+    ) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = [
+            _refused(409, "ConditionalRequestConflict"),
+            {},
+        ]
+
+        store.save(
+            models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
+        )
+
+        assert client.put_object.call_count == 2
+
+    def test_a_write_in_flight_that_landed_meanwhile_is_found_there(
+        self, mocker: Any
+    ) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = [
+            _refused(409, "ConditionalRequestConflict"),
+            _refused(412, "PreconditionFailed"),
+        ]
+
+        store.save(
+            models.MarkdownDocument(title="Claims"), GUIDE, BESIDE, s3_client=client
+        )
+
+        assert client.put_object.call_count == 2
+
+    def test_a_conflict_that_will_not_settle_is_raised(self, mocker: Any) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = _refused(409, "ConditionalRequestConflict")
+        document = models.MarkdownDocument(title="Claims")
+
+        with pytest.raises(ClientError):
+            store.save(document, GUIDE, BESIDE, s3_client=client)
+
+        assert client.put_object.call_count == 2
+
+    def test_being_refused_for_any_other_reason_is_raised(self, mocker: Any) -> None:
+        client = mocker.MagicMock()
+        client.put_object.side_effect = _refused(403, "AccessDenied")
+        document = models.MarkdownDocument(title="Claims")
+
+        with pytest.raises(ClientError):
+            store.save(document, GUIDE, BESIDE, s3_client=client)
+
+        assert client.put_object.call_count == 1
+
+
+def _with_pictures(count: int) -> models.MarkdownDocument:
+    images = [
+        models.Image(name=f"p{n:02}.png", content_type="image/png", data=b"\x89PNG")
+        for n in range(count)
+    ]
+    section = models.MarkdownSection(
+        heading="Evidence",
+        ordinal=1,
+        content="".join(f"![]({image.name})" for image in images),
+        images=images,
+    )
+    return models.MarkdownDocument(title="Claims", sections=[section])
+
+
+class TestPicturesAreWrittenSideBySide:
+    """A document's pictures go up several at a time, and its Markdown only once
+    every one of them is stored."""
+
+    def test_every_picture_is_stored_and_the_markdown_last(
+        self, s3: Any, mocker: Any
+    ) -> None:
+        spy = mocker.spy(s3, "put_object")
+
+        store.save(_with_pictures(12), GUIDE, BESIDE)
+
+        keys = [call.kwargs["Key"] for call in spy.call_args_list]
+        assert keys[-1] == "01JBQ8/01JBQ9/content.md"
+        assert sorted(keys[:-1]) == [
+            f"01JBQ8/01JBQ9/assets/p{n:02}.png" for n in range(12)
+        ]
+
+    def test_no_more_than_the_pool_are_written_at_once(self, mocker: Any) -> None:
+        in_flight, most = 0, 0
+        lock = threading.Lock()
+
+        def put_object(**_kwargs: Any) -> dict[str, Any]:
+            nonlocal in_flight, most
+            with lock:
+                in_flight += 1
+                most = max(most, in_flight)
+            time.sleep(0.02)
+            with lock:
+                in_flight -= 1
+            return {}
+
+        client = mocker.MagicMock()
+        client.put_object.side_effect = put_object
+
+        store.save(_with_pictures(20), GUIDE, BESIDE, s3_client=client)
+
+        assert 1 < most <= store.PARALLEL_WRITES
+
+    def test_a_picture_that_fails_stops_the_save_before_its_markdown(
+        self, mocker: Any
+    ) -> None:
+        """The error is raised, and the document naming the pictures is never
+        written: a retry finds no Markdown, and writes what is missing."""
+
+        def put_object(**kwargs: Any) -> dict[str, Any]:
+            if kwargs["Key"].endswith("p03.png"):
+                raise _refused(500, "InternalError")
+            return {}
+
+        client = mocker.MagicMock()
+        client.put_object.side_effect = put_object
+        document = _with_pictures(8)
+
+        with pytest.raises(ClientError):
+            store.save(document, GUIDE, BESIDE, s3_client=client)
+
+        written = [call.kwargs["Key"] for call in client.put_object.call_args_list]
+        assert not any(key.endswith("content.md") for key in written)
 
 
 class TestStoreS3ClientUsage:

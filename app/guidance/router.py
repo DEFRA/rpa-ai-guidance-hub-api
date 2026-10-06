@@ -5,6 +5,14 @@ and scanned, the author has described it, and this is where those two become one
 thing. It converts the upload, stores the version it makes, and records what the
 document is.
 
+The upload is named by its file id, and everything else about it is read from its
+staging record rather than taken from the caller: where cdp-uploader left it, whether
+it parsed, and the ids the document is stored under. Those ids are reserved on the
+staging record the first time, so a retried or repeated submission finishes the same
+document rather than starting another. The writes go bottom up - the content, then
+its version record, then the document record, which commits it - and each leaves in
+place whatever an earlier attempt already wrote.
+
 The route is still `/guides` because that is what the front end calls and what a
 reader of these documents calls them. Underneath, the thing being stored is a
 document with versions - see `records` for why the two words are not the same.
@@ -24,9 +32,13 @@ import fastapi
 import pydantic
 from fastapi.concurrency import run_in_threadpool
 
+from app import config
 from app.common import mongo, s3
 from app.guidance import records, service
 from app.guidance.documents import store
+from app.guidance.documents.staging import models as staging_models
+from app.guidance.documents.staging import router as staging_router
+from app.guidance.documents.staging import store as staging_store
 from app.guidance.parsing.errors import DocumentParseError
 
 if TYPE_CHECKING:
@@ -39,6 +51,9 @@ Database = Annotated[
     "pymongo.asynchronous.database.AsyncDatabase", fastapi.Depends(mongo.get_db)
 ]
 S3Client = Annotated[Any, fastapi.Depends(s3.get_s3_client)]
+Staging = Annotated[
+    staging_store.StagingStore, fastapi.Depends(staging_router.get_staging_store)
+]
 
 
 def get_guidance_service(
@@ -48,11 +63,15 @@ def get_guidance_service(
 
 
 class Source(pydantic.BaseModel):
-    """Where cdp-uploader left the document, as the front end read it back."""
+    """Which upload the document is, as the front end knows it.
+
+    Only names it: where the file is, and whether it parsed, are read from its
+    staging record, so the caller never says where to read from.
+    """
 
     upload_id: str = pydantic.Field(alias="uploadId")
-    url: str = pydantic.Field(
-        description="Where the document is, as cdp-uploader's status reports it"
+    file_id: str = pydantic.Field(
+        alias="fileId", description="The file's id, as cdp-uploader's status reports it"
     )
     filename: str | None = None
 
@@ -161,40 +180,40 @@ async def create_document(
     database: Database,
     response: fastapi.Response,
     guidance: Annotated[service.GuidanceService, fastapi.Depends(get_guidance_service)],
+    staging: Staging,
 ) -> Document:
     """Convert an upload and record the document it becomes.
 
     Converting the same upload twice answers the document it made the first time,
     rather than making a second one. The journey ahead of this can be submitted more
     than once - a refresh, a back button, a retried request - and every one of those
-    means the same version of the same document.
+    means the same version of the same document: a finished document is answered as
+    it is, and an unfinished one is finished under the ids its first attempt
+    reserved.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
         response.status_code = fastapi.status.HTTP_200_OK
         return await _answered(database, already["_id"])
 
-    stored = await _converted(guidance, new.source.url)
+    staged, document_id, version_id = await _reserved(staging, new.source)
+    source_url = f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}"
 
-    sanitized_url = new.source.url.replace("\r", "").replace("\n", "")
+    stored = await _converted(guidance, source_url, document_id, version_id)
+
     logger.info(
-        "Converted %s into document %s version %s: %d sections, %d images",
-        sanitized_url,
+        "Converted file %s into document %s version %s: %d sections, %d images",
+        staged.file_id,
         stored.document_id,
         stored.version_id,
         stored.sections,
         stored.images,
     )
 
-    # The document first: a document with no versions is a conversion that failed
-    # half way, which is recoverable and legible. A version pointing at a document
-    # that was never written is neither.
-    document = await records.create(
-        database,
-        stored.document_id,
-        metadata=new.metadata,
-        source=new.source.model_dump(by_alias=True),
-    )
+    # Bottom up. The version is recorded only once its content is wholly stored, and
+    # the document last, because writing it is what commits the document: until it
+    # exists nothing can reach the version, and once it does everything beneath it
+    # is there.
     version = await records.create_version(
         database,
         stored.version_id,
@@ -203,6 +222,14 @@ async def create_document(
         title=stored.title,
         created_by=new.created_by.model_dump(by_alias=True) if new.created_by else None,
     )
+    document = await records.create(
+        database,
+        stored.document_id,
+        metadata=new.metadata,
+        source=new.source.model_dump(by_alias=True),
+    )
+    await _promote_staged(staging, staged.file_id)
+
     response.headers["Location"] = f"/guides/{stored.document_id}"
     return _answer(document, [version])
 
@@ -250,12 +277,75 @@ async def read_content(
     return content.decode("utf-8")
 
 
+async def _reserved(
+    staging: staging_store.StagingStore, source: Source
+) -> tuple[staging_models.StagedDocument, str, str]:
+    """The upload's staging record, and the document and version ids reserved on it.
+
+    Answers the caller's mistakes as their status codes: a file that was never
+    staged (or whose record has expired), a file that is not part of the upload
+    named with it, and a file whose parse has not completed.
+    """
+    staged = await staging.get(source.file_id)
+    if staged is None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND,
+            detail=f"No staged file {source.file_id}: never delivered, or expired",
+        )
+
+    # cdp-uploader keys a delivered file by the upload it belongs to, so a file id
+    # paired with another upload's id is a mistake, and would record this file
+    # against the wrong upload.
+    if not staged.path.startswith(f"{source.upload_id}/"):
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_400_BAD_REQUEST,
+            detail=f"File {source.file_id} is not part of upload {source.upload_id}",
+        )
+
+    if staged.parsing_status != staging_models.ParsingStatus.COMPLETE:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail=f"File {source.file_id} is {staged.parsing_status}, not parsed",
+        )
+
+    reserved = await staging.reserve_ids(source.file_id)
+    if reserved is None or reserved.document_id is None or reserved.version_id is None:
+        # Expired between reading it and reserving on it.
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND,
+            detail=f"No staged file {source.file_id}: never delivered, or expired",
+        )
+
+    return reserved, reserved.document_id, reserved.version_id
+
+
+async def _promote_staged(staging: staging_store.StagingStore, file_id: str) -> None:
+    """Mark the file's staging record as promoted, now its document is committed.
+
+    Best effort: the document is already safe, and is the upload's record from here
+    on, so failing to mark the staging record must not fail the request.
+    """
+    try:
+        await staging.promote(file_id)
+    except Exception:
+        logger.warning(
+            "Could not mark the staging record for file %s as promoted",
+            file_id,
+            exc_info=True,
+        )
+
+
 async def _converted(
-    guidance: service.GuidanceService, source_url: str
+    guidance: service.GuidanceService,
+    source_url: str,
+    document_id: str,
+    version_id: str,
 ) -> service.StoredDocument:
     """Convert the upload, answering the caller's mistakes as their status codes."""
     try:
-        return await run_in_threadpool(guidance.convert, source_url)
+        return await run_in_threadpool(
+            guidance.convert, source_url, document_id, version_id
+        )
     except service.SourceRefusedError as refused:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_400_BAD_REQUEST, detail=str(refused)
