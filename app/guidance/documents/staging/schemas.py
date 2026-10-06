@@ -66,6 +66,11 @@ class StagedDocumentResponse(pydantic.BaseModel):
     title: str | None = None
     version: str | None = None
     last_modified: datetime | None = None
+    # The document this file was converted into, and when it was committed: set
+    # once the conversion finishes, so a caller that gave up waiting on POST
+    # /guides can tell whether it finished anyway.
+    document_id: str | None = None
+    promoted_at: datetime | None = None
 
     @classmethod
     def from_staged_document(
@@ -78,4 +83,6 @@ class StagedDocumentResponse(pydantic.BaseModel):
             title=staged_document.title,
             version=staged_document.version,
             last_modified=staged_document.last_modified,
+            document_id=staged_document.document_id,
+            promoted_at=staged_document.promoted_at,
         )

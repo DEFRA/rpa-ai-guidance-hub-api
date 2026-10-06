@@ -164,6 +164,47 @@ class TestGetStagedDocument:
         assert data["parsingStatus"] == "failed"
         assert data["parsingError"] == "Invalid docx document"
 
+    def test_returns_the_document_converted_from_the_file_once_committed(
+        self, client, staging_store: staging_store_fake.InMemoryStagingStore
+    ):
+        staging_store.records["guide-converted"] = models.StagedDocument(
+            file_id="guide-converted",
+            parsing_status=models.ParsingStatus.COMPLETE,
+            path="upload-1/guide-converted",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            document_id="document-1",
+            version_id="version-1",
+            promoted_at=datetime(2026, 10, 6, 11, 0, 0, tzinfo=UTC),
+        )
+
+        response = client.get("/guides/staging/guide-converted")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["documentId"] == "document-1"
+        assert data["promotedAt"] == "2026-10-06T11:00:00Z"
+
+    def test_returns_no_commit_time_while_the_conversion_is_unfinished(
+        self, client, staging_store: staging_store_fake.InMemoryStagingStore
+    ):
+        staging_store.records["guide-converting"] = models.StagedDocument(
+            file_id="guide-converting",
+            parsing_status=models.ParsingStatus.COMPLETE,
+            path="upload-1/guide-converting",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            document_id="document-1",
+            version_id="version-1",
+        )
+
+        response = client.get("/guides/staging/guide-converting")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["documentId"] == "document-1"
+        assert data["promotedAt"] is None
+
     def test_returns_404_when_document_does_not_exist(self, client):
         response = client.get("/guides/staging/missing-guide-id")
 
