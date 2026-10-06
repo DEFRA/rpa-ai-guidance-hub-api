@@ -13,7 +13,7 @@ Two buckets, and they are different kinds of thing:
 
 | Bucket (config field)                          | Owner        | Access       |
 | ----------------------------------------------- | ------------ | ------------ |
-| `SOURCE_DOCS_S3_BUCKET` (`source_docs_s3_bucket`) | cdp-uploader | read-only    |
+| `SOURCE_DOCS_S3_BUCKET` (`source_docs_s3_bucket`) | this service | read-only    |
 | `MANAGED_DOCS_S3_BUCKET` (`managed_docs_s3_bucket`) | this service | read + write |
 
 The source bucket holds the .docx a designer uploaded, in cdp-uploader's own
