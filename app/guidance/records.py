@@ -9,7 +9,8 @@ an edit of that rather than another upload of it.
 
 `document_versions` holds what one conversion produced: where its Markdown went, and
 who was signed in when it was made. One document has many, and the newest is only the
-newest by `createdAt` - a version id is a uuid and says nothing about order.
+newest by `createdAt`. A version id is a time-ordered uuid, but nothing reads meaning
+into its order.
 
 **A version records its content URL and nothing else about where it is.** That URL is
 enough to restore the document, and the pictures are named by the document itself, in
@@ -25,7 +26,8 @@ whole of the information rather than a fault in it.
 
 The ids are the ones the object store uses. `documents._id` is the prefix a document
 is written under and a version's `_id` is the prefix beneath that, so a record and a
-key are two spellings of one address rather than two facts to keep in step.
+key are two spellings of one address rather than two facts to keep in step. They are
+stored as native uuids, and the prefixes are their text (see `ids`).
 
 **Records are created, never replaced, and one already there is kept.** A new
 document's ids are reserved once, on its upload's staging record, so the only thing
@@ -50,10 +52,12 @@ rather than another one.
 
 from __future__ import annotations
 
-import datetime as dt
 from typing import TYPE_CHECKING, Any
 
 import pymongo.errors
+
+from app.guidance import models
+from app.guidance.ids import DocumentId, UploadId
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
@@ -65,17 +69,17 @@ VERSIONS = "document_versions"
 # mean the same document.
 _UPLOAD_ID = "source.uploadId"
 
-# The document a version belongs to: the many end of the one-to-many. Public because
-# a version record read back is how a caller gets from an upload to its document.
-DOCUMENT_ID = "documentId"
+# The document a version belongs to: the many end of the one-to-many. Its name is the
+# model's, which owns how a version is stored.
+DOCUMENT_ID = models.DOCUMENT_ID
 
 
 class MisfiledVersionError(RuntimeError):
     """Raised when a version id is already taken by a version of another document."""
 
 
-# Newest first. A version id is a uuid, so when a version was made is the only thing
-# that orders one against another.
+# Newest first, by when a version was made. A version id is time-ordered too, but
+# `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
 
 
@@ -93,95 +97,76 @@ async def ensure_indexes(
 
 
 async def find_by_upload(
-    database: pymongo.asynchronous.database.AsyncDatabase, upload_id: str
-) -> dict[str, Any] | None:
+    database: pymongo.asynchronous.database.AsyncDatabase, upload_id: UploadId
+) -> models.Document | None:
     """The document already converted from `upload_id`, if there is one."""
-    found: dict[str, Any] | None = await database[DOCUMENTS].find_one(
-        {_UPLOAD_ID: upload_id}
-    )
-    return found
+    found = await database[DOCUMENTS].find_one({_UPLOAD_ID: upload_id})
+    return None if found is None else models.Document.from_document(found)
 
 
 async def find(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: str
-) -> dict[str, Any] | None:
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: DocumentId
+) -> models.Document | None:
     """One document by its id, without its versions."""
-    found: dict[str, Any] | None = await database[DOCUMENTS].find_one(
-        {"_id": document_id}
-    )
-    return found
+    found = await database[DOCUMENTS].find_one({"_id": document_id})
+    return None if found is None else models.Document.from_document(found)
 
 
 async def versions_of(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: str
-) -> list[dict[str, Any]]:
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: DocumentId
+) -> list[models.Version]:
     """Every version of `document_id`, newest first."""
     cursor = database[VERSIONS].find({DOCUMENT_ID: document_id}).sort(_NEWEST)
-    return [version async for version in cursor]
+    return [models.Version.from_document(version) async for version in cursor]
 
 
 async def latest_version(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: str
-) -> dict[str, Any] | None:
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: DocumentId
+) -> models.Version | None:
     """The most recent version of `document_id`, or None if it has none.
 
     A document with no versions is a document whose first conversion failed after its
     record was written. It exists, and it has no content, and those are two different
     answers.
     """
-    found: dict[str, Any] | None = await database[VERSIONS].find_one(
-        {DOCUMENT_ID: document_id}, sort=_NEWEST
-    )
-    return found
+    found = await database[VERSIONS].find_one({DOCUMENT_ID: document_id}, sort=_NEWEST)
+    return None if found is None else models.Version.from_document(found)
 
 
 async def create(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    document_id: str,
-    *,
-    metadata: dict[str, Any],
-    source: dict[str, Any],
-) -> dict[str, Any]:
+    document: models.Document,
+) -> models.Document:
     """Record a document, answering the record as it was written.
 
-    `document_id` is the prefix the document is stored under, not an id minted here.
+    Its id is the prefix the document is stored under, not an id minted here.
 
-    `metadata` is what the journey collected, owners included: this service does not
-    interpret it, because what an author is asked about a document is a question for
-    the journey rather than for the store behind it.
+    Its metadata is what the journey collected, owners included: this service does
+    not interpret it, because what an author is asked about a document is a question
+    for the journey rather than for the store behind it.
 
     Writing it is what commits the document, so it goes last, after its first
     version. If it is already there, an earlier attempt committed it, and that
     record is answered as it stands.
     """
-    record = {
-        "_id": document_id,
-        "metadata": metadata,
-        "source": source,
-        "createdAt": dt.datetime.now(tz=dt.UTC),
-    }
-    return await _created(database[DOCUMENTS], record)
+    stored = await _created(database[DOCUMENTS], document.to_document())
+    return models.Document.from_document(stored)
 
 
 async def create_version(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    version_id: str,
-    *,
-    document_id: str,
-    content_url: str,
-    title: str | None = None,
-    created_by: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    version: models.Version,
+) -> models.Version:
     """Record one version of a document, answering the record as it was written.
 
-    `version_id` is the prefix this version was stored under, and `content_url` names
+    Its id is the prefix this version was stored under, and its content URL names
     the file inside it - the whole of what is needed to read the version back.
 
-    `title` is the document's own title as this version had it, kept so a person can
-    see what a version was called without fetching it. See the module docstring for
-    why a copy is the point here and would be a fault anywhere else.
+    Its title is the document's own title as this version had it, kept so a person
+    can see what a version was called without fetching it. See the module docstring
+    for why a copy is the point here and would be a fault anywhere else.
 
-    `created_by` is who was signed in, not who owns the document - see the module
+    Its creator is who was signed in, not who owns the document - see the module
     docstring. It is optional because the endpoint is not yet authenticated, and a
     version made by nobody is more honest than one attributed to a guess.
 
@@ -193,19 +178,13 @@ async def create_version(
         MisfiledVersionError: if the version id is taken by another document's
             version.
     """
-    record = {
-        "_id": version_id,
-        DOCUMENT_ID: document_id,
-        "contentUrl": content_url,
-        "title": title,
-        "createdBy": created_by,
-        "createdAt": dt.datetime.now(tz=dt.UTC),
-    }
-    stored = await _created(database[VERSIONS], record)
-    if stored[DOCUMENT_ID] != document_id:
+    stored = models.Version.from_document(
+        await _created(database[VERSIONS], version.to_document())
+    )
+    if stored.document_id != version.document_id:
         message = (
-            f"Version {version_id} belongs to document {stored[DOCUMENT_ID]}, "
-            f"not {document_id}"
+            f"Version {version.id} belongs to document {stored.document_id}, "
+            f"not {version.document_id}"
         )
         raise MisfiledVersionError(message)
     return stored

@@ -46,6 +46,14 @@ def stored(mocker):
     return calls
 
 
+class TestTheIdsItMints:
+    def test_a_new_document_and_its_version_get_time_ordered_uuids(self, stored):  # noqa: ARG002 - wanted for its effect
+        converted = service.convert(SOURCE)
+
+        assert converted.document_id.version == 7
+        assert converted.version_id.version == 7
+
+
 class TestWhereAConvertedDocumentGoes:
     def test_the_markdown_goes_under_the_document_and_then_its_version(self, stored):
         converted = service.convert(SOURCE, document_id="01JBQ8", version_id="01JBQ9")
