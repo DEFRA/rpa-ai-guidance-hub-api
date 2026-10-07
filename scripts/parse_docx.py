@@ -122,8 +122,9 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    root = store.document_url(args.output_dir.resolve().as_uri(), str(document_id))
-    into = store.document_url(root, str(version_id))
+    into = store.version_url(
+        args.output_dir.resolve().as_uri(), document_id, version_id
+    )
     content_url = store.save(document, into, _ASSETS)
 
     print(content_url)

@@ -103,10 +103,9 @@ def convert(
     document_id = document_id or ids.new_document_id()
     version_id = version_id or ids.new_version_id()
 
-    document_url = store.document_url(
-        f"s3://{settings.managed_docs_s3_bucket}", str(document_id)
+    into = store.version_url(
+        f"s3://{settings.managed_docs_s3_bucket}", document_id, version_id
     )
-    into = store.document_url(document_url, str(version_id))
 
     content = store.save(document, into, _ASSETS, s3_client=s3_client)
 
