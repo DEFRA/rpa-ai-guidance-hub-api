@@ -112,3 +112,26 @@ class TestStagedDocumentResponse:
         assert dumped["parsingStatus"] == "failed"
         assert dumped["parsingError"] == "Invalid docx"
         assert "file_id" not in dumped
+
+    def test_says_how_far_saving_has_got(self):
+        created_at = datetime(2026, 10, 7, 12, 0, 0, tzinfo=UTC)
+        staged_document = models.StagedDocument(
+            file_id="f-saving",
+            parsing_status=models.ParsingStatus.COMPLETE,
+            path="upload/f-saving",
+            created_at=created_at,
+            updated_at=created_at,
+            saving_status=models.SavingStatus.FAILED,
+            save_steps_completed=3,
+            save_steps_total=74,
+            save_error="The document store refused a write",
+        )
+
+        dumped = schemas.StagedDocumentResponse.from_staged_document(
+            staged_document
+        ).model_dump(by_alias=True, mode="json")
+
+        assert dumped["savingStatus"] == "failed"
+        assert dumped["saveStepsCompleted"] == 3
+        assert dumped["saveStepsTotal"] == 74
+        assert dumped["saveError"] == "The document store refused a write"

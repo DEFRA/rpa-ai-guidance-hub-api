@@ -56,33 +56,25 @@ class NewDocument(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
-    def document_for(
-        self, document_id: DocumentId, created_at: dt.datetime
-    ) -> models.Document:
-        """The document this request makes, once it has an id."""
-        return models.Document(
-            id=document_id,
-            upload_id=self.source.upload_id,
+    def job_for(
+        self,
+        source_url: str,
+        document_id: DocumentId,
+        version_id: VersionId,
+    ) -> models.ConversionJob:
+        """The conversion this request asks for, once its ids are reserved."""
+        return models.ConversionJob(
             file_id=self.source.file_id,
+            source_url=source_url,
+            document_id=document_id,
+            version_id=version_id,
+            upload_id=self.source.upload_id,
             filename=self.source.filename,
             metadata=self.metadata,
-            created_at=created_at,
-        )
-
-    def version_for(
-        self, stored: models.StoredDocument, created_at: dt.datetime
-    ) -> models.Version:
-        """The version this request makes, once its content is stored."""
-        return models.Version(
-            id=stored.version_id,
-            document_id=stored.document_id,
-            content_url=stored.content,
-            title=stored.title,
             created_by_id=self.created_by.id if self.created_by else None,
             created_by_display_name=(
                 self.created_by.display_name if self.created_by else None
             ),
-            created_at=created_at,
         )
 
 

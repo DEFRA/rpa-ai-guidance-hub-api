@@ -237,3 +237,95 @@ class TestPromote:
 
     async def test_promoting_a_file_already_gone_is_not_an_error(self, staging_store):
         await staging_store.promote(f"never-{uuid.uuid4()}")
+
+
+class TestSaving:
+    """Saving the document a file converts into: started once, its progress kept on
+    the file's record, and finished or failed there."""
+
+    async def _reserved(self, staging_store, file_id: str) -> None:
+        await TestReserveIds()._parsed(staging_store, file_id)
+        await staging_store.reserve_ids(file_id)
+
+    async def test_starting_to_save_marks_the_record_as_saving(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+
+        started = await staging_store.start_saving(file_id)
+
+        staged = await staging_store.get(file_id)
+        assert started is True
+        assert staged.saving_status == models.SavingStatus.IN_PROGRESS
+        assert staged.save_steps_completed == 0
+
+    async def test_a_save_already_under_way_is_not_started_again(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+
+        assert await staging_store.start_saving(file_id) is False
+
+    async def test_requests_racing_to_start_a_save_start_it_once(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+
+        started = await asyncio.gather(
+            *(staging_store.start_saving(file_id) for _ in range(10))
+        )
+
+        assert started.count(True) == 1
+
+    async def test_a_finished_save_is_not_started_again(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await staging_store.promote(file_id)
+
+        assert await staging_store.start_saving(file_id) is False
+
+    async def test_a_failed_save_can_be_started_again(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await staging_store.fail_saving(file_id, "The document store refused a write")
+
+        assert await staging_store.start_saving(file_id) is True
+        assert (await staging_store.get(file_id)).save_error is None
+
+    async def test_a_file_without_reserved_ids_is_not_saved(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await TestReserveIds()._parsed(staging_store, file_id)
+
+        assert await staging_store.start_saving(file_id) is False
+
+    async def test_progress_is_kept_on_the_record(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+
+        await staging_store.record_save_progress(file_id, 12, 74)
+
+        staged = await staging_store.get(file_id)
+        assert (staged.save_steps_completed, staged.save_steps_total) == (12, 74)
+
+    async def test_a_failed_save_keeps_its_reason(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+
+        await staging_store.fail_saving(file_id, "The document store refused a write")
+
+        staged = await staging_store.get(file_id)
+        assert staged.saving_status == models.SavingStatus.FAILED
+        assert staged.save_error == "The document store refused a write"
+
+    async def test_promoting_the_file_marks_its_save_complete(self, staging_store):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+
+        await staging_store.promote(file_id)
+
+        staged = await staging_store.get(file_id)
+        assert staged.saving_status == models.SavingStatus.COMPLETE
+        assert staged.promoted_at is not None

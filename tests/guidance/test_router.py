@@ -6,6 +6,10 @@ which status a caller gets, what is recorded in which collection and in what ord
 and what happens when the same journey is submitted twice or an attempt stopped part
 way.
 
+The save runs as a background task after the reply. The test client runs background
+tasks before it hands back the response, so a case can look at what was recorded
+straight after posting - while the reply itself still shows the save just started.
+
 All fixture text is invented, as everywhere in this package.
 """
 
@@ -161,12 +165,14 @@ class FakeStaging:
 
     def __init__(self) -> None:
         self.staged: dict[str, staging_models.StagedDocument] = {}
+        self.progress: list[tuple[int, int]] = []
 
     def stage(
         self,
         file_id: str = FILE,
         path: str = KEY,
         status: staging_models.ParsingStatus = staging_models.ParsingStatus.COMPLETE,
+        **fields: Any,
     ) -> None:
         now = dt.datetime.now(tz=dt.UTC)
         self.staged[file_id] = staging_models.StagedDocument(
@@ -175,7 +181,13 @@ class FakeStaging:
             path=path,
             created_at=now,
             updated_at=now,
+            **fields,
         )
+
+    def _update(self, file_id: str, **fields: Any) -> None:
+        staged = self.staged.get(file_id)
+        if staged is not None:
+            self.staged[file_id] = dataclasses.replace(staged, **fields)
 
     async def get(self, file_id: str) -> staging_models.StagedDocument | None:
         return self.staged.get(file_id)
@@ -185,18 +197,46 @@ class FakeStaging:
         if staged is None or staged.parsing_status != "complete":
             return None
         if staged.document_id is None:
-            staged = dataclasses.replace(
-                staged, document_id=DOCUMENT, version_id=VERSION
-            )
-            self.staged[file_id] = staged
-        return staged
+            self._update(file_id, document_id=DOCUMENT, version_id=VERSION)
+        return self.staged[file_id]
+
+    async def start_saving(self, file_id: str) -> bool:
+        staged = self.staged.get(file_id)
+        if staged is None or staged.document_id is None:
+            return False
+        if staged.saving_status in (
+            staging_models.SavingStatus.IN_PROGRESS,
+            staging_models.SavingStatus.COMPLETE,
+        ):
+            return False
+        self._update(
+            file_id,
+            saving_status=staging_models.SavingStatus.IN_PROGRESS,
+            save_steps_completed=0,
+            save_steps_total=None,
+            save_error=None,
+        )
+        return True
+
+    async def record_save_progress(
+        self, file_id: str, completed: int, total: int
+    ) -> None:
+        self.progress.append((completed, total))
+        self._update(file_id, save_steps_completed=completed, save_steps_total=total)
+
+    async def fail_saving(self, file_id: str, reason: str) -> None:
+        self._update(
+            file_id,
+            saving_status=staging_models.SavingStatus.FAILED,
+            save_error=reason,
+        )
 
     async def promote(self, file_id: str) -> None:
-        staged = self.staged.get(file_id)
-        if staged is not None:
-            self.staged[file_id] = dataclasses.replace(
-                staged, promoted_at=dt.datetime.now(tz=dt.UTC)
-            )
+        self._update(
+            file_id,
+            promoted_at=dt.datetime.now(tz=dt.UTC),
+            saving_status=staging_models.SavingStatus.COMPLETE,
+        )
 
 
 @pytest.fixture
@@ -247,20 +287,26 @@ def client(collections, converts, staging):  # noqa: ARG001 - wanted for their e
 
 
 class TestCreatingADocument:
-    def test_a_converted_document_is_answered_with_the_version_it_made(self, client):
+    def test_a_submission_is_accepted_at_once_pointing_at_its_progress(self, client):
+        """The save runs after the reply, so the reply says where to follow it: the
+        file's staging record, which says how far the save has got."""
         response = client.post("/guides", json=_request())
 
-        assert response.status_code == 201
-        assert response.json()["id"] == str(DOCUMENT)
+        assert response.status_code == 202
+        assert response.headers["Location"] == f"/guides/staging/{FILE}"
+        assert response.json()["savingStatus"] == "in_progress"
+        assert response.json()["documentId"] == str(DOCUMENT)
+
+    def test_once_saved_the_document_is_answered_with_the_version_it_made(self, client):
+        client.post("/guides", json=_request())
+
+        response = client.get(f"/guides/{DOCUMENT}")
+
+        assert response.status_code == 200
         assert [version["id"] for version in response.json()["versions"]] == [
             str(VERSION)
         ]
         assert response.json()["versions"][0]["contentUrl"] == CONTENT
-
-    def test_where_the_document_can_be_read_from_afterwards(self, client):
-        response = client.post("/guides", json=_request())
-
-        assert response.headers["Location"] == f"/guides/{DOCUMENT}"
 
     def test_what_the_author_said_is_recorded_against_the_document(
         self, client, documents
@@ -329,16 +375,45 @@ class TestCreatingADocument:
         assert versions.documents[0]["createdBy"] is None
 
 
+class TestFollowingTheSave:
+    """The staging record says how far the save has got: a step per picture and one
+    for the Markdown, then complete."""
+
+    def test_each_step_of_the_save_is_recorded_as_it_happens(
+        self, client, staging, converts
+    ):
+        def convert(*_args: Any, on_progress: Any = None, **_kwargs: Any) -> Any:
+            for done in range(4):
+                on_progress(done, 3)
+            return converts.return_value
+
+        converts.side_effect = convert
+
+        client.post("/guides", json=_request())
+
+        assert staging.progress == [(0, 3), (1, 3), (2, 3), (3, 3)]
+
+    def test_a_finished_save_is_complete_and_names_its_document(self, client, staging):
+        client.post("/guides", json=_request())
+
+        response = client.get(f"/guides/staging/{FILE}")
+
+        assert response.json()["savingStatus"] == "complete"
+        assert response.json()["documentId"] == str(DOCUMENT)
+        assert staging.staged[FILE].promoted_at is not None
+
+
 class TestSubmittingTheSameJourneyTwice:
     """A refresh, a back button, a retried request. Each of those means the same
     version, and converting a second time would spend the work to make another."""
 
-    def test_the_second_submission_answers_the_first_document(self, client):
-        first = client.post("/guides", json=_request())
+    def test_after_the_save_the_second_submission_answers_the_document(self, client):
+        client.post("/guides", json=_request())
+
         second = client.post("/guides", json=_request())
 
         assert second.status_code == 200
-        assert second.json() == first.json()
+        assert second.json()["id"] == str(DOCUMENT)
 
     def test_and_does_not_convert_again(self, client, converts):
         client.post("/guides", json=_request())
@@ -355,30 +430,47 @@ class TestSubmittingTheSameJourneyTwice:
         assert len(documents.documents) == 1
         assert len(versions.documents) == 1
 
-
-class TestWhenItCannotBeDone:
-    def test_a_source_this_will_not_read_is_a_bad_request(self, client, converts):
-        converts.side_effect = service.SourceRefusedError("not the bucket")
-
-        response = client.post("/guides", json=_request())
-
-        assert response.status_code == 400
-
-    def test_a_source_that_is_not_there_is_a_not_found(self, client, converts):
-        converts.side_effect = service.SourceMissingError("nothing there")
-
-        response = client.post("/guides", json=_request())
-
-        assert response.status_code == 404
-
-    def test_something_that_is_not_a_word_document_is_unprocessable(
-        self, client, converts
+    def test_while_the_first_is_saving_a_second_follows_it_rather_than_start_another(
+        self, client, staging, converts
     ):
-        converts.side_effect = DocumentParseError("not a .docx")
+        staging.stage(
+            document_id=DOCUMENT,
+            version_id=VERSION,
+            saving_status=staging_models.SavingStatus.IN_PROGRESS,
+            save_steps_completed=12,
+            save_steps_total=74,
+        )
 
         response = client.post("/guides", json=_request())
 
-        assert response.status_code == 422
+        assert response.status_code == 202
+        assert response.headers["Location"] == f"/guides/staging/{FILE}"
+        assert response.json()["saveStepsCompleted"] == 12
+        converts.assert_not_called()
+
+
+class TestWhenTheSaveFails:
+    """The reply has already gone, so a failure is recorded on the staging record,
+    where the caller following the save will see it."""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            service.SourceRefusedError("not the bucket"),
+            service.SourceMissingError("nothing there"),
+            DocumentParseError("not a .docx"),
+        ],
+    )
+    def test_the_failure_and_its_reason_are_recorded(
+        self, client, converts, staging, error
+    ):
+        converts.side_effect = error
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 202
+        assert staging.staged[FILE].saving_status == "failed"
+        assert staging.staged[FILE].save_error == str(error)
 
     def test_nothing_is_recorded_when_the_conversion_fails(
         self, client, converts, documents, versions
@@ -391,6 +483,21 @@ class TestWhenItCannotBeDone:
 
         assert documents.documents == []
         assert versions.documents == []
+
+    def test_a_failed_save_can_be_submitted_again_and_finishes(
+        self, client, converts, documents, staging
+    ):
+        converts.side_effect = [
+            DocumentParseError("not a .docx"),
+            converts.return_value,
+        ]
+        client.post("/guides", json=_request())
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 202
+        assert staging.staged[FILE].saving_status == "complete"
+        assert [record["_id"] for record in documents.documents] == [DOCUMENT]
 
 
 class TestTheUploadIsTheStagedOne:
@@ -476,12 +583,12 @@ class TestTheIdsAreReservedOnce:
 
         response = client.post("/guides", json=_request())
 
-        assert response.status_code == 201
+        assert response.status_code == 202
         assert [record["_id"] for record in documents.documents] == [DOCUMENT]
         assert versions.documents == [earlier]
 
-    def test_a_version_id_taken_by_another_document_is_raised(
-        self, client, versions, documents
+    def test_a_version_id_taken_by_another_document_fails_the_save(
+        self, client, versions, documents, staging
     ):
         """No attempt at this document could have recorded that, so it is a fault
         rather than an earlier attempt's work - and nothing is committed."""
@@ -495,12 +602,11 @@ class TestTheIdsAreReservedOnce:
                 "createdAt": dt.datetime(2026, 10, 5, 9, 0, tzinfo=dt.UTC),
             }
         )
-        request = _request()
 
-        with pytest.raises(records.MisfiledVersionError):
-            client.post("/guides", json=request)
+        client.post("/guides", json=_request())
 
         assert documents.documents == []
+        assert staging.staged[FILE].saving_status == "failed"
 
 
 class TestTheStagedFileIsPromoted:
@@ -509,20 +615,18 @@ class TestTheStagedFileIsPromoted:
     that never committed."""
 
     def test_once_the_document_is_committed(self, client, staging):
-        response = client.post("/guides", json=_request())
+        client.post("/guides", json=_request())
 
-        assert response.status_code == 201
         assert staging.staged[FILE].promoted_at is not None
 
-    def test_failing_to_mark_it_does_not_fail_the_request(
+    def test_failing_to_mark_it_leaves_the_document_committed(
         self, client, staging, documents, mocker, caplog
     ):
         """The document is already safe, and is the upload's record from here on."""
         mocker.patch.object(staging, "promote", side_effect=RuntimeError("Mongo away"))
 
-        response = client.post("/guides", json=_request())
+        client.post("/guides", json=_request())
 
-        assert response.status_code == 201
         assert [record["_id"] for record in documents.documents] == [DOCUMENT]
         assert "as promoted" in caplog.text
 
