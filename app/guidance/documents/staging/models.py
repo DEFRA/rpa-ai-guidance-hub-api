@@ -16,6 +16,17 @@ class ParsingStatus(StrEnum):
     FAILED = "failed"
 
 
+class SavingStatus(StrEnum):
+    """How far saving the document this file converts into has got.
+
+    None on a record means no save has been started.
+    """
+
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class UploadedDocument:
     """A file cdp-uploader has scanned and delivered: what it is called, and where."""
@@ -41,6 +52,12 @@ class StagedDocument:
     version_id: VersionId | None = None
     # When the document made from this file was committed (see store.promote).
     promoted_at: datetime | None = None
+    # Saving that document: started once (see store.start_saving), counted in steps -
+    # one write per picture and one for the Markdown - and finished or failed.
+    saving_status: SavingStatus | None = None
+    save_steps_completed: int | None = None
+    save_steps_total: int | None = None
+    save_error: str | None = None
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -56,6 +73,10 @@ class StagedDocument:
             "document_id": self.document_id,
             "version_id": self.version_id,
             "promoted_at": self.promoted_at,
+            "saving_status": self.saving_status.value if self.saving_status else None,
+            "save_steps_completed": self.save_steps_completed,
+            "save_steps_total": self.save_steps_total,
+            "save_error": self.save_error,
         }
 
     @classmethod
@@ -95,4 +116,12 @@ class StagedDocument:
             document_id=document.get("document_id", None),
             version_id=document.get("version_id", None),
             promoted_at=promoted_at,
+            saving_status=(
+                SavingStatus(document["saving_status"])
+                if document.get("saving_status")
+                else None
+            ),
+            save_steps_completed=document.get("save_steps_completed"),
+            save_steps_total=document.get("save_steps_total"),
+            save_error=document.get("save_error"),
         )

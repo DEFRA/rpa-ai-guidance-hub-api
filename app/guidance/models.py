@@ -115,3 +115,43 @@ class StoredDocument:
     title: str
     sections: int
     images: int
+
+
+@dataclass(frozen=True)
+class ConversionJob:
+    """One upload to convert and save, as a queue would carry it: everything the work
+    needs, so nothing has to be asked of the request that started it, which has
+    already been answered by the time the work runs."""
+
+    file_id: FileId
+    source_url: str
+    document_id: DocumentId
+    version_id: VersionId
+    upload_id: UploadId
+    metadata: dict[str, Any]
+    filename: str | None = None
+    created_by_id: str | None = None
+    created_by_display_name: str | None = None
+
+    def document(self, created_at: dt.datetime) -> Document:
+        """The document this job makes."""
+        return Document(
+            id=self.document_id,
+            upload_id=self.upload_id,
+            file_id=self.file_id,
+            filename=self.filename,
+            metadata=self.metadata,
+            created_at=created_at,
+        )
+
+    def version(self, stored: StoredDocument, created_at: dt.datetime) -> Version:
+        """The version this job makes, once its content is stored."""
+        return Version(
+            id=stored.version_id,
+            document_id=stored.document_id,
+            content_url=stored.content,
+            title=stored.title,
+            created_by_id=self.created_by_id,
+            created_by_display_name=self.created_by_display_name,
+            created_at=created_at,
+        )

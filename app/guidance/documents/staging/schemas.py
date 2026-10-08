@@ -65,6 +65,12 @@ class StagedDocumentResponse(pydantic.BaseModel):
     # /guides can tell whether it finished anyway.
     document_id: DocumentId | None = None
     promoted_at: datetime | None = None
+    # Saving that document, once started: how many of its steps are done out of
+    # how many (a write per picture, then the Markdown), and why it failed if it did.
+    saving_status: models.SavingStatus | None = None
+    save_steps_completed: int | None = None
+    save_steps_total: int | None = None
+    save_error: str | None = None
 
     @classmethod
     def from_staged_document(
@@ -79,4 +85,8 @@ class StagedDocumentResponse(pydantic.BaseModel):
             last_modified=staged_document.last_modified,
             document_id=staged_document.document_id,
             promoted_at=staged_document.promoted_at,
+            saving_status=staged_document.saving_status,
+            save_steps_completed=staged_document.save_steps_completed,
+            save_steps_total=staged_document.save_steps_total,
+            save_error=staged_document.save_error,
         )

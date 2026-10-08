@@ -56,6 +56,7 @@ from __future__ import annotations
 import posixpath
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -194,6 +195,7 @@ def save(
     document_url_prefix: str,
     assets_url_prefix: str,
     s3_client: Any = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> str:
     """Store `document` and its pictures, answering where its Markdown was put.
 
@@ -211,13 +213,28 @@ def save(
     pictures not yet started are not written, and the error is raised. In a bucket,
     where every write creates and none replaces, finding the Markdown already stored
     means an earlier save of this document finished.
+
+    `on_progress`, if given, is told `(done, total)` before the first write and after
+    each one: a step per picture and one for the Markdown, which is the last. It is
+    called on the thread that called `save`, never from the pool writing pictures.
     """
+    images = _unique(document.images)
+    total = len(images) + 1
+    report = on_progress or (lambda _done, _total: None)
+    report(0, total)
+
     into = assets_url(document_url_prefix, assets_url_prefix)
-    _save_assets(_unique(document.images), into, s3_client=s3_client)
+    _save_assets(
+        images,
+        into,
+        s3_client=s3_client,
+        on_saved=lambda done: report(done, total),
+    )
 
     url = content_url(document_url_prefix)
     markdown = document.markdown(_directory(assets_url_prefix))
     _write(url, markdown.encode("utf-8"), _MARKDOWN, s3_client=s3_client)
+    report(total, total)
     return url
 
 
@@ -271,7 +288,12 @@ def load_asset(
     )
 
 
-def _save_assets(images: list[models.Image], into: str, s3_client: Any = None) -> None:
+def _save_assets(
+    images: list[models.Image],
+    into: str,
+    s3_client: Any = None,
+    on_saved: Callable[[int], None] | None = None,
+) -> None:
     """Write the pictures side by side, raising the first that fails.
 
     A failure cancels every write not yet started; those already under way are left
@@ -284,8 +306,10 @@ def _save_assets(images: list[models.Image], into: str, s3_client: Any = None) -
             for image in images
         ]
         try:
-            for write in as_completed(writes):
+            for done, write in enumerate(as_completed(writes), start=1):
                 write.result()
+                if on_saved is not None:
+                    on_saved(done)
         except BaseException:
             pool.shutdown(wait=True, cancel_futures=True)
             raise

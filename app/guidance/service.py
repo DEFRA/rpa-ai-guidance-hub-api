@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from collections.abc import Callable
 from typing import Any
 
 from app import config
@@ -64,12 +65,14 @@ class GuidanceService:
         source_url: str,
         document_id: ids.DocumentId | None = None,
         version_id: ids.VersionId | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> models.StoredDocument:
         return convert(
             source_url,
             document_id=document_id,
             version_id=version_id,
             s3_client=self._s3,
+            on_progress=on_progress,
         )
 
 
@@ -78,12 +81,15 @@ def convert(
     document_id: ids.DocumentId | None = None,
     version_id: ids.VersionId | None = None,
     s3_client: Any = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> models.StoredDocument:
     """Convert the .docx at `source_url` into a stored version of a document.
 
     Takes the URL cdp-uploader's status reports rather than a bucket and a key,
     because that is the form it arrives in and taking it apart only to put it back
     together is two chances to do it differently.
+
+    `on_progress` is told how far storing the version has got - see `store.save`.
 
     Raises:
         SourceRefusedError: if the caller named a location this will not read.
@@ -107,7 +113,9 @@ def convert(
         f"s3://{settings.managed_docs_s3_bucket}", document_id, version_id
     )
 
-    content = store.save(document, into, _ASSETS, s3_client=s3_client)
+    content = store.save(
+        document, into, _ASSETS, s3_client=s3_client, on_progress=on_progress
+    )
 
     return models.StoredDocument(
         document_id=document_id,
