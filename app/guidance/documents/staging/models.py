@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from app.guidance.ids import DocumentId, FileId, VersionId
+from app.guidance import ids
 
 
 class ParsingStatus(StrEnum):
@@ -20,13 +20,13 @@ class ParsingStatus(StrEnum):
 class UploadedDocument:
     """A file cdp-uploader has scanned and delivered: what it is called, and where."""
 
-    file_id: FileId
+    file_id: ids.FileId
     s3_key: str
 
 
 @dataclass(frozen=True)
 class StagedDocument:
-    file_id: FileId
+    file_id: ids.FileId
     parsing_status: ParsingStatus
     path: str
     created_at: datetime
@@ -37,8 +37,8 @@ class StagedDocument:
     parse_error: str | None = None
     # The ids a document made from this file is stored under, reserved the first
     # time it is created and reused by every attempt after (see store.reserve_ids).
-    document_id: DocumentId | None = None
-    version_id: VersionId | None = None
+    document_id: ids.DocumentId | None = None
+    version_id: ids.VersionId | None = None
     # When the document made from this file was committed (see store.promote).
     promoted_at: datetime | None = None
 

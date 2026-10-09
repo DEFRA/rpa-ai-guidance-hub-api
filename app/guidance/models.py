@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from app.guidance.ids import DocumentId, FileId, UploadId, VersionId
+from app.guidance import ids
 
 # The document a version belongs to: the many end of the one-to-many.
 DOCUMENT_ID = "documentId"
@@ -29,9 +29,9 @@ class Document:
     `metadata` is what the journey collected, uninterpreted - see `records`.
     """
 
-    id: DocumentId
-    upload_id: UploadId
-    file_id: FileId
+    id: ids.DocumentId
+    upload_id: ids.UploadId
+    file_id: ids.FileId
     metadata: dict[str, Any]
     created_at: dt.datetime
     filename: str | None = None
@@ -68,8 +68,8 @@ class Version:
     The creator is who was signed in, not who owns the document - see `records`.
     """
 
-    id: VersionId
-    document_id: DocumentId
+    id: ids.VersionId
+    document_id: ids.DocumentId
     content_url: str
     created_at: dt.datetime
     title: str | None = None
@@ -109,8 +109,8 @@ class Version:
 class StoredDocument:
     """Where a converted guide went, and what it turned out to be."""
 
-    document_id: DocumentId
-    version_id: VersionId
+    document_id: ids.DocumentId
+    version_id: ids.VersionId
     content: str
     title: str
     sections: int

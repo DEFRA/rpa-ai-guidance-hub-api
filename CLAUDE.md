@@ -32,6 +32,7 @@ Copy `.env.example` to `.env` first — `AppConfig` has required fields and refu
 ## Gotchas
 
 - **`app/` uses namespace packages — there are no `__init__.py` files.** pytest is configured with `--import-mode=importlib` and mypy with `explicit_package_bases`. Don't add `__init__.py` when creating a new subpackage.
+- **Import modules, not names** ([AICE Python Style Guide](https://github.com/DEFRA/aice-team/blob/main/plugins/python/skills/python-style-guide/references/python-style-guide.md) §2.1.2, after [Google's](https://google.github.io/styleguide/pyguide.html#22-imports) §2.2): `from app.guidance import ids`, then `ids.DocumentId`; never `from app.guidance.ids import DocumentId`. The one exception is types from `typing` and `collections.abc`. No relative imports. Ruff does not enforce this, so check it by eye.
 - `tests/conftest.py` seeds required environment variables with `os.environ.setdefault` *before* any app import. `AppConfig` is a validate-on-construct singleton (`app.config.get_config()`), so tests that need different config must mock `get_config`, not mutate env vars after import.
 - The ruff rev in `.pre-commit-config.yaml` must match the ruff version in `uv.lock`, or the hook's formatter fights `uv run task lint`.
 - mypy runs with `disallow_untyped_defs` on `app/` (tests are exempt via a `[[tool.mypy.overrides]]` entry).

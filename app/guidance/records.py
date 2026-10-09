@@ -56,8 +56,7 @@ from typing import TYPE_CHECKING, Any
 
 import pymongo.errors
 
-from app.guidance import models
-from app.guidance.ids import DocumentId, UploadId
+from app.guidance import ids, models
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
@@ -97,7 +96,7 @@ async def ensure_indexes(
 
 
 async def find_by_upload(
-    database: pymongo.asynchronous.database.AsyncDatabase, upload_id: UploadId
+    database: pymongo.asynchronous.database.AsyncDatabase, upload_id: ids.UploadId
 ) -> models.Document | None:
     """The document already converted from `upload_id`, if there is one."""
     found = await database[DOCUMENTS].find_one({_UPLOAD_ID: upload_id})
@@ -105,7 +104,7 @@ async def find_by_upload(
 
 
 async def find(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: DocumentId
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Document | None:
     """One document by its id, without its versions."""
     found = await database[DOCUMENTS].find_one({"_id": document_id})
@@ -113,7 +112,7 @@ async def find(
 
 
 async def versions_of(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: DocumentId
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> list[models.Version]:
     """Every version of `document_id`, newest first."""
     cursor = database[VERSIONS].find({DOCUMENT_ID: document_id}).sort(_NEWEST)
@@ -121,7 +120,7 @@ async def versions_of(
 
 
 async def latest_version(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: DocumentId
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Version | None:
     """The most recent version of `document_id`, or None if it has none.
 

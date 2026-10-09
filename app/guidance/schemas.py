@@ -12,8 +12,7 @@ from typing import Any
 
 import pydantic
 
-from app.guidance import models
-from app.guidance.ids import DocumentId, FileId, UploadId, VersionId
+from app.guidance import ids, models
 
 
 class Source(pydantic.BaseModel):
@@ -23,8 +22,8 @@ class Source(pydantic.BaseModel):
     staging record, so the caller never says where to read from.
     """
 
-    upload_id: UploadId = pydantic.Field(alias="uploadId")
-    file_id: FileId = pydantic.Field(
+    upload_id: ids.UploadId = pydantic.Field(alias="uploadId")
+    file_id: ids.FileId = pydantic.Field(
         alias="fileId", description="The file's id, as cdp-uploader's status reports it"
     )
     filename: str | None = None
@@ -57,7 +56,7 @@ class NewDocument(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
     def document_for(
-        self, document_id: DocumentId, created_at: dt.datetime
+        self, document_id: ids.DocumentId, created_at: dt.datetime
     ) -> models.Document:
         """The document this request makes, once it has an id."""
         return models.Document(
@@ -97,7 +96,7 @@ class Version(pydantic.BaseModel):
     was made, so that a list of versions reads as something a person can follow.
     """
 
-    id: VersionId
+    id: ids.VersionId
     content_url: str = pydantic.Field(alias="contentUrl")
     title: str | None = None
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
@@ -128,7 +127,7 @@ class Document(pydantic.BaseModel):
     """A document as it is answered: what it is, where it came from, and every
     version of it there has been."""
 
-    id: DocumentId
+    id: ids.DocumentId
     metadata: dict[str, Any]
     source: Source
     versions: list[Version]
