@@ -63,6 +63,7 @@ from typing import TYPE_CHECKING, Any
 from botocore.exceptions import ClientError
 
 from app.common import s3
+from app.guidance import ids
 from app.guidance.documents import reader
 from app.guidance.parsing import models
 
@@ -107,6 +108,18 @@ def document_url(base: str, document_id: str) -> str:
     and those hold spaces - a `#` in one would truncate every URL built from it.
     """
     return f"{_directory(base)}{_segment(document_id)}"
+
+
+def version_url(
+    base: str, document_id: ids.DocumentId, version_id: ids.VersionId
+) -> str:
+    """Where one version of a document is stored beneath `base`.
+
+    The bucket's layout, `<document id>/<version id>`, built from the ids rather
+    than from their text: this is where they become a path, so it is the last place
+    the type checker can tell one from the other.
+    """
+    return document_url(document_url(base, str(document_id)), str(version_id))
 
 
 def content_url(document_url_prefix: str) -> str:

@@ -25,11 +25,10 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-import uuid
-from dataclasses import dataclass
 from typing import Any
 
 from app import config
+from app.guidance import ids, models
 from app.guidance.documents import store
 from app.guidance.parsing import parser
 
@@ -56,18 +55,6 @@ class SourceMissingError(LookupError):
     """Raised when the source document is not where the caller said it was."""
 
 
-@dataclass(frozen=True)
-class StoredDocument:
-    """Where a converted guide went, and what it turned out to be."""
-
-    document_id: str
-    version_id: str
-    content: str
-    title: str
-    sections: int
-    images: int
-
-
 class GuidanceService:
     def __init__(self, s3_client: Any = None) -> None:
         self._s3 = s3_client
@@ -75,9 +62,9 @@ class GuidanceService:
     def convert(
         self,
         source_url: str,
-        document_id: str | None = None,
-        version_id: str | None = None,
-    ) -> StoredDocument:
+        document_id: ids.DocumentId | None = None,
+        version_id: ids.VersionId | None = None,
+    ) -> models.StoredDocument:
         return convert(
             source_url,
             document_id=document_id,
@@ -88,10 +75,10 @@ class GuidanceService:
 
 def convert(
     source_url: str,
-    document_id: str | None = None,
-    version_id: str | None = None,
+    document_id: ids.DocumentId | None = None,
+    version_id: ids.VersionId | None = None,
     s3_client: Any = None,
-) -> StoredDocument:
+) -> models.StoredDocument:
     """Convert the .docx at `source_url` into a stored version of a document.
 
     Takes the URL cdp-uploader's status reports rather than a bucket and a key,
@@ -113,17 +100,16 @@ def convert(
 
     document = parser.parse_docx(source)
 
-    document_id = document_id or str(uuid.uuid4())
-    version_id = version_id or str(uuid.uuid4())
+    document_id = document_id or ids.new_document_id()
+    version_id = version_id or ids.new_version_id()
 
-    document_url = store.document_url(
-        f"s3://{settings.managed_docs_s3_bucket}", document_id
+    into = store.version_url(
+        f"s3://{settings.managed_docs_s3_bucket}", document_id, version_id
     )
-    into = store.document_url(document_url, version_id)
 
     content = store.save(document, into, _ASSETS, s3_client=s3_client)
 
-    return StoredDocument(
+    return models.StoredDocument(
         document_id=document_id,
         version_id=version_id,
         content=content,
