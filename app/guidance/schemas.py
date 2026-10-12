@@ -13,6 +13,7 @@ from typing import Any
 import pydantic
 
 from app.guidance import ids, models
+from app.reference import labels
 
 
 class Source(pydantic.BaseModel):
@@ -125,7 +126,11 @@ class Version(pydantic.BaseModel):
 
 class Document(pydantic.BaseModel):
     """A document as it is answered: what it is, where it came from, and every
-    version of it there has been."""
+    version of it there has been.
+
+    The metadata is for display: the reference fields (schemes, systems, audience,
+    guidance type) hold labels, not the keys they are stored and filtered by.
+    """
 
     id: ids.DocumentId
     metadata: dict[str, Any]
@@ -138,7 +143,7 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=labels.labelled(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
@@ -149,7 +154,10 @@ class Document(pydantic.BaseModel):
 
 
 class DocumentSummary(pydantic.BaseModel):
-    """A document as listed, with its newest version."""
+    """A document as listed, with its newest version.
+
+    Its metadata is labelled as a `Document`'s is.
+    """
 
     id: ids.DocumentId
     metadata: dict[str, Any]
@@ -164,7 +172,7 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=labels.labelled(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,

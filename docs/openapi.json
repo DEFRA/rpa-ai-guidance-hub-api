@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "Document": {
-        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.",
+        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.\n\nThe metadata is for display: the reference fields (schemes, systems, audience,\nguidance type) hold labels, not the keys they are stored and filtered by.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -65,7 +65,7 @@
         "type": "object"
       },
       "DocumentSummary": {
-        "description": "A document as listed, with its newest version.",
+        "description": "A document as listed, with its newest version.\n\nIts metadata is labelled as a `Document`'s is.",
         "properties": {
           "id": {
             "format": "uuid",

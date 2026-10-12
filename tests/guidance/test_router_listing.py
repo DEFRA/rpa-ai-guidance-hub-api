@@ -142,6 +142,16 @@ class TestListingDocuments:
         assert [i["id"] for i in second["items"]] == [str(seeded[0])]
         assert second["nextCursor"] is None
 
+    async def test_metadata_carries_labels_in_place_of_reference_keys(
+        self, client, database
+    ):
+        await _seed(database, {"schemes": ["basic-payment-scheme"], "title": "T"})
+
+        response = await client.get("/guides")
+
+        (item,) = response.json()["items"]
+        assert item["metadata"] == {"schemes": ["Basic Payment Scheme"], "title": "T"}
+
     async def test_a_filter_keeps_only_documents_with_one_of_its_values(
         self, client, database
     ):

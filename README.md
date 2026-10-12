@@ -82,6 +82,11 @@ database, no admin UI. The following environment variables are **required**; lik
 | `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `siti-agri:Siti Agri,crm:CRM` |
 | `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `process-guide:Process guide` |
 
+Guides are stored, and filtered on, by these keys, but `GET /guides` and `GET /guides/{id}` answer
+with each key replaced by its label in `metadata.schemes`, `systems`, `audience` and `guidanceType`,
+so a reader needs no call to `/reference/*` to display them. A key no longer in the list is shown
+as it is, and a scheme of `none` reads "Not scheme-specific".
+
 Each variable's format is a comma-separated list of `value:label` pairs, in display order. Each
 endpoint returns that list unchanged, as `[{"value": ..., "label": ...}, ...]` - see `/docs` for the
 generated OpenAPI schema.
