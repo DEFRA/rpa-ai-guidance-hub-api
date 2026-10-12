@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 
 import pytest
 
+from app.guidance import ids
 from app.guidance.documents import store
 from app.guidance.parsing import anchors, models
 
@@ -168,6 +169,17 @@ class TestWhereAGuideLives:
 
         assert "file://" in str(refused.value)
         assert "s3://" in str(refused.value)
+
+    def test_a_version_lives_beneath_its_document(self, tmp_path):
+        """The bucket's layout, `<document id>/<version id>`, built in one place from
+        the ids rather than from their text, so the two cannot change places."""
+        base = tmp_path.as_uri()
+        document_id, version_id = ids.new_document_id(), ids.new_version_id()
+
+        assert (
+            store.version_url(base, document_id, version_id)
+            == f"{base}/{document_id}/{version_id}"
+        )
 
     def test_composing_a_guide_url_escapes_the_id(self, tmp_path):
         """The one place an id is escaped. The dev tooling names a guide after the

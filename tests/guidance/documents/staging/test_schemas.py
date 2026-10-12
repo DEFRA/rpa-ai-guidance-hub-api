@@ -13,7 +13,7 @@ class TestUploadedDocument:
         documents = payload.uploaded_documents()
 
         assert documents == [
-            schemas.UploadedDocument(
+            models.UploadedDocument(
                 file_id="9fcaabe5-77ec-44db-8356-3a6e8dc51b13",
                 s3_key="scanned/3b0b2a02-a669-44ba-9b78-bd5cb8460253/9fcaabe5-77ec-44db-8356-3a6e8dc51b13",
             )

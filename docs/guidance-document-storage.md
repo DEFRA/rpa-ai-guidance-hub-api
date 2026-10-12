@@ -33,10 +33,11 @@ s3://<managed-docs bucket>/<document id>/assets/<sha256 of the picture>.<ext>
 s3://<managed-docs bucket>/<document id>/<version id>/content.md
 ```
 
-`document id` and `version id` are both uuid4 strings, minted once when a
-document is first converted and then kept - as the Mongo `_id` of a
-`documents` record and a `document_versions` record respectively (see
-`app/guidance/records.py`). Re-converting an existing upload reuses the same
+`document id` and `version id` are both version 7 (time-ordered) uuids, minted
+once when a document is first converted and then kept - as the Mongo `_id` of a
+`documents` record and a `document_versions` record respectively, stored there as
+native uuids (see `app/guidance/ids.py` and `app/guidance/records.py`). The S3
+prefixes are their text. Re-converting an existing upload reuses the same
 `document id` and mints a fresh `version id`.
 
 ### Why pictures sit above versions
@@ -88,8 +89,8 @@ and its pictures under `~/rpa-ai-guidance-hub/parsed-guides/<document id>/assets
 Sync the output root to the managed-docs bucket, or sync that `<document id>`
 directory to `s3://<managed-docs bucket>/<document id>/`, so the keys retain the document prefix.
 
-Each run makes a new document with one version, under freshly minted uuids, as
-converting an upload does. `--document-id <id>` adds a version to an existing
+Each run makes a new document with one version, under freshly minted time-ordered uuids,
+as converting an upload does. `--document-id <id>` adds a version to an existing
 document instead, under a fresh version id and sharing its `assets/`. Nothing
 else is written: no manifest or index of what was converted, so which version
 is latest is told by when each was written. The script prints the content location on stdout, and the

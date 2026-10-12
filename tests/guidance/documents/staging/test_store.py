@@ -151,12 +151,25 @@ class TestReserveIds:
         staged = await staging_store.reserve_ids(file_id)
 
         assert staged is not None
-        assert uuid.UUID(staged.document_id) != uuid.UUID(staged.version_id)
+        assert staged.document_id != staged.version_id
         raw = await mongo_database[store.COLLECTION_NAME].find_one({"_id": file_id})
         assert (raw["document_id"], raw["version_id"]) == (
             staged.document_id,
             staged.version_id,
         )
+
+    async def test_the_reserved_ids_are_stored_as_native_time_ordered_uuids(
+        self, staging_store, mongo_database
+    ):
+        file_id = f"reserve-{uuid.uuid4()}"
+        await self._parsed(staging_store, file_id)
+
+        await staging_store.reserve_ids(file_id)
+
+        raw = await mongo_database[store.COLLECTION_NAME].find_one({"_id": file_id})
+        assert isinstance(raw["document_id"], uuid.UUID)
+        assert isinstance(raw["version_id"], uuid.UUID)
+        assert (raw["document_id"].version, raw["version_id"].version) == (7, 7)
 
     async def test_reserving_again_gives_the_same_ids(self, staging_store):
         file_id = f"reserve-{uuid.uuid4()}"

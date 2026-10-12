@@ -4,7 +4,8 @@ import asyncio
 from logging import getLogger
 from typing import Any
 
-from app.guidance.documents.staging import models, schemas, store
+from app.guidance import ids
+from app.guidance.documents.staging import models, store
 from app.guidance.parsing import errors, parser
 
 logger = getLogger(__name__)
@@ -21,10 +22,10 @@ class StagingService:
         self._bucket = bucket_name
         self._s3 = s3_client
 
-    async def handle_callback(self, document: schemas.UploadedDocument) -> bool:
+    async def handle_callback(self, document: models.UploadedDocument) -> bool:
         return await self._store.claim(document.file_id, document.s3_key)
 
-    async def validate_and_parse(self, document: schemas.UploadedDocument) -> None:
+    async def validate_and_parse(self, document: models.UploadedDocument) -> None:
         doc_bytes = await self._get_object_bytes(document)
 
         try:
@@ -42,10 +43,10 @@ class StagingService:
         info = await asyncio.to_thread(parser.parse_minimal, doc_bytes)
         await self._store.mark_complete(document.file_id, info)
 
-    async def get_staged_doc(self, file_id: str) -> models.StagedDocument | None:
+    async def get_staged_doc(self, file_id: ids.FileId) -> models.StagedDocument | None:
         return await self._store.get(file_id)
 
-    async def _get_object_bytes(self, document: schemas.UploadedDocument) -> bytes:
+    async def _get_object_bytes(self, document: models.UploadedDocument) -> bytes:
         def _fetch() -> bytes:
             response = self._s3.get_object(
                 Bucket=self._bucket,

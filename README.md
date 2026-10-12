@@ -12,6 +12,9 @@ This is work-in-progress. See [To Do List](./TODO.md)
     - [Development](#development)
     - [Testing](#testing)
     - [Production Mode](#production-mode)
+  - [Where code goes](#where-code-goes)
+    - [Schemas and models](#schemas-and-models)
+    - [Ids](#ids)
   - [API endpoints](#api-endpoints)
   - [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics)
   - [Pipelines](#pipelines)
@@ -216,6 +219,45 @@ To test the application run:
 ```bash
 uv run pytest
 ```
+
+## Where code goes
+
+### Schemas and models
+
+Each layer knows only the one directly below it:
+
+```text
+HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
+                   |
+               models.py    dataclasses and enums: to_document() / from_document()
+                   |
+               Mongo record (a dict)
+```
+
+- **`schemas.py`** holds the shapes that cross the HTTP boundary: request bodies,
+  response bodies, and payloads other services send us (such as cdp-uploader's
+  callback). They are Pydantic, which validates them, writes them into the OpenAPI
+  document and spells them in camelCase on the wire. A schema converts to and from
+  models, and knows nothing of how anything is stored.
+- **`models.py`** holds what the service works with: plain dataclasses and enums,
+  with no HTTP in them. A model converts itself to and from the record Mongo stores
+  (`to_document()` and `from_document()`), so the stored field names are written
+  down once. A model never imports a schema.
+- **Routers** only call the conversions; they don't build shapes themselves.
+- The role decides the file, not the library: `AppConfig` is Pydantic and lives in
+  `config.py`.
+
+### Ids
+
+`app/guidance/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
+mypy refuses one where another belongs:
+
+- **Ours**, `DocumentId` and `VersionId`, are uuids, version 7 (time-ordered), minted
+  only by `new_document_id()` and `new_version_id()`. Mongo stores them as native
+  uuids; they become text only as an S3 prefix or on the wire, where the OpenAPI
+  document says `format: uuid`. A path id that isn't a uuid is refused with 422.
+- **Other services'**, cdp-uploader's `UploadId` and `FileId`, are `str`: taken as
+  given, not claimed to be uuids. So is the signed-in user's id.
 
 ## API endpoints
 

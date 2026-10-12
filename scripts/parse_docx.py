@@ -38,6 +38,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from app.guidance import ids
 from app.guidance.documents import store
 from app.guidance.parsing import models, parser
 from app.guidance.parsing.errors import DocumentParseError
@@ -63,10 +64,10 @@ def summarise(document: models.MarkdownDocument) -> str:
     return "\n".join(lines)
 
 
-def document_id_argument(value: str) -> str:
+def document_id_argument(value: str) -> ids.DocumentId:
     """`value` as a document id: a uuid, as the bucket names documents."""
     try:
-        return str(uuid.UUID(value))
+        return ids.DocumentId(uuid.UUID(value))
     except ValueError:
         message = f"not a uuid: {value!r}"
         raise argparse.ArgumentTypeError(message) from None
@@ -91,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         "--document-id",
         type=document_id_argument,
         help="Add a version to this existing document rather than making a new "
-        "one (default: a fresh uuid4, as app.guidance.service mints one).",
+        "one (default: a fresh time-ordered uuid, as app.guidance.ids mints one).",
     )
     return argument_parser.parse_args()
 
@@ -109,10 +110,10 @@ def main() -> int:
     # Minted as app.guidance.service.convert mints them: once, before anything is
     # written, and used as the prefixes the files go under. A version id is never
     # taken from the caller, so no run can write over another's version.
-    document_id = args.document_id or str(uuid.uuid4())
-    version_id = str(uuid.uuid4())
+    document_id = args.document_id or ids.new_document_id()
+    version_id = ids.new_version_id()
 
-    if args.document_id and not (args.output_dir / document_id).is_dir():
+    if args.document_id and not (args.output_dir / str(document_id)).is_dir():
         # Allowed, since the document may live elsewhere, but more often a
         # mistyped id or the wrong --output-dir.
         print(
@@ -121,8 +122,9 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    root = store.document_url(args.output_dir.resolve().as_uri(), document_id)
-    into = store.document_url(root, version_id)
+    into = store.version_url(
+        args.output_dir.resolve().as_uri(), document_id, version_id
+    )
     content_url = store.save(document, into, _ASSETS)
 
     print(content_url)

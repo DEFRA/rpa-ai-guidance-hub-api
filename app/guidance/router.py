@@ -29,12 +29,11 @@ from logging import getLogger
 from typing import TYPE_CHECKING, Annotated, Any
 
 import fastapi
-import pydantic
 from fastapi.concurrency import run_in_threadpool
 
 from app import config
 from app.common import mongo, s3
-from app.guidance import records, service
+from app.guidance import ids, models, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
@@ -62,107 +61,9 @@ def get_guidance_service(
     return service.GuidanceService(s3_client=s3_client)
 
 
-class Source(pydantic.BaseModel):
-    """Which upload the document is, as the front end knows it.
-
-    Only names it: where the file is, and whether it parsed, are read from its
-    staging record, so the caller never says where to read from.
-    """
-
-    upload_id: str = pydantic.Field(alias="uploadId")
-    file_id: str = pydantic.Field(
-        alias="fileId", description="The file's id, as cdp-uploader's status reports it"
-    )
-    filename: str | None = None
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-
-class Person(pydantic.BaseModel):
-    """Someone the auth provider knows.
-
-    The id is the machine identifier and is what anything should match on; the
-    display name is carried beside it so that a listing can say who made a version
-    without asking a directory. That name is a copy taken at the time and will go
-    stale if the person is renamed, which is the price of not needing the directory.
-    """
-
-    id: str
-    display_name: str | None = pydantic.Field(default=None, alias="displayName")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-
-class NewDocument(pydantic.BaseModel):
-    """An upload to convert, and what its author said about the document."""
-
-    source: Source
-    metadata: dict[str, Any]
-    created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-
-class Version(pydantic.BaseModel):
-    """One conversion: where its Markdown went, and who made it.
-
-    The content URL is the whole of where. The pictures are named by the file itself,
-    in addresses relative to that URL, so anything holding it can reach them and a
-    second field pointing at them would be free to disagree with the file.
-
-    The title is a copy of what the stored document called itself when this version
-    was made, so that a list of versions reads as something a person can follow.
-    """
-
-    id: str
-    content_url: str = pydantic.Field(alias="contentUrl")
-    title: str | None = None
-    created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
-    created_at: dt.datetime = pydantic.Field(alias="createdAt")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-
-class Document(pydantic.BaseModel):
-    """A document as it is answered: what it is, where it came from, and every
-    version of it there has been."""
-
-    id: str
-    metadata: dict[str, Any]
-    source: Source
-    versions: list[Version]
-
-
-def _version(record: dict[str, Any]) -> Version:
-    """One stored version as it is answered.
-
-    Validated from a dict rather than constructed, because the record is already in
-    the shape the wire uses and naming each field twice - once as it is stored, once
-    as it is sent - is where the two drift apart.
-    """
-    return Version.model_validate(
-        {
-            "id": record["_id"],
-            "contentUrl": record["contentUrl"],
-            "title": record.get("title"),
-            "createdBy": record.get("createdBy"),
-            "createdAt": record["createdAt"],
-        }
-    )
-
-
-def _answer(document: dict[str, Any], versions: list[dict[str, Any]]) -> Document:
-    return Document(
-        id=document["_id"],
-        metadata=document["metadata"],
-        source=Source.model_validate(document["source"]),
-        versions=[_version(version) for version in versions],
-    )
-
-
 async def _answered(
-    database: pymongo.asynchronous.database.AsyncDatabase, document_id: str
-) -> Document:
+    database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
+) -> schemas.Document:
     """A document and its versions, read back as they now stand."""
     document = await records.find(database, document_id)
     if document is None:
@@ -171,17 +72,18 @@ async def _answered(
             detail=f"No guide {document_id}",
         )
 
-    return _answer(document, await records.versions_of(database, document_id))
+    versions = await records.versions_of(database, document_id)
+    return schemas.Document.from_model(document, versions)
 
 
 @router.post("", status_code=fastapi.status.HTTP_201_CREATED)
 async def create_document(
-    new: NewDocument,
+    new: schemas.NewDocument,
     database: Database,
     response: fastapi.Response,
     guidance: Annotated[service.GuidanceService, fastapi.Depends(get_guidance_service)],
     staging: Staging,
-) -> Document:
+) -> schemas.Document:
     """Convert an upload and record the document it becomes.
 
     Converting the same upload twice answers the document it made the first time,
@@ -194,7 +96,7 @@ async def create_document(
     already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
         response.status_code = fastapi.status.HTTP_200_OK
-        return await _answered(database, already["_id"])
+        return await _answered(database, already.id)
 
     staged, document_id, version_id = await _reserved(staging, new.source)
     source_url = f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}"
@@ -214,28 +116,19 @@ async def create_document(
     # the document last, because writing it is what commits the document: until it
     # exists nothing can reach the version, and once it does everything beneath it
     # is there.
-    version = await records.create_version(
-        database,
-        stored.version_id,
-        document_id=stored.document_id,
-        content_url=stored.content,
-        title=stored.title,
-        created_by=new.created_by.model_dump(by_alias=True) if new.created_by else None,
-    )
-    document = await records.create(
-        database,
-        stored.document_id,
-        metadata=new.metadata,
-        source=new.source.model_dump(by_alias=True),
-    )
+    now = dt.datetime.now(tz=dt.UTC)
+    version = await records.create_version(database, new.version_for(stored, now))
+    document = await records.create(database, new.document_for(stored.document_id, now))
     await _promote_staged(staging, staged.file_id)
 
     response.headers["Location"] = f"/guides/{stored.document_id}"
-    return _answer(document, [version])
+    return schemas.Document.from_model(document, [version])
 
 
 @router.get("/{document_id}")
-async def read_document(document_id: str, database: Database) -> Document:
+async def read_document(
+    document_id: ids.DocumentId, database: Database
+) -> schemas.Document:
     """One document: what it is, and every version of it there has been."""
     return await _answered(database, document_id)
 
@@ -244,7 +137,7 @@ async def read_document(document_id: str, database: Database) -> Document:
     "/{document_id}/content", response_class=fastapi.responses.PlainTextResponse
 )
 async def read_content(
-    document_id: str,
+    document_id: ids.DocumentId,
     database: Database,
     s3_client: S3Client,
 ) -> str:
@@ -263,7 +156,7 @@ async def read_content(
         )
 
     content = await run_in_threadpool(
-        store.read, version["contentUrl"], s3_client=s3_client
+        store.read, version.content_url, s3_client=s3_client
     )
     if content is None:
         # The record points at something that is not there: a version half-deleted,
@@ -278,8 +171,8 @@ async def read_content(
 
 
 async def _reserved(
-    staging: staging_store.StagingStore, source: Source
-) -> tuple[staging_models.StagedDocument, str, str]:
+    staging: staging_store.StagingStore, source: schemas.Source
+) -> tuple[staging_models.StagedDocument, ids.DocumentId, ids.VersionId]:
     """The upload's staging record, and the document and version ids reserved on it.
 
     Answers the caller's mistakes as their status codes: a file that was never
@@ -319,7 +212,9 @@ async def _reserved(
     return reserved, reserved.document_id, reserved.version_id
 
 
-async def _promote_staged(staging: staging_store.StagingStore, file_id: str) -> None:
+async def _promote_staged(
+    staging: staging_store.StagingStore, file_id: ids.FileId
+) -> None:
     """Mark the file's staging record as promoted, now its document is committed.
 
     Best effort: the document is already safe, and is the upload's record from here
@@ -338,9 +233,9 @@ async def _promote_staged(staging: staging_store.StagingStore, file_id: str) -> 
 async def _converted(
     guidance: service.GuidanceService,
     source_url: str,
-    document_id: str,
-    version_id: str,
-) -> service.StoredDocument:
+    document_id: ids.DocumentId,
+    version_id: ids.VersionId,
+) -> models.StoredDocument:
     """Convert the upload, answering the caller's mistakes as their status codes."""
     try:
         return await run_in_threadpool(

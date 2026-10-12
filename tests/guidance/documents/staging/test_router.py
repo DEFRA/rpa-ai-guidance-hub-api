@@ -5,6 +5,7 @@ Addresses the ASGI request boundary using `fastapi.testclient.TestClient`.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 import fastapi.testclient
@@ -14,6 +15,9 @@ import app.entrypoints.fastapi
 from app.guidance.documents.staging import models, router, service, store
 from tests.fakes import staging_store as staging_store_fake
 from tests.fixtures import cdp_uploader
+
+DOCUMENT = uuid.UUID("0199b8a2-4c1e-7b3a-9d2f-6a1e3c5b7d90")
+VERSION = uuid.UUID("0199b8a2-4c1f-7e21-8b4c-2f9a6d1e3b57")
 
 
 @pytest.fixture
@@ -173,8 +177,8 @@ class TestGetStagedDocument:
             path="upload-1/guide-converted",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
-            document_id="document-1",
-            version_id="version-1",
+            document_id=DOCUMENT,
+            version_id=VERSION,
             promoted_at=datetime(2026, 10, 6, 11, 0, 0, tzinfo=UTC),
         )
 
@@ -182,7 +186,7 @@ class TestGetStagedDocument:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["documentId"] == "document-1"
+        assert data["documentId"] == str(DOCUMENT)
         assert data["promotedAt"] == "2026-10-06T11:00:00Z"
 
     def test_returns_no_commit_time_while_the_conversion_is_unfinished(
@@ -194,15 +198,15 @@ class TestGetStagedDocument:
             path="upload-1/guide-converting",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
-            document_id="document-1",
-            version_id="version-1",
+            document_id=DOCUMENT,
+            version_id=VERSION,
         )
 
         response = client.get("/guides/staging/guide-converting")
 
         assert response.status_code == 200
         data = response.json()
-        assert data["documentId"] == "document-1"
+        assert data["documentId"] == str(DOCUMENT)
         assert data["promotedAt"] is None
 
     def test_returns_404_when_document_does_not_exist(self, client):

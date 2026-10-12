@@ -7,7 +7,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from app.guidance.documents.staging import models, schemas, service
+from app.guidance.documents.staging import models, service
 from app.guidance.parsing import errors, parser
 from app.guidance.parsing import models as parsing_models
 from tests.fakes import staging_store as staging_store_fake
@@ -35,12 +35,12 @@ def staging_service(
 
 class TestHandleCallback:
     async def test_claims_unprocessed_document(self, staging_service):
-        document = schemas.UploadedDocument("file-1", "first.docx")
+        document = models.UploadedDocument("file-1", "first.docx")
 
         assert await staging_service.handle_callback(document) is True
 
     async def test_rejects_already_claimed_document(self, staging_service):
-        document = schemas.UploadedDocument("file-1", "first.docx")
+        document = models.UploadedDocument("file-1", "first.docx")
 
         assert await staging_service.handle_callback(document) is True
         assert await staging_service.handle_callback(document) is False
@@ -53,7 +53,7 @@ class TestValidateAndParse:
         staging_store: staging_store_fake.InMemoryStagingStore,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        document = schemas.UploadedDocument("file-1", "first.docx")
+        document = models.UploadedDocument("file-1", "first.docx")
         info = parsing_models.MinimalDocumentInfo(title="Parsed Title", version="1.0")
         monkeypatch.setattr(parser, "parse_docx", lambda _source: None)
         monkeypatch.setattr(parser, "parse_minimal", lambda _source: info)
@@ -73,7 +73,7 @@ class TestValidateAndParse:
         staging_store: staging_store_fake.InMemoryStagingStore,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        document = schemas.UploadedDocument("file-corrupt", "first.docx")
+        document = models.UploadedDocument("file-corrupt", "first.docx")
         parse_minimal_calls: list[bytes] = []
 
         def _raise_parse_error(_source: bytes) -> parsing_models.MarkdownDocument:
@@ -98,8 +98,8 @@ class TestValidateAndParse:
 
 class TestMultiFileUpload:
     async def test_both_files_are_claimed(self, staging_service):
-        first = schemas.UploadedDocument("first-file", "first.docx")
-        second = schemas.UploadedDocument("second-file", "second.docx")
+        first = models.UploadedDocument("first-file", "first.docx")
+        second = models.UploadedDocument("second-file", "second.docx")
 
         assert await staging_service.handle_callback(first) is True
         assert await staging_service.handle_callback(second) is True
@@ -107,8 +107,8 @@ class TestMultiFileUpload:
     async def test_each_file_is_parsed_and_recorded_under_its_own_id(
         self, staging_service, monkeypatch: pytest.MonkeyPatch
     ):
-        first = schemas.UploadedDocument("first-file", "first.docx")
-        second = schemas.UploadedDocument("second-file", "second.docx")
+        first = models.UploadedDocument("first-file", "first.docx")
+        second = models.UploadedDocument("second-file", "second.docx")
 
         info_by_bytes = {
             b"first-bytes": parsing_models.MinimalDocumentInfo(title="First"),
@@ -137,8 +137,8 @@ class TestMultiFileUpload:
     async def test_one_file_failing_to_validate_does_not_affect_the_other(
         self, staging_service, monkeypatch: pytest.MonkeyPatch
     ):
-        first = schemas.UploadedDocument("first-file", "first.docx")
-        second = schemas.UploadedDocument("second-file", "second.docx")
+        first = models.UploadedDocument("first-file", "first.docx")
+        second = models.UploadedDocument("second-file", "second.docx")
 
         def _parse_docx(source: bytes) -> parsing_models.MarkdownDocument | None:
             if source == b"first-bytes":
@@ -169,7 +169,7 @@ class TestMultiFileUpload:
 
 class TestGetStagedDoc:
     async def test_returns_document_from_store(self, staging_service):
-        first = schemas.UploadedDocument("first-file", "first.docx")
+        first = models.UploadedDocument("first-file", "first.docx")
         await staging_service.handle_callback(first)
 
         staged_document = await staging_service.get_staged_doc("first-file")

@@ -6,6 +6,7 @@ import pymongo
 
 from app import config as app_config
 from app.common import mongo, s3
+from app.guidance import ids
 from app.guidance.documents.staging import schemas, service, store
 
 config = app_config.get_config()
@@ -60,7 +61,7 @@ async def handle_callback(
 
 @router.get("/{file_id}")
 async def get_staged_document(
-    file_id: str,
+    file_id: ids.FileId,
     staging: Annotated[service.StagingService, fastapi.Depends(get_staging_service)],
 ) -> schemas.StagedDocumentResponse:
     staged_document = await staging.get_staged_doc(file_id)

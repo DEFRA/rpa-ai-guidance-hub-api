@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import uuid
 from typing import Any
 
 import pymongo.errors
@@ -21,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from app.common import mongo
 from app.entrypoints.fastapi import app
-from app.guidance import records, router, service
+from app.guidance import models, records, router, service
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
 from app.guidance.parsing.errors import DocumentParseError
@@ -30,8 +31,8 @@ UPLOAD = "854a1f43-aab4-4579-b166-d708c0aad436"
 FILE = "bf9b3179-47d0-4104-9944-5e23421ef437"
 KEY = f"{UPLOAD}/{FILE}"
 
-DOCUMENT = "01JBQ8"
-VERSION = "01JBQ9"
+DOCUMENT = uuid.UUID("0199b8a2-4c1e-7b3a-9d2f-6a1e3c5b7d90")
+VERSION = uuid.UUID("0199b8a2-4c1f-7e21-8b4c-2f9a6d1e3b57")
 CONTENT = f"s3://rpa-ai-guidance-hub-docs/{DOCUMENT}/{VERSION}/content.md"
 
 # What the stored document calls itself, which is not what the author typed on the
@@ -223,7 +224,7 @@ def converts(mocker):
     return mocker.patch.object(
         router.service,
         "convert",
-        return_value=service.StoredDocument(
+        return_value=models.StoredDocument(
             document_id=DOCUMENT,
             version_id=VERSION,
             content=CONTENT,
@@ -250,8 +251,10 @@ class TestCreatingADocument:
         response = client.post("/guides", json=_request())
 
         assert response.status_code == 201
-        assert response.json()["id"] == DOCUMENT
-        assert [version["id"] for version in response.json()["versions"]] == [VERSION]
+        assert response.json()["id"] == str(DOCUMENT)
+        assert [version["id"] for version in response.json()["versions"]] == [
+            str(VERSION)
+        ]
         assert response.json()["versions"][0]["contentUrl"] == CONTENT
 
     def test_where_the_document_can_be_read_from_afterwards(self, client):
@@ -482,7 +485,16 @@ class TestTheIdsAreReservedOnce:
     ):
         """No attempt at this document could have recorded that, so it is a fault
         rather than an earlier attempt's work - and nothing is committed."""
-        versions.documents.append({"_id": VERSION, records.DOCUMENT_ID: "another"})
+        versions.documents.append(
+            {
+                "_id": VERSION,
+                records.DOCUMENT_ID: "another",
+                "contentUrl": "s3://rpa-ai-guidance-hub-docs/another/content.md",
+                "title": None,
+                "createdBy": None,
+                "createdAt": dt.datetime(2026, 10, 5, 9, 0, tzinfo=dt.UTC),
+            }
+        )
         request = _request()
 
         with pytest.raises(records.MisfiledVersionError):
@@ -533,10 +545,23 @@ class TestReadingADocumentBack:
 
         assert response.status_code == 200
         assert response.json()["metadata"] == METADATA
-        assert [version["id"] for version in response.json()["versions"]] == [VERSION]
+        assert [version["id"] for version in response.json()["versions"]] == [
+            str(VERSION)
+        ]
 
     def test_a_document_that_never_was(self, client):
-        assert client.get("/guides/no-such-document").status_code == 404
+        assert client.get(f"/guides/{uuid.uuid4()}").status_code == 404
+
+    def test_an_id_that_is_not_a_uuid_is_refused_before_anything_is_looked_up(
+        self, client, mocker
+    ):
+        """No document could have such an id, so there is nothing to look for."""
+        find = mocker.spy(records, "find")
+
+        response = client.get("/guides/no-such-document")
+
+        assert response.status_code == 422
+        find.assert_not_called()
 
     def test_its_content_is_the_newest_versions_as_it_is_stored(self, client, mocker):
         """As stored rather than re-rendered: what the file says about its pictures
@@ -551,7 +576,15 @@ class TestReadingADocumentBack:
         assert response.text == "# CS Revenue Claims"
 
     def test_the_content_of_a_document_that_never_was(self, client):
-        assert client.get("/guides/no-such-document/content").status_code == 404
+        assert client.get(f"/guides/{uuid.uuid4()}/content").status_code == 404
+
+    def test_the_content_of_an_id_that_is_not_a_uuid_is_refused(self, client, mocker):
+        latest = mocker.spy(records, "latest_version")
+
+        response = client.get("/guides/no-such-document/content")
+
+        assert response.status_code == 422
+        latest.assert_not_called()
 
     def test_a_version_recorded_but_whose_content_has_gone(self, client, mocker):
         """The record points at something that is not there. Not a 404, which would

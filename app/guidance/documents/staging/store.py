@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import pymongo.asynchronous.database
 import pymongo.errors
 
+from app.guidance import ids
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.parsing import models as parsing_models
 
@@ -14,21 +14,23 @@ COLLECTION_NAME = "document_staging"
 
 
 class StagingStore(Protocol):
-    async def claim(self, file_id: str, path: str) -> bool: ...
+    async def claim(self, file_id: ids.FileId, path: str) -> bool: ...
 
     async def mark_complete(
-        self, file_id: str, info: parsing_models.MinimalDocumentInfo
+        self, file_id: ids.FileId, info: parsing_models.MinimalDocumentInfo
     ) -> None: ...
 
-    async def mark_failed(self, file_id: str, reason: str) -> None: ...
+    async def mark_failed(self, file_id: ids.FileId, reason: str) -> None: ...
 
-    async def get(self, file_id: str) -> staging_models.StagedDocument | None: ...
-
-    async def reserve_ids(
-        self, file_id: str
+    async def get(
+        self, file_id: ids.FileId
     ) -> staging_models.StagedDocument | None: ...
 
-    async def promote(self, file_id: str) -> None: ...
+    async def reserve_ids(
+        self, file_id: ids.FileId
+    ) -> staging_models.StagedDocument | None: ...
+
+    async def promote(self, file_id: ids.FileId) -> None: ...
 
 
 class MongoStagingStore:
@@ -41,7 +43,7 @@ class MongoStagingStore:
     async def ensure_indexes(self) -> None:
         await self._collection.create_index("expires_at", expireAfterSeconds=0)
 
-    async def claim(self, file_id: str, path: str) -> bool:
+    async def claim(self, file_id: ids.FileId, path: str) -> bool:
         now = datetime.now(UTC)
 
         try:
@@ -66,7 +68,7 @@ class MongoStagingStore:
         return True
 
     async def mark_complete(
-        self, file_id: str, info: parsing_models.MinimalDocumentInfo
+        self, file_id: ids.FileId, info: parsing_models.MinimalDocumentInfo
     ) -> None:
         await self._collection.update_one(
             {"_id": file_id},
@@ -81,7 +83,7 @@ class MongoStagingStore:
             },
         )
 
-    async def mark_failed(self, file_id: str, reason: str) -> None:
+    async def mark_failed(self, file_id: ids.FileId, reason: str) -> None:
         await self._collection.update_one(
             {"_id": file_id},
             {
@@ -93,7 +95,7 @@ class MongoStagingStore:
             },
         )
 
-    async def get(self, file_id: str) -> staging_models.StagedDocument | None:
+    async def get(self, file_id: ids.FileId) -> staging_models.StagedDocument | None:
         document = await self._collection.find_one({"_id": file_id})
 
         if document is None:
@@ -101,7 +103,9 @@ class MongoStagingStore:
 
         return staging_models.StagedDocument.from_document(document)
 
-    async def reserve_ids(self, file_id: str) -> staging_models.StagedDocument | None:
+    async def reserve_ids(
+        self, file_id: ids.FileId
+    ) -> staging_models.StagedDocument | None:
         """Reserve the ids a document made from this file is stored under.
 
         The first call for a parsed file mints them; every later call, including one
@@ -122,8 +126,8 @@ class MongoStagingStore:
             },
             {
                 "$set": {
-                    "document_id": str(uuid.uuid4()),
-                    "version_id": str(uuid.uuid4()),
+                    "document_id": ids.new_document_id(),
+                    "version_id": ids.new_version_id(),
                     "updated_at": datetime.now(UTC),
                 }
             },
@@ -139,7 +143,7 @@ class MongoStagingStore:
 
         return staged
 
-    async def promote(self, file_id: str) -> None:
+    async def promote(self, file_id: ids.FileId) -> None:
         """Record that the document made from this file has been committed.
 
         The file has been promoted from staging to a document under the ids reserved
