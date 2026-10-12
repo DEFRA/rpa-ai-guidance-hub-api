@@ -270,6 +270,9 @@ mypy refuses one where another belongs:
 | `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
 | `GET: /reference/guidance-types`| Guidance type options |
 | `GET: /review/assets`           | Simple example endpoint        |
+| `GET: /guides`                  | A page of guides, newest first; `limit`, `cursor`, and repeatable `scheme`, `system`, `audience`, `guidance_type` filters |
+| `GET: /guides/{id}`             | A guide and all its versions   |
+| `GET: /guides/{id}/assets/{name}` | Gets asset content for by name |
 
 ## Custom Cloudwatch Metrics
 

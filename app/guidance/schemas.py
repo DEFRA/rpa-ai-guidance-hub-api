@@ -146,3 +146,45 @@ class Document(pydantic.BaseModel):
             ),
             versions=[Version.from_model(version) for version in versions],
         )
+
+
+class DocumentSummary(pydantic.BaseModel):
+    """A document as listed, with its newest version."""
+
+    id: DocumentId
+    metadata: dict[str, Any]
+    source: Source
+    latest_version: Version | None = pydantic.Field(alias="latestVersion")
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, summary: models.DocumentSummary) -> DocumentSummary:
+        document = summary.document
+        latest = summary.latest_version
+        return cls(
+            id=document.id,
+            metadata=document.metadata,
+            source=Source(
+                uploadId=document.upload_id,
+                fileId=document.file_id,
+                filename=document.filename,
+            ),
+            latestVersion=None if latest is None else Version.from_model(latest),
+        )
+
+
+class DocumentPage(pydantic.BaseModel):
+    """One page of documents; `nextCursor` is null on the last."""
+
+    items: list[DocumentSummary]
+    next_cursor: DocumentId | None = pydantic.Field(alias="nextCursor")
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, page: models.DocumentPage) -> DocumentPage:
+        return cls(
+            items=[DocumentSummary.from_model(item) for item in page.items],
+            nextCursor=page.next_cursor,
+        )

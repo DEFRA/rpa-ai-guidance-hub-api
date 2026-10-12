@@ -52,6 +52,7 @@ rather than another one.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pymongo.errors
@@ -67,6 +68,8 @@ VERSIONS = "document_versions"
 # The upload a document was converted from, and the only thing that says two requests
 # mean the same document.
 _UPLOAD_ID = "source.uploadId"
+
+_METADATA = "metadata"
 
 # The document a version belongs to: the many end of the one-to-many. Its name is the
 # model's, which owns how a version is stored.
@@ -93,6 +96,8 @@ async def ensure_indexes(
     """
     await database[DOCUMENTS].create_index(_UPLOAD_ID, unique=True)
     await database[VERSIONS].create_index([(DOCUMENT_ID, 1), *_NEWEST])
+    for key in models.FILTERABLE_METADATA:
+        await database[DOCUMENTS].create_index(f"{_METADATA}.{key}")
 
 
 async def find_by_upload(
@@ -109,6 +114,45 @@ async def find(
     """One document by its id, without its versions."""
     found = await database[DOCUMENTS].find_one({"_id": document_id})
     return None if found is None else models.Document.from_document(found)
+
+
+async def list_documents(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    *,
+    metadata: Mapping[str, Sequence[str]],
+    after: DocumentId | None,
+    limit: int,
+) -> list[models.Document]:
+    """Up to `limit` documents, newest first, older than `after` if given.
+
+    A document matches when, for every metadata key, at least one of its values is
+    among those asked for. Ids are time-ordered, so `_id` is order and cursor both.
+    """
+    query: dict[str, Any] = {
+        f"{_METADATA}.{key}": {"$in": list(values)} for key, values in metadata.items()
+    }
+    if after is not None:
+        query["_id"] = {"$lt": after}
+
+    cursor = database[DOCUMENTS].find(query).sort("_id", -1).limit(limit)
+    return [models.Document.from_document(document) async for document in cursor]
+
+
+async def latest_versions_of(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_ids: Sequence[DocumentId],
+) -> dict[DocumentId, models.Version]:
+    """The newest version of each of `document_ids` that has one, in a single query."""
+    pipeline: list[dict[str, Any]] = [
+        {"$match": {DOCUMENT_ID: {"$in": list(document_ids)}}},
+        {"$sort": dict(_NEWEST)},
+        {"$group": {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
+    ]
+    cursor = await database[VERSIONS].aggregate(pipeline)
+    return {
+        group["_id"]: models.Version.from_document(group["newest"])
+        async for group in cursor
+    }
 
 
 async def versions_of(

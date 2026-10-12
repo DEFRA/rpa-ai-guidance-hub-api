@@ -21,6 +21,8 @@ from app.guidance import ids
 # The document a version belongs to: the many end of the one-to-many.
 DOCUMENT_ID = "documentId"
 
+FILTERABLE_METADATA = ("schemes", "systems", "audience", "guidanceType")
+
 
 @dataclass(frozen=True)
 class Document:
@@ -115,3 +117,19 @@ class StoredDocument:
     title: str
     sections: int
     images: int
+
+
+@dataclass(frozen=True)
+class DocumentSummary:
+    """A document and its newest version, if it has one."""
+
+    document: Document
+    latest_version: Version | None = None
+
+
+@dataclass(frozen=True)
+class DocumentPage:
+    """One page of documents, newest first; `next_cursor` is None on the last."""
+
+    items: list[DocumentSummary]
+    next_cursor: DocumentId | None = None
