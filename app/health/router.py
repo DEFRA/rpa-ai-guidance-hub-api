@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-router = APIRouter()
+router = APIRouter(include_in_schema=False)
 
 
 # Do not remove - used for health checks

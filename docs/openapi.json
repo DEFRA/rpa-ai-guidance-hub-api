@@ -1,0 +1,939 @@
+{
+  "components": {
+    "schemas": {
+      "Document": {
+        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/Version"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "metadata",
+          "source",
+          "versions"
+        ],
+        "title": "Document",
+        "type": "object"
+      },
+      "DocumentPage": {
+        "description": "One page of documents; `nextCursor` is null on the last.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "DocumentPage",
+        "type": "object"
+      },
+      "DocumentSummary": {
+        "description": "A document as listed, with its newest version.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latestVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Version"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          }
+        },
+        "required": [
+          "id",
+          "metadata",
+          "source",
+          "latestVersion"
+        ],
+        "title": "DocumentSummary",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "NewDocument": {
+        "description": "An upload to convert, and what its author said about the document.",
+        "properties": {
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Person"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          }
+        },
+        "required": [
+          "source",
+          "metadata"
+        ],
+        "title": "NewDocument",
+        "type": "object"
+      },
+      "ParsingStatus": {
+        "enum": [
+          "pending",
+          "in_progress",
+          "complete",
+          "failed"
+        ],
+        "title": "ParsingStatus",
+        "type": "string"
+      },
+      "Person": {
+        "description": "Someone the auth provider knows.\n\nThe id is the machine identifier and is what anything should match on; the\ndisplay name is carried beside it so that a listing can say who made a version\nwithout asking a directory. That name is a copy taken at the time and will go\nstale if the person is renamed, which is the price of not needing the directory.",
+        "properties": {
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "Person",
+        "type": "object"
+      },
+      "ReferenceOption": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "ReferenceOption",
+        "type": "object"
+      },
+      "Source": {
+        "description": "Which upload the document is, as the front end knows it.\n\nOnly names it: where the file is, and whether it parsed, are read from its\nstaging record, so the caller never says where to read from.",
+        "properties": {
+          "fileId": {
+            "description": "The file's id, as cdp-uploader's status reports it",
+            "title": "Fileid",
+            "type": "string"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "uploadId": {
+            "title": "Uploadid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uploadId",
+          "fileId"
+        ],
+        "title": "Source",
+        "type": "object"
+      },
+      "StagedDocumentResponse": {
+        "properties": {
+          "documentId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documentid"
+          },
+          "fileId": {
+            "title": "Fileid",
+            "type": "string"
+          },
+          "lastModified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastmodified"
+          },
+          "parsingError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parsingerror"
+          },
+          "parsingStatus": {
+            "$ref": "#/components/schemas/ParsingStatus"
+          },
+          "promotedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotedat"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "fileId",
+          "parsingStatus"
+        ],
+        "title": "StagedDocumentResponse",
+        "type": "object"
+      },
+      "UploadCallbackPayload": {
+        "properties": {
+          "form": {
+            "additionalProperties": true,
+            "title": "Form",
+            "type": "object"
+          },
+          "uploadStatus": {
+            "title": "Uploadstatus",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uploadStatus"
+        ],
+        "title": "UploadCallbackPayload",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Version": {
+        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is a copy of what the stored document called itself when this version\nwas made, so that a list of versions reads as something a person can follow.",
+        "properties": {
+          "contentUrl": {
+            "title": "Contenturl",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Person"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "contentUrl",
+          "createdAt"
+        ],
+        "title": "Version",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "RPA AI Guidance Hub API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/guides": {
+      "get": {
+        "description": "The documents there are, newest first, a page at a time.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
+        "operationId": "list_documents_guides_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The `nextCursor` of the page before this one",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `nextCursor` of the page before this one",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Audience"
+            }
+          },
+          {
+            "in": "query",
+            "name": "guidance_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Guidance Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Documents",
+        "tags": [
+          "guides"
+        ]
+      },
+      "post": {
+        "description": "Convert an upload and record the document it becomes.\n\nConverting the same upload twice answers the document it made the first time,\nrather than making a second one. The journey ahead of this can be submitted more\nthan once - a refresh, a back button, a retried request - and every one of those\nmeans the same version of the same document: a finished document is answered as\nit is, and an unfinished one is finished under the ids its first attempt\nreserved.",
+        "operationId": "create_document_guides_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDocument"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Document",
+        "tags": [
+          "guides"
+        ]
+      }
+    },
+    "/guides/staging/callback": {
+      "post": {
+        "operationId": "handle_callback_guides_staging_callback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCallbackPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handle Callback"
+      }
+    },
+    "/guides/staging/{file_id}": {
+      "get": {
+        "operationId": "get_staged_document_guides_staging__file_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Staged Document"
+      }
+    },
+    "/guides/{document_id}": {
+      "get": {
+        "description": "One document: what it is, and every version of it there has been.",
+        "operationId": "read_document_guides__document_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Document",
+        "tags": [
+          "guides"
+        ]
+      }
+    },
+    "/guides/{document_id}/assets/{name}": {
+      "get": {
+        "description": "A picture a document's Markdown draws, named as the Markdown names it.\n\nThe Markdown says `../assets/<name>`; this is where `<name>` is fetched from.\nPictures belong to the document, so every version shares them.",
+        "operationId": "read_asset_guides__document_id__assets__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9]+\\.[A-Za-z0-9]+$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Asset",
+        "tags": [
+          "guides"
+        ]
+      }
+    },
+    "/guides/{document_id}/content": {
+      "get": {
+        "description": "The Markdown of a document's newest version, as it is stored.\n\nAnswered as it was written rather than re-rendered. What it says about its\npictures is `../assets/...`, which resolves against the URL this content was read\nfrom - so a caller that keeps that URL can reach them, and `store.resolved` is\nwhat turns one into an address.",
+        "operationId": "read_content_guides__document_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Content",
+        "tags": [
+          "guides"
+        ]
+      }
+    },
+    "/reference/audiences": {
+      "get": {
+        "description": "Audience options for the \"Who is this for?\" checkboxes.",
+        "operationId": "get_audiences_reference_audiences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReferenceOption"
+                  },
+                  "title": "Response Get Audiences Reference Audiences Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Audiences"
+      }
+    },
+    "/reference/guidance-types": {
+      "get": {
+        "description": "Guidance type options for the metadata capture journey.",
+        "operationId": "get_guidance_types_reference_guidance_types_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReferenceOption"
+                  },
+                  "title": "Response Get Guidance Types Reference Guidance Types Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Guidance Types"
+      }
+    },
+    "/reference/schemes": {
+      "get": {
+        "description": "Schemes for the \"Which scheme does this guidance relate to?\" radios.",
+        "operationId": "get_schemes_reference_schemes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReferenceOption"
+                  },
+                  "title": "Response Get Schemes Reference Schemes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Schemes"
+      }
+    },
+    "/reference/systems": {
+      "get": {
+        "description": "System options for the \"What systems does this guidance relate to?\" checkboxes.",
+        "operationId": "get_systems_reference_systems_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReferenceOption"
+                  },
+                  "title": "Response Get Systems Reference Systems Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Systems"
+      }
+    },
+    "/review/assets": {
+      "get": {
+        "operationId": "root_review_assets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Root Review Assets Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    }
+  }
+}
