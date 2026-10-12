@@ -151,7 +151,7 @@ class Document(pydantic.BaseModel):
 class DocumentSummary(pydantic.BaseModel):
     """A document as listed, with its newest version."""
 
-    id: DocumentId
+    id: ids.DocumentId
     metadata: dict[str, Any]
     source: Source
     latest_version: Version | None = pydantic.Field(alias="latestVersion")
@@ -178,7 +178,7 @@ class DocumentPage(pydantic.BaseModel):
     """One page of documents; `nextCursor` is null on the last."""
 
     items: list[DocumentSummary]
-    next_cursor: DocumentId | None = pydantic.Field(alias="nextCursor")
+    next_cursor: ids.DocumentId | None = pydantic.Field(alias="nextCursor")
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 

@@ -132,4 +132,4 @@ class DocumentPage:
     """One page of documents, newest first; `next_cursor` is None on the last."""
 
     items: list[DocumentSummary]
-    next_cursor: DocumentId | None = None
+    next_cursor: ids.DocumentId | None = None

@@ -120,7 +120,7 @@ async def list_documents(
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
     metadata: Mapping[str, Sequence[str]],
-    after: DocumentId | None,
+    after: ids.DocumentId | None,
     limit: int,
 ) -> list[models.Document]:
     """Up to `limit` documents, newest first, older than `after` if given.
@@ -140,8 +140,8 @@ async def list_documents(
 
 async def latest_versions_of(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    document_ids: Sequence[DocumentId],
-) -> dict[DocumentId, models.Version]:
+    document_ids: Sequence[ids.DocumentId],
+) -> dict[ids.DocumentId, models.Version]:
     """The newest version of each of `document_ids` that has one, in a single query."""
     pipeline: list[dict[str, Any]] = [
         {"$match": {DOCUMENT_ID: {"$in": list(document_ids)}}},
