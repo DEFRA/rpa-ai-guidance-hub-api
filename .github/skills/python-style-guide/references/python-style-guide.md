@@ -196,6 +196,7 @@ config: Optional[Dict[str, Any]] = None
 def process_data(data: str, timeout: int = 30) -> dict[str, Any]:
     return {"result": data, "timeout": timeout}
 
+
 async def fetch_user(user_id: str) -> dict[str, str]:
     return {"id": user_id, "name": "John"}
 ```
@@ -208,6 +209,7 @@ active_sessions: list[str] = []
 
 # Not this
 from typing import Dict, List, Any
+
 user_cache: Dict[str, Any] = {}
 active_sessions: List[str] = []
 ```

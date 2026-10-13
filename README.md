@@ -82,6 +82,11 @@ database, no admin UI. The following environment variables are **required**; lik
 | `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `siti-agri:Siti Agri,crm:CRM` |
 | `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `process-guide:Process guide` |
 
+Guides are stored, and filtered on, by these keys, but `GET /guides` and `GET /guides/{id}` answer
+with each key replaced by its label in `metadata.schemes`, `systems`, `audience` and `guidanceType`,
+so a reader needs no call to `/reference/*` to display them. A key no longer in the list is shown
+as it is, and a scheme of `none` reads "Not scheme-specific".
+
 Each variable's format is a comma-separated list of `value:label` pairs, in display order. Each
 endpoint returns that list unchanged, as `[{"value": ..., "label": ...}, ...]` - see `/docs` for the
 generated OpenAPI schema.
@@ -263,13 +268,20 @@ mypy refuses one where another belongs:
 
 | Endpoint                        | Description                    |
 |:--------------------------------| :----------------------------- |
-| `GET: /docs`                    | Automatic API Swagger docs     |
+| `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
 | `GET: /reference/schemes`       | Scheme options for the "Which scheme does this guidance relate to?" radios |
 | `GET: /reference/audiences`     | Audience options for the "Who is this for?" checkboxes |
 | `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
 | `GET: /reference/guidance-types`| Guidance type options |
 | `GET: /review/assets`           | Simple example endpoint        |
+| `GET: /guides`                  | A page of guides, newest first; `limit`, `cursor`, and repeatable `scheme`, `system`, `audience`, `guidance_type` filters |
+| `POST: /guides`                 | Creates a guide (201)          |
+| `GET: /guides/{id}`             | A guide and all its versions   |
+| `GET: /guides/{id}/content`     | The Markdown of a guide's newest version, as plain text |
+| `GET: /guides/{id}/assets/{name}` | Gets asset content by name   |
+| `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
+| `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file (404 if unknown) |
 
 ## Custom Cloudwatch Metrics
 
