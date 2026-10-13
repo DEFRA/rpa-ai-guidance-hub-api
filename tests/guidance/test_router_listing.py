@@ -238,3 +238,16 @@ class TestReadingAnAsset:
         response = await client.get(f"/guides/{ids.new_document_id()}/assets/{name}")
 
         assert response.status_code in (404, 422)
+
+    @pytest.mark.parametrize("name", ["a3f9.svg", "a3f9.gif", "a3f9.html", "a3f9.xyz"])
+    async def test_a_file_that_is_not_an_allowed_image_type_is_not_served(
+        self, client, bucket, name
+    ):
+        document_id = ids.new_document_id()
+        bucket.put_object(
+            Bucket=BUCKET, Key=f"{document_id}/assets/{name}", Body=b"<svg/>"
+        )
+
+        response = await client.get(f"/guides/{document_id}/assets/{name}")
+
+        assert response.status_code == 404

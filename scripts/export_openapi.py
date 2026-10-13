@@ -5,9 +5,8 @@
     uv run task openapi-check    # exit 1 if the committed file is out of date
 
 The document is built from the FastAPI app without starting it, so no Mongo, S3 or
-Bedrock is involved. Importing the app does construct ``AppConfig``, which has
-required fields; ``tests/conftest.py`` already seeds placeholders for them, so it is
-imported here for its side effect rather than keeping a second copy of the list.
+Bedrock is involved. Importing the app does not construct ``AppConfig``, so none of
+its required environment variables need to be set.
 """
 
 import argparse
@@ -15,7 +14,6 @@ import json
 import sys
 from pathlib import Path
 
-import tests.conftest  # noqa: F401  (seeds AppConfig environment defaults)
 from app.entrypoints.fastapi import app
 
 OPENAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "openapi.json"

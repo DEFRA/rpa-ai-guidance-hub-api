@@ -54,6 +54,9 @@ MAX_PAGE_SIZE = 100
 # the assets directory.
 ASSET_NAME = r"^[A-Za-z0-9]+\.[A-Za-z0-9]+$"
 
+# Only these are served as assets, matching what the front end will pass on.
+ALLOWED_ASSET_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
+
 Database = Annotated[
     "pymongo.asynchronous.database.AsyncDatabase", fastapi.Depends(mongo.get_db)
 ]
@@ -230,6 +233,12 @@ async def read_asset(
     The Markdown says `../assets/<name>`; this is where `<name>` is fetched from.
     Pictures belong to the document, so every version shares them.
     """
+    media_type = mimetypes.guess_type(name)[0]
+    if media_type not in ALLOWED_ASSET_MEDIA_TYPES:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=f"No asset {name}"
+        )
+
     data = await run_in_threadpool(
         service.read_asset, document_id, name, s3_client=s3_client
     )
@@ -238,7 +247,6 @@ async def read_asset(
             status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=f"No asset {name}"
         )
 
-    media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
     return fastapi.Response(
         content=data,
         media_type=media_type,
