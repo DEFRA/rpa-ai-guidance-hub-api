@@ -61,6 +61,8 @@ output = "coverage/coverage.xml"
 format = "uv run ruff format . && uv run ruff check . --fix"
 lint = "uv run ruff format ./app ./tests --check && uv run ruff check ./app ./tests"
 typecheck = "uv run mypy ./app ./tests"
+openapi = "uv run python -m scripts.export_openapi"
+openapi-check = "uv run python -m scripts.export_openapi --check"
 test = "uv run task lint && uv run task typecheck && uv run coverage run -m pytest -vv && uv run coverage html && uv run coverage xml"
 
 [tool.pytest.ini_options]

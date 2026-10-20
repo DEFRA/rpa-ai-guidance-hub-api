@@ -13,6 +13,7 @@ from typing import Any
 import pydantic
 
 from app.guidance import ids, models
+from app.reference import labels
 
 
 class Source(pydantic.BaseModel):
@@ -125,7 +126,11 @@ class Version(pydantic.BaseModel):
 
 class Document(pydantic.BaseModel):
     """A document as it is answered: what it is, where it came from, and every
-    version of it there has been."""
+    version of it there has been.
+
+    The metadata is for display: the reference fields (schemes, systems, audience,
+    guidance type) hold labels, not the keys they are stored and filtered by.
+    """
 
     id: ids.DocumentId
     metadata: dict[str, Any]
@@ -138,11 +143,56 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=labels.labelled(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
                 filename=document.filename,
             ),
             versions=[Version.from_model(version) for version in versions],
+        )
+
+
+class DocumentSummary(pydantic.BaseModel):
+    """A document as listed, with its newest version.
+
+    Its metadata is labelled as a `Document`'s is.
+    """
+
+    id: ids.DocumentId
+    metadata: dict[str, Any]
+    source: Source
+    latest_version: Version | None = pydantic.Field(alias="latestVersion")
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, summary: models.DocumentSummary) -> DocumentSummary:
+        document = summary.document
+        latest = summary.latest_version
+        return cls(
+            id=document.id,
+            metadata=labels.labelled(document.metadata),
+            source=Source(
+                uploadId=document.upload_id,
+                fileId=document.file_id,
+                filename=document.filename,
+            ),
+            latestVersion=None if latest is None else Version.from_model(latest),
+        )
+
+
+class DocumentPage(pydantic.BaseModel):
+    """One page of documents; `nextCursor` is null on the last."""
+
+    items: list[DocumentSummary]
+    next_cursor: ids.DocumentId | None = pydantic.Field(alias="nextCursor")
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, page: models.DocumentPage) -> DocumentPage:
+        return cls(
+            items=[DocumentSummary.from_model(item) for item in page.items],
+            nextCursor=page.next_cursor,
         )

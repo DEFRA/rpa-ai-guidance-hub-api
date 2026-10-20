@@ -1,12 +1,12 @@
-"""Testcontainers floci support, for the few S3 behaviours moto cannot vouch for.
+"""Testcontainers support for S3 tests against floci, a mocked AWS.
 
 moto imitates S3 in memory, and is what the store is tested against: it is fast and
-needs nothing running. floci is the S3 stand-in the local stack runs, and it has
+needs nothing running. floci is the AWS emulator the local stack runs, and it has
 disagreed with moto before (ranged reads failing a checksum, found only in floci).
-So the handful of S3 behaviours the service relies on to stay correct - a
-create-only write being refused, and racing writes to one key leaving one winner -
-are checked against floci too, started here the way `tests.support.mongo` starts
-MongoDB: one container for the whole session, in CI as on a laptop.
+So a handful of store tests also run against floci over real HTTP, started here the
+way `tests.support.mongo` starts MongoDB: one container for the whole session, in CI
+as on a laptop. Unlike Mongo, it is still an imitation of AWS, so these tests check
+our store and leave the emulator's own behaviour alone.
 
 The image is the one both compose files pin, so the tests and the local stack run
 the same floci.

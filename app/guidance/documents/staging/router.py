@@ -9,8 +9,6 @@ from app.common import mongo, s3
 from app.guidance import ids
 from app.guidance.documents.staging import schemas, service, store
 
-config = app_config.get_config()
-
 router = fastapi.APIRouter(prefix="/guides/staging")
 logger = getLogger(__name__)
 
@@ -20,7 +18,9 @@ def get_staging_store(
         pymongo.asynchronous.database.AsyncDatabase, fastapi.Depends(mongo.get_db)
     ],
 ) -> store.StagingStore:
-    return store.MongoStagingStore(db, config.staging_retention_seconds)
+    return store.MongoStagingStore(
+        db, app_config.get_config().staging_retention_seconds
+    )
 
 
 def get_staging_service(
@@ -28,7 +28,7 @@ def get_staging_service(
     s3_client: Annotated[Any, fastapi.Depends(s3.get_s3_client)],
 ) -> service.StagingService:
     return service.StagingService(
-        staging_store, config.source_docs_s3_bucket, s3_client
+        staging_store, app_config.get_config().source_docs_s3_bucket, s3_client
     )
 
 
