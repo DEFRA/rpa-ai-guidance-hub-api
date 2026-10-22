@@ -5,17 +5,20 @@ description = "rpa-ai-guidance-hub-api"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "aiohttp==3.14.5",
     "asgi-logger==0.1.0",
     "aws-embedded-metrics==3.5.0",
-    "boto3==1.43.112",
+    "boto3==1.43.117",
     "dnspython==2.9.0",
     "ecs-logging==2.3.0",
     "fastapi==0.143.0",
     "httpx2==2.13.1",
+    "multidict==6.9.1",
     "pydantic-ai-slim[bedrock]==2.55.0",
     "pydantic-settings==2.15.0",
     "pymongo[aws,encryption,snappy,zstd]==4.18.3",
     "python-docx==1.2.0",
+    "urllib3==2.8.0",
     "uvicorn==0.54.0",
 ]
 
@@ -110,5 +113,7 @@ ignore_errors = true
 exclude-newer = "1 week"
 # Exempt from the cooldown so the trust bundle can pick up eMudhra G3 intermediate
 # revocations (https://blog.talosintelligence.com/compromised-intermediate-certificates/).
-exclude-newer-package = { certifi = false }
+# Exempt boto3/botocore so we can take botocore 1.43.117, whose vendored CA bundle
+# drops the Comodo AAA root that cross-signed the compromised eMudhra G3 root.
+exclude-newer-package = { certifi = false, boto3 = false, botocore = false }
 default-groups = ["dev"]
