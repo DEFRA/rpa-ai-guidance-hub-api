@@ -26,7 +26,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pipx install uv==0.11.17
+          pipx install uv==0.13.5
           uv sync --frozen
           uv run task test
 

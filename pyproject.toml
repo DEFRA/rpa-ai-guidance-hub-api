@@ -108,4 +108,7 @@ ignore_errors = true
 
 [tool.uv]
 exclude-newer = "1 week"
+# Exempt from the cooldown so the trust bundle can pick up eMudhra G3 intermediate
+# revocations (https://blog.talosintelligence.com/compromised-intermediate-certificates/).
+exclude-newer-package = { certifi = false }
 default-groups = ["dev"]
