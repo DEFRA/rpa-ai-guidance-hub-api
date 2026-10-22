@@ -76,34 +76,51 @@ def _parse_bedrock_model_config(v: str) -> BedrockModelConfig:
 
 
 def _parse_reference_options(v: str) -> list[dict[str, str]]:
-    """Parse a packed 'value1:Label One,value2:Label Two' string into {value, label} dicts.
+    """Parse a packed 'Label One|SHORT,Label Two' string into option dicts.
 
-    Expected format: comma-separated entries, each 'value:label'. Returns plain
-    dicts rather than a pydantic model deliberately - this is config-parsing
-    output, not the API response shape (see app.reference.schemas.ReferenceOption
-    for that), so config.py has no reason to know about a feature package. The
-    keys match ReferenceOption's fields, so a router can return this list as-is
-    and FastAPI's declared response type does the validation/shaping for free.
+    Expected format: comma-separated entries, each 'label' or 'label|short label'.
+    The label is the identity of an option, so duplicate labels (ignoring case)
+    are rejected; the optional short label is display-only and need not be unique.
+
+    Returns plain dicts rather than a pydantic model deliberately - this is
+    config-parsing output, not the API response shape (see
+    app.reference.schemas.ReferenceOption for that), so config.py has no reason to
+    know about a feature package. The keys match ReferenceOption's fields, so a
+    router can return this list as-is and FastAPI's declared response type does the
+    validation/shaping for free. Any other consumer-specific encoding (e.g.
+    URL-friendly values for checkbox inputs) is derived by the consumer from the
+    label, not supplied by the API.
     """
     if not isinstance(v, str):
-        msg = "Reference option list must be a string in the format 'value1:Label One,value2:Label Two'"
+        msg = (
+            "Reference option list must be a string in the format "
+            "'Label One|SHORT,Label Two'"
+        )
         raise ValueError(msg)
 
     if not v.strip():
         msg = "Reference option list must contain at least one entry"
         raise ValueError(msg)
 
-    options = []
+    options: list[dict[str, str]] = []
 
     for entry in v.split(","):
-        (value, separator, label) = entry.partition(":")
-        value, label = value.strip(), label.strip()
-
-        if not separator or not value or not label:
-            msg = f"invalid reference option entry {entry.strip()!r}; expected 'value:label'"
+        label, separator, short_label = (part.strip() for part in entry.partition("|"))
+        if not label:
+            msg = "reference option list must not contain empty entries"
             raise ValueError(msg)
 
-        options.append({"value": value, "label": label})
+        option = {"label": label}
+        if separator:
+            if not short_label:
+                msg = f"reference option {label!r} has an empty short label"
+                raise ValueError(msg)
+            option["short_label"] = short_label
+        options.append(option)
+
+    if len({option["label"].casefold() for option in options}) != len(options):
+        msg = "reference option list must not contain duplicate entries"
+        raise ValueError(msg)
 
     return options
 

@@ -18,10 +18,10 @@ os.environ.setdefault(
 )
 os.environ.setdefault(
     "REFERENCE_SCHEMES",
-    "basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific",
+    "Basic Payment Scheme|BPS,Countryside Stewardship",
 )
-os.environ.setdefault("REFERENCE_AUDIENCES", "caseworker:Caseworker,customer:Customer")
-os.environ.setdefault("REFERENCE_SYSTEMS", "siti-agri:Siti Agri,crm:CRM")
-os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "process-guide:Process guide")
+os.environ.setdefault("REFERENCE_AUDIENCES", "Caseworker,Customer")
+os.environ.setdefault("REFERENCE_SYSTEMS", "Siti Agri,CRM")
+os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "Process guide")
 
 pytest_plugins = ["tests.support.mongo", "tests.support.s3", "tests.support.floci"]

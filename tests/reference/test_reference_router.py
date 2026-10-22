@@ -11,8 +11,8 @@ class TestSchemes:
 
         assert response.status_code == 200
         assert response.json() == [
-            {"value": "basic-payment-scheme", "label": "Basic Payment Scheme"},
-            {"value": "not-specific", "label": "Not scheme-specific"},
+            {"label": "Basic Payment Scheme", "shortLabel": "BPS"},
+            {"label": "Countryside Stewardship"},
         ]
 
 
@@ -21,10 +21,7 @@ class TestAudiences:
         response = client.get("/reference/audiences")
 
         assert response.status_code == 200
-        assert response.json() == [
-            {"value": "caseworker", "label": "Caseworker"},
-            {"value": "customer", "label": "Customer"},
-        ]
+        assert response.json() == [{"label": "Caseworker"}, {"label": "Customer"}]
 
 
 class TestSystems:
@@ -32,10 +29,7 @@ class TestSystems:
         response = client.get("/reference/systems")
 
         assert response.status_code == 200
-        assert response.json() == [
-            {"value": "siti-agri", "label": "Siti Agri"},
-            {"value": "crm", "label": "CRM"},
-        ]
+        assert response.json() == [{"label": "Siti Agri"}, {"label": "CRM"}]
 
 
 class TestGuidanceTypes:
@@ -43,4 +37,4 @@ class TestGuidanceTypes:
         response = client.get("/reference/guidance-types")
 
         assert response.status_code == 200
-        assert response.json() == [{"value": "process-guide", "label": "Process guide"}]
+        assert response.json() == [{"label": "Process guide"}]
