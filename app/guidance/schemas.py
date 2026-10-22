@@ -28,8 +28,6 @@ class Source(pydantic.BaseModel):
     )
     filename: str | None = None
 
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
 
 class Person(pydantic.BaseModel):
     """Someone the auth provider knows.
@@ -43,8 +41,6 @@ class Person(pydantic.BaseModel):
     id: str
     display_name: str | None = pydantic.Field(default=None, alias="displayName")
 
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
 
 class NewDocument(pydantic.BaseModel):
     """An upload to convert, and what its author said about the document."""
@@ -52,8 +48,6 @@ class NewDocument(pydantic.BaseModel):
     source: Source
     metadata: dict[str, Any]
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
 
     def document_for(
         self, document_id: ids.DocumentId, created_at: dt.datetime
@@ -101,8 +95,6 @@ class Version(pydantic.BaseModel):
     title: str | None = None
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
 
     @classmethod
     def from_model(cls, version: models.Version) -> Version:

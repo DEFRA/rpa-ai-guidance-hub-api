@@ -85,7 +85,7 @@ def _parse_reference_options(v: str) -> list[dict[str, str]]:
     Returns plain dicts rather than a pydantic model deliberately - this is
     config-parsing output, not the API response shape (see
     app.reference.schemas.ReferenceOption for that), so config.py has no reason to
-    know about a feature package. The keys match ReferenceOption's fields, so a
+    know about a feature package. The keys match ReferenceOption's wire (camelCase) names, so a
     router can return this list as-is and FastAPI's declared response type does the
     validation/shaping for free. Any other consumer-specific encoding (e.g.
     URL-friendly values for checkbox inputs) is derived by the consumer from the
@@ -115,7 +115,7 @@ def _parse_reference_options(v: str) -> list[dict[str, str]]:
             if not short_label:
                 msg = f"reference option {label!r} has an empty short label"
                 raise ValueError(msg)
-            option["short_label"] = short_label
+            option["shortLabel"] = short_label
         options.append(option)
 
     if len({option["label"].casefold() for option in options}) != len(options):

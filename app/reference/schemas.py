@@ -11,5 +11,3 @@ class ReferenceOption(pydantic.BaseModel):
 
     label: str
     short_label: str | None = pydantic.Field(default=None, alias="shortLabel")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)

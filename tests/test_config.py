@@ -128,14 +128,14 @@ class TestParseReferenceOptions:
         )
 
         assert parsed == [
-            {"label": "Sustainable Farming Incentive (SFI)", "short_label": "SFI"},
+            {"label": "Sustainable Farming Incentive (SFI)", "shortLabel": "SFI"},
             {"label": "Countryside Stewardship"},
         ]
 
     def test_strips_whitespace_around_each_part(self):
         parsed = config._parse_reference_options("  Siti Agri | SA  ")
 
-        assert parsed == [{"label": "Siti Agri", "short_label": "SA"}]
+        assert parsed == [{"label": "Siti Agri", "shortLabel": "SA"}]
 
     def test_rejects_non_string_input(self):
         with pytest.raises(ValueError, match="must be a string"):
@@ -164,7 +164,7 @@ class TestParseReferenceOptions:
     def test_duplicate_short_labels_are_allowed(self):
         parsed = config._parse_reference_options("One|X,Two|X")
 
-        assert [option["short_label"] for option in parsed] == ["X", "X"]
+        assert [option["shortLabel"] for option in parsed] == ["X", "X"]
 
     def test_one_empty_entry_fails_the_whole_value(self):
         """Fail-fast, not partial recovery - an empty entry never silently vanishes."""
