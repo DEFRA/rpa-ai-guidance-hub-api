@@ -13,7 +13,6 @@ from typing import Any
 import pydantic
 
 from app.guidance import ids, models
-from app.reference import labels
 
 
 class Source(pydantic.BaseModel):
@@ -29,8 +28,6 @@ class Source(pydantic.BaseModel):
     )
     filename: str | None = None
 
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
 
 class Person(pydantic.BaseModel):
     """Someone the auth provider knows.
@@ -44,8 +41,6 @@ class Person(pydantic.BaseModel):
     id: str
     display_name: str | None = pydantic.Field(default=None, alias="displayName")
 
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
 
 class NewDocument(pydantic.BaseModel):
     """An upload to convert, and what its author said about the document."""
@@ -53,8 +48,6 @@ class NewDocument(pydantic.BaseModel):
     source: Source
     metadata: dict[str, Any]
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
 
     def document_for(
         self, document_id: ids.DocumentId, created_at: dt.datetime
@@ -103,8 +96,6 @@ class Version(pydantic.BaseModel):
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
 
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
     @classmethod
     def from_model(cls, version: models.Version) -> Version:
         created_by = (
@@ -127,9 +118,6 @@ class Version(pydantic.BaseModel):
 class Document(pydantic.BaseModel):
     """A document as it is answered: what it is, where it came from, and every
     version of it there has been.
-
-    The metadata is for display: the reference fields (schemes, systems, audience,
-    guidance type) hold labels, not the keys they are stored and filtered by.
     """
 
     id: ids.DocumentId
@@ -143,7 +131,7 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=labels.labelled(document.metadata),
+            metadata=document.metadata,
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
@@ -154,10 +142,7 @@ class Document(pydantic.BaseModel):
 
 
 class DocumentSummary(pydantic.BaseModel):
-    """A document as listed, with its newest version.
-
-    Its metadata is labelled as a `Document`'s is.
-    """
+    """A document as listed, with its newest version."""
 
     id: ids.DocumentId
     metadata: dict[str, Any]
@@ -172,7 +157,7 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=labels.labelled(document.metadata),
+            metadata=document.metadata,
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,

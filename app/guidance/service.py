@@ -185,7 +185,7 @@ def _metadata_filters(
     metadata: dict[str, list[str]] = {}
     for name, values in requested.items():
         key, options = known[name]
-        allowed = {option["value"] for option in options}
+        allowed = {option["label"] for option in options}
         unknown = sorted(set(values) - allowed)
         if unknown:
             message = (

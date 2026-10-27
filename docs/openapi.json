@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "Document": {
-        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.\n\nThe metadata is for display: the reference fields (schemes, systems, audience,\nguidance type) hold labels, not the keys they are stored and filtered by.",
+        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -65,7 +65,7 @@
         "type": "object"
       },
       "DocumentSummary": {
-        "description": "A document as listed, with its newest version.\n\nIts metadata is labelled as a `Document`'s is.",
+        "description": "A document as listed, with its newest version.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -178,18 +178,25 @@
         "type": "object"
       },
       "ReferenceOption": {
+        "description": "A reference option as returned on the wire.\n\n`label` is the option's identity: it is what documents store and filters\nmatch on. `short_label` is display-only (e.g. for chips and table columns) and\nis never stored or filtered by; it is omitted from the response when unset.",
         "properties": {
           "label": {
             "title": "Label",
             "type": "string"
           },
-          "value": {
-            "title": "Value",
-            "type": "string"
+          "shortLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortlabel"
           }
         },
         "required": [
-          "value",
           "label"
         ],
         "title": "ReferenceOption",

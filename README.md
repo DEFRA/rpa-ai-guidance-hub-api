@@ -77,19 +77,23 @@ database, no admin UI. The following environment variables are **required**; lik
 
 | Variable | Description | Example |
 | --- | --- | --- |
-| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific` |
-| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `caseworker:Caseworker,customer:Customer` |
-| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `siti-agri:Siti Agri,crm:CRM` |
-| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `process-guide:Process guide` |
+| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `Basic Payment Scheme|BPS,Countryside Stewardship` |
+| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `Caseworker,Customer` |
+| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `Siti Agri,CRM` |
+| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `Process guide` |
 
-Guides are stored, and filtered on, by these keys, but `GET /guides` and `GET /guides/{id}` answer
-with each key replaced by its label in `metadata.schemes`, `systems`, `audience` and `guidanceType`,
-so a reader needs no call to `/reference/*` to display them. A key no longer in the list is shown
-as it is, and a scheme of `none` reads "Not scheme-specific".
+Each variable's format is a comma-separated list of `label` or `label|short label` entries, in display
+order. Each endpoint returns that list as `[{"label": ..., "shortLabel": ...}, ...]`, omitting
+`shortLabel` when none is set - see `/docs` for the generated OpenAPI schema.
 
-Each variable's format is a comma-separated list of `value:label` pairs, in display order. Each
-endpoint returns that list unchanged, as `[{"value": ..., "label": ...}, ...]` - see `/docs` for the
-generated OpenAPI schema.
+- The **label** is the option's identity: documents store it and filters match on it. Labels must be
+  unique ignoring case (startup fails otherwise). Include any abbreviation in the label itself, e.g.
+  `Sustainable Farming Incentive (SFI)`, and don't rename a label in place - add the new one and
+  retire the old, as stored guides and saved filters hold the old text.
+- The **short label** is display-only (chips, table columns). It is never stored or filtered by, and
+  need not be unique.
+- Any other consumer-specific encoding (e.g. URL-friendly values for checkbox inputs) is derived by
+  the consumer from the label.
 
 ### Linting and Formatting
 

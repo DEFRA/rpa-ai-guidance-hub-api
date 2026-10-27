@@ -142,36 +142,28 @@ class TestListingDocuments:
         assert [i["id"] for i in second["items"]] == [str(seeded[0])]
         assert second["nextCursor"] is None
 
-    async def test_metadata_carries_labels_in_place_of_reference_keys(
-        self, client, database
-    ):
-        await _seed(database, {"schemes": ["basic-payment-scheme"], "title": "T"})
-
-        response = await client.get("/guides")
-
-        (item,) = response.json()["items"]
-        assert item["metadata"] == {"schemes": ["Basic Payment Scheme"], "title": "T"}
-
     async def test_a_filter_keeps_only_documents_with_one_of_its_values(
         self, client, database
     ):
-        wanted, _ = await _seed(database, {"schemes": ["basic-payment-scheme"]})
-        await _seed(database, {"schemes": ["not-specific"]})
+        wanted, _ = await _seed(database, {"schemes": ["Basic Payment Scheme"]})
+        await _seed(database, {"schemes": ["Countryside Stewardship"]})
 
         response = await client.get(
-            "/guides", params={"scheme": "basic-payment-scheme"}
+            "/guides", params={"scheme": "Basic Payment Scheme"}
         )
 
         assert [i["id"] for i in response.json()["items"]] == [str(wanted)]
 
     async def test_filters_must_all_match(self, client, database):
         wanted, _ = await _seed(
-            database, {"schemes": ["not-specific"], "systems": ["crm"]}
+            database, {"schemes": ["Countryside Stewardship"], "systems": ["CRM"]}
         )
-        await _seed(database, {"schemes": ["not-specific"], "systems": ["siti-agri"]})
+        await _seed(
+            database, {"schemes": ["Countryside Stewardship"], "systems": ["Siti Agri"]}
+        )
 
         response = await client.get(
-            "/guides", params={"scheme": "not-specific", "system": "crm"}
+            "/guides", params={"scheme": "Countryside Stewardship", "system": "CRM"}
         )
 
         assert [i["id"] for i in response.json()["items"]] == [str(wanted)]

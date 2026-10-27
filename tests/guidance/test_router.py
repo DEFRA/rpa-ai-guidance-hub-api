@@ -549,15 +549,6 @@ class TestReadingADocumentBack:
             str(VERSION)
         ]
 
-    def test_with_labels_in_place_of_reference_keys(self, client):
-        keyed = {**METADATA, "systems": ["crm"], "audience": ["customer"]}
-        client.post("/guides", json=_request(metadata=keyed))
-
-        response = client.get(f"/guides/{DOCUMENT}")
-
-        assert response.json()["metadata"]["systems"] == ["CRM"]
-        assert response.json()["metadata"]["audience"] == ["Customer"]
-
     def test_a_document_that_never_was(self, client):
         assert client.get(f"/guides/{uuid.uuid4()}").status_code == 404
 
