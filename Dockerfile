@@ -1,5 +1,5 @@
 # Set default values for build arguments
-ARG PARENT_VERSION=2.9.0-python3.14.8
+ARG PARENT_VERSION=2.10.0-python3.14.10
 ARG PORT=8085
 ARG PORT_DEBUG=8086
 
