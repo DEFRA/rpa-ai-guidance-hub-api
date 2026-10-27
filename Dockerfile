@@ -1,9 +1,8 @@
 # Set default values for build arguments
-ARG PARENT_VERSION=2.9.0-python3.14.8
 ARG PORT=8085
 ARG PORT_DEBUG=8086
 
-FROM defradigital/python-development:${PARENT_VERSION} AS development
+FROM defradigital/python-development:2.10.0-python3.14.10 AS development
 
 ENV PATH="/home/nonroot/.venv/bin:${PATH}"
 ENV LOG_CONFIG="logging-dev.json"
@@ -27,7 +26,7 @@ EXPOSE ${PORT} ${PORT_DEBUG}
 
 CMD [ "/home/nonroot/.venv/bin/rpa-ai-guidance-hub-api" ]
 
-FROM defradigital/python:${PARENT_VERSION} AS production
+FROM defradigital/python:2.10.0-python3.14.10 AS production
 
 ENV PATH="/home/nonroot/.venv/bin:${PATH}"
 ENV LOG_CONFIG="logging.json"
