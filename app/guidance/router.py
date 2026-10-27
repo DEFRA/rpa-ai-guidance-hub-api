@@ -25,6 +25,7 @@ it on the event loop would stop the service answering anything else meanwhile.
 from __future__ import annotations
 
 import datetime as dt
+import mimetypes
 from logging import getLogger
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -45,6 +46,16 @@ if TYPE_CHECKING:
 
 router = fastapi.APIRouter(prefix="/guides", tags=["guides"])
 logger = getLogger(__name__)
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+# A picture is named by a digest and an extension: no separators, so no way out of
+# the assets directory.
+ASSET_NAME = r"^[A-Za-z0-9]+\.[A-Za-z0-9]+$"
+
+# Only these are served as assets, matching what the front end will pass on.
+ALLOWED_ASSET_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
 
 Database = Annotated[
     "pymongo.asynchronous.database.AsyncDatabase", fastapi.Depends(mongo.get_db)
@@ -125,6 +136,47 @@ async def create_document(
     return schemas.Document.from_model(document, [version])
 
 
+@router.get("")
+async def list_documents(
+    database: Database,
+    limit: Annotated[int, fastapi.Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    cursor: Annotated[
+        ids.DocumentId | None,
+        fastapi.Query(description="The `nextCursor` of the page before this one"),
+    ] = None,
+    scheme: Annotated[list[str] | None, fastapi.Query()] = None,
+    system: Annotated[list[str] | None, fastapi.Query()] = None,
+    audience: Annotated[list[str] | None, fastapi.Query()] = None,
+    guidance_type: Annotated[list[str] | None, fastapi.Query()] = None,
+) -> schemas.DocumentPage:
+    """The documents there are, newest first, a page at a time.
+
+    Filters take values from the reference data and can be repeated. Follow
+    `nextCursor` for the next page; it is null on the last.
+    """
+    filters = {
+        name: values
+        for name, values in {
+            "scheme": scheme,
+            "system": system,
+            "audience": audience,
+            "guidance_type": guidance_type,
+        }.items()
+        if values
+    }
+    try:
+        page = await service.list_page(
+            database, filters=filters, after=cursor, limit=limit
+        )
+    except service.UnknownFilterValueError as unknown:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(unknown),
+        ) from unknown
+
+    return schemas.DocumentPage.from_model(page)
+
+
 @router.get("/{document_id}")
 async def read_document(
     document_id: ids.DocumentId, database: Database
@@ -168,6 +220,42 @@ async def read_content(
         )
 
     return content.decode("utf-8")
+
+
+@router.get("/{document_id}/assets/{name}")
+async def read_asset(
+    document_id: ids.DocumentId,
+    name: Annotated[str, fastapi.Path(pattern=ASSET_NAME)],
+    s3_client: S3Client,
+) -> fastapi.Response:
+    """A picture a document's Markdown draws, named as the Markdown names it.
+
+    The Markdown says `../assets/<name>`; this is where `<name>` is fetched from.
+    Pictures belong to the document, so every version shares them.
+    """
+    media_type = mimetypes.guess_type(name)[0]
+    if media_type not in ALLOWED_ASSET_MEDIA_TYPES:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=f"No asset {name}"
+        )
+
+    data = await run_in_threadpool(
+        service.read_asset, document_id, name, s3_client=s3_client
+    )
+    if data is None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=f"No asset {name}"
+        )
+
+    return fastapi.Response(
+        content=data,
+        media_type=media_type,
+        # Named by the digest of its bytes, so what a name answers never changes.
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 async def _reserved(

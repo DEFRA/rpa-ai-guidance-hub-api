@@ -136,3 +136,102 @@ class TestHowIdsAreStored:
         assert found is not None
         assert found.id == document_id
         assert [version.id for version in versions] == [version_id]
+
+
+class TestListingDocuments:
+    async def test_documents_come_newest_first_after_the_cursor(self, database):
+        await database[records.DOCUMENTS].delete_many({})
+        first, second, third = (ids.new_document_id() for _ in range(3))
+        for document_id in (first, second, third):
+            await records.create(database, _document(document_id, str(uuid.uuid4())))
+
+        everything = await records.list_documents(
+            database, metadata={}, after=None, limit=10
+        )
+        older = await records.list_documents(
+            database, metadata={}, after=second, limit=10
+        )
+
+        assert [d.id for d in everything] == [third, second, first]
+        assert [d.id for d in older] == [first]
+
+    async def test_a_limit_caps_the_documents_returned(self, database):
+        await database[records.DOCUMENTS].delete_many({})
+        for _ in range(3):
+            await records.create(
+                database, _document(ids.new_document_id(), str(uuid.uuid4()))
+            )
+
+        found = await records.list_documents(database, metadata={}, after=None, limit=2)
+
+        assert len(found) == 2
+
+    async def test_a_document_matches_when_any_value_of_a_key_is_asked_for(
+        self, database
+    ):
+        await database[records.DOCUMENTS].delete_many({})
+        both, other = ids.new_document_id(), ids.new_document_id()
+        await records.create(
+            database, _document(both, str(uuid.uuid4()), {"schemes": ["a", "b"]})
+        )
+        await records.create(
+            database, _document(other, str(uuid.uuid4()), {"schemes": ["c"]})
+        )
+
+        found = await records.list_documents(
+            database, metadata={"schemes": ["b", "z"]}, after=None, limit=10
+        )
+
+        assert [d.id for d in found] == [both]
+
+    async def test_a_document_must_match_every_key_asked_for(self, database):
+        await database[records.DOCUMENTS].delete_many({})
+        wanted, wrong_system = ids.new_document_id(), ids.new_document_id()
+        await records.create(
+            database,
+            _document(wanted, str(uuid.uuid4()), {"schemes": ["a"], "systems": ["x"]}),
+        )
+        await records.create(
+            database,
+            _document(
+                wrong_system, str(uuid.uuid4()), {"schemes": ["a"], "systems": ["y"]}
+            ),
+        )
+
+        found = await records.list_documents(
+            database,
+            metadata={"schemes": ["a"], "systems": ["x"]},
+            after=None,
+            limit=10,
+        )
+
+        assert [d.id for d in found] == [wanted]
+
+
+class TestLatestVersions:
+    async def test_each_document_gets_its_newest_version_and_none_without(
+        self, database
+    ):
+        with_two, with_none = ids.new_document_id(), ids.new_document_id()
+        old = _version(ids.new_version_id(), with_two, "s3://d/old")
+        new = models.Version(
+            id=ids.new_version_id(),
+            document_id=with_two,
+            content_url="s3://d/new",
+            created_at=old.created_at + dt.timedelta(seconds=1),
+        )
+        await records.create_version(database, old)
+        await records.create_version(database, new)
+
+        latest = await records.latest_versions_of(database, [with_two, with_none])
+
+        assert {k: v.id for k, v in latest.items()} == {with_two: new.id}
+
+
+class TestIndexes:
+    async def test_filterable_metadata_is_indexed(self, database):
+        indexes = await database[records.DOCUMENTS].index_information()
+
+        keys = {name for index in indexes.values() for name, _ in index["key"]}
+
+        assert {f"metadata.{key}" for key in models.FILTERABLE_METADATA} <= keys

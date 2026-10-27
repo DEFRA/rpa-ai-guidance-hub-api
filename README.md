@@ -272,13 +272,20 @@ mypy refuses one where another belongs:
 
 | Endpoint                        | Description                    |
 |:--------------------------------| :----------------------------- |
-| `GET: /docs`                    | Automatic API Swagger docs     |
+| `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
 | `GET: /reference/schemes`       | Scheme options for the "Which scheme does this guidance relate to?" radios |
 | `GET: /reference/audiences`     | Audience options for the "Who is this for?" checkboxes |
 | `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
 | `GET: /reference/guidance-types`| Guidance type options |
 | `GET: /review/assets`           | Simple example endpoint        |
+| `GET: /guides`                  | A page of guides, newest first; `limit`, `cursor`, and repeatable `scheme`, `system`, `audience`, `guidance_type` filters |
+| `POST: /guides`                 | Creates a guide (201)          |
+| `GET: /guides/{id}`             | A guide and all its versions   |
+| `GET: /guides/{id}/content`     | The Markdown of a guide's newest version, as plain text |
+| `GET: /guides/{id}/assets/{name}` | Gets asset content by name   |
+| `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
+| `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file (404 if unknown) |
 
 ## Custom Cloudwatch Metrics
 

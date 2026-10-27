@@ -1,4 +1,4 @@
-"""Turning an uploaded .docx into a stored version of a document.
+"""Turning an uploaded .docx into a stored version of a document, and listing them.
 
 One operation, in the order the pieces become known: read the document cdp-uploader
 delivered, parse it, and store the version it makes. What comes back is where that
@@ -25,12 +25,16 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from app import config
-from app.guidance import ids, models
+from app.guidance import ids, models, records
 from app.guidance.documents import store
 from app.guidance.parsing import parser
+
+if TYPE_CHECKING:
+    import pymongo.asynchronous.database
 
 # What cdp-uploader names an object it has delivered: the upload it belonged to and
 # the file within it, both uuids. Matched before anything is read, because a key is
@@ -53,6 +57,23 @@ class SourceRefusedError(ValueError):
 
 class SourceMissingError(LookupError):
     """Raised when the source document is not where the caller said it was."""
+
+
+def read_asset(
+    document_id: ids.DocumentId, name: str, s3_client: Any = None
+) -> bytes | None:
+    """The bytes of one of a document's pictures, or None if it is not there.
+
+    Pictures belong to the document, not to any version of it: see the module
+    docstring.
+    """
+    base = f"s3://{config.get_config().managed_docs_s3_bucket}"
+    document = store.document_url(base, str(document_id))
+    return store.load_asset(document, "./assets", name, s3_client=s3_client)
+
+
+class UnknownFilterValueError(ValueError):
+    """Raised when a list is narrowed to a value the reference data does not have."""
 
 
 class GuidanceService:
@@ -143,3 +164,69 @@ def _refuse_anything_but_an_upload(source_url: str, expected: str) -> None:
     if not _UPLOADER_KEY.match(parsed.path.lstrip("/")):
         message = f"{parsed.path!r} is not the shape of a key cdp-uploader writes"
         raise SourceRefusedError(message)
+
+
+def _metadata_filters(
+    requested: Mapping[str, Sequence[str]],
+) -> dict[str, list[str]]:
+    """Map filter names to the metadata keys they narrow, checking each value.
+
+    Raises:
+        UnknownFilterValueError: if a value is not in the reference data.
+    """
+    reference = config.get_config()
+    known = {
+        "scheme": ("schemes", reference.reference_schemes),
+        "system": ("systems", reference.reference_systems),
+        "audience": ("audience", reference.reference_audiences),
+        "guidance_type": ("guidanceType", reference.reference_guidance_types),
+    }
+
+    metadata: dict[str, list[str]] = {}
+    for name, values in requested.items():
+        key, options = known[name]
+        allowed = {option["label"] for option in options}
+        unknown = sorted(set(values) - allowed)
+        if unknown:
+            message = (
+                f"Unknown {name} {', '.join(unknown)}; "
+                f"expected one of {', '.join(sorted(allowed))}"
+            )
+            raise UnknownFilterValueError(message)
+        metadata[key] = list(values)
+    return metadata
+
+
+async def list_page(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    *,
+    filters: Mapping[str, Sequence[str]],
+    after: ids.DocumentId | None,
+    limit: int,
+) -> models.DocumentPage:
+    """A page of documents, newest first, each with its newest version.
+
+    A document matches a filter if it has any of the values given, and must match
+    every filter given. `after` is the last document of the previous page.
+
+    Raises:
+        UnknownFilterValueError: if a filter value is not in the reference data.
+    """
+    metadata = _metadata_filters(filters)
+
+    # One more than a page, to know whether there is another.
+    found = await records.list_documents(
+        database, metadata=metadata, after=after, limit=limit + 1
+    )
+    documents = found[:limit]
+    latest = await records.latest_versions_of(
+        database, [document.id for document in documents]
+    )
+
+    return models.DocumentPage(
+        items=[
+            models.DocumentSummary(document, latest.get(document.id))
+            for document in documents
+        ],
+        next_cursor=documents[-1].id if len(found) > limit else None,
+    )

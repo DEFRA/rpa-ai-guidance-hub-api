@@ -17,8 +17,6 @@ from app.review import router as review_router
 
 logger = getLogger(__name__)
 
-config = app_config.get_config()
-
 
 @asynccontextmanager
 async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
@@ -46,6 +44,8 @@ app.include_router(staging_router.router)
 
 
 def main() -> None:  # pragma: no cover
+    config = app_config.get_config()
+
     if config.http_proxy:
         os.environ["HTTP_PROXY"] = str(config.http_proxy)
         os.environ["HTTPS_PROXY"] = str(config.http_proxy)
