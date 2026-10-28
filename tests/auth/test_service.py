@@ -12,7 +12,7 @@ UI_ARN = "arn:aws:iam::123456789012:role/rpa-ai-guidance-hub-ui"
 def mock_claims(mocker):
     mocker.patch(
         "app.config.get_config",
-        return_value=MagicMock(aws_account_id="123456789012"),
+        return_value=MagicMock(aws_account="123456789012"),
     )
 
     def _set(sub: str) -> None:

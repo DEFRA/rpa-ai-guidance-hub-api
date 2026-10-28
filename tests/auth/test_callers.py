@@ -5,7 +5,7 @@ from app.auth import callers
 
 class TestServiceCaller:
     def test_arn_derives_from_config(self, mocker):
-        mock_config = MagicMock(aws_account_id="111122223333")
+        mock_config = MagicMock(aws_account="111122223333")
         mocker.patch("app.config.get_config", return_value=mock_config)
 
         caller = callers.ServiceCaller(name="test-service")
@@ -37,7 +37,7 @@ class TestLookupByName:
 
 class TestLookupByArn:
     def test_lookup_existing_caller(self, mocker):
-        mock_config = MagicMock(aws_account_id="111122223333")
+        mock_config = MagicMock(aws_account="111122223333")
         mocker.patch("app.config.get_config", return_value=mock_config)
 
         caller = callers.get_caller_by_arn(
@@ -48,7 +48,7 @@ class TestLookupByArn:
         assert caller.name == "rpa-ai-guidance-hub-ui"
 
     def test_lookup_wrong_account_returns_none(self, mocker):
-        mock_config = MagicMock(aws_account_id="111122223333")
+        mock_config = MagicMock(aws_account="111122223333")
         mocker.patch("app.config.get_config", return_value=mock_config)
 
         caller = callers.get_caller_by_arn(
@@ -58,7 +58,7 @@ class TestLookupByArn:
         assert caller is None
 
     def test_lookup_unknown_caller_returns_none(self, mocker):
-        mock_config = MagicMock(aws_account_id="111122223333")
+        mock_config = MagicMock(aws_account="111122223333")
         mocker.patch("app.config.get_config", return_value=mock_config)
 
         caller = callers.get_caller_by_arn(
