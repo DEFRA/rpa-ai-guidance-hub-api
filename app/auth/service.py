@@ -7,7 +7,7 @@ import jwt
 from app import config
 from app.auth import callers
 
-_jwk_client = jwt.PyJWKClient(config.get_config().cdp_jwt_jwks_url or "")
+_jwk_client = jwt.PyJWKClient(config.get_config().cdp_jwt_jwks_uri or "")
 
 
 def allow(

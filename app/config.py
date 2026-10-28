@@ -179,7 +179,7 @@ class AppConfig(pydantic_settings.BaseSettings):
     cdp_jwt_issuer: str | None = pydantic.Field(
         None, description="JWT issuer for CDP authentication, if any"
     )
-    cdp_jwt_jwks_url: str | None = pydantic.Field(
+    cdp_jwt_jwks_uri: str | None = pydantic.Field(
         None, description="JWKS URL for CDP authentication, if any"
     )
 
