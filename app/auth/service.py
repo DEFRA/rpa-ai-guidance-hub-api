@@ -84,6 +84,7 @@ def allow_all_known() -> Callable[[fastapi.Request], Awaitable[callers.ServiceCa
     """Build a dependency that admits every caller in `KnownCallers`."""
     return allow(*callers.KnownCallers)
 
+
 def _get_jwk_client() -> jwt.PyJWKClient:
     """Return the JWKS client, creating it if necessary."""
     global _jwk_client
@@ -98,6 +99,7 @@ def _get_jwk_client() -> jwt.PyJWKClient:
         _jwk_client = jwt.PyJWKClient(config.get_config().cdp_jwt_jwks_uri or "")
 
     return _jwk_client
+
 
 async def _verify_caller(request: fastapi.Request) -> dict:
     """

@@ -335,11 +335,19 @@ Routes are guarded by a FastAPI dependency from `app/auth/service.py`, and the g
 ```python
 from app.auth import callers, service
 
-app = fastapi.FastAPI(dependencies=[fastapi.Depends(service.allow_all_known())])   # whole app
-router = fastapi.APIRouter(dependencies=[fastapi.Depends(service.allow_all_known())])  # one router
+app = fastapi.FastAPI(
+    dependencies=[fastapi.Depends(service.allow_all_known())]
+)  # whole app
+router = fastapi.APIRouter(
+    dependencies=[fastapi.Depends(service.allow_all_known())]
+)  # one router
 
-@router.get("/thing", dependencies=[fastapi.Depends(service.allow(callers.KnownCallers.GUIDANCE_HUB_UI))])
-async def thing() -> None: ...                                                       # one route
+
+@router.get(
+    "/thing",
+    dependencies=[fastapi.Depends(service.allow(callers.KnownCallers.GUIDANCE_HUB_UI))],
+)
+async def thing() -> None: ...  # one route
 ```
 
 - `allow_all_known()` admits every caller in `KnownCallers`; `allow(*names)` admits only those named.
