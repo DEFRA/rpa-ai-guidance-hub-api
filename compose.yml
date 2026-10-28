@@ -1,6 +1,6 @@
 services:
   floci:
-    image: floci/floci@sha256:b604da97e8c481c407f8e8d3300a8317d68058ac757dfa2af15fd6c4e9d25c59 # 1.5.19-compat
+    image: floci/floci@sha256:e0b292df4dc9559b7b1bf4f51bdda4bb8e269276236438cd03cae661260ea8a9 # 1.5.19-compat
     ports:
       - '4566:4566'
     env_file:
