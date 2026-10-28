@@ -364,8 +364,12 @@ async def thing() -> None: ...  # one route
 
 The API can require callers to present a CDP web-identity token. It is **off by default**
 (`USE_AUTH=false`) so local development needs nothing; turn it on with `USE_AUTH=true` plus
-`CDP_JWT_ISSUER` and `CDP_JWT_JWKS_URI` (CDP supplies both in a deployed environment; set them in `.env` locally). When on, every route except `/health` and the generated
-docs (`/docs`, `/redoc`, `/openapi.json`) needs one.
+`CDP_JWT_ISSUER` and `CDP_JWT_JWKS_URI` (CDP supplies both in a deployed environment; set them in `.env` locally). When on, every route except `/health`, the generated
+docs (`/docs`, `/redoc`, `/openapi.json`) and `POST /guides/staging/callback` needs one. The
+callback is the one route cdp-uploader calls, and it sends no token. It lives on its own router
+(`staging.router.callback_router`) mounted outside the authenticated routes, so nothing else
+gains access; `tests/auth/test_jwks_integration.py` lists it in `PUBLIC_OPERATIONS`, and
+fails if any other route is left open.
 
 **What a caller sends:** `Authorization: Bearer <jwt>`.
 
@@ -380,7 +384,7 @@ docs (`/docs`, `/redoc`, `/openapi.json`) needs one.
    known caller (currently `rpa-ai-guidance-hub-ui`), and that caller is allowed on the route.
 
 **Responses.** They are deliberately generic, so a caller cannot probe which check failed; the
-specific reason is only in the logs (`Auth rejected: ...`).
+specific reason is only in the logs (from the `app.auth.service` logger).
 
 | Status | Detail | Meaning |
 | --- | --- | --- |

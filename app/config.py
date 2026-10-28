@@ -81,15 +81,6 @@ def _parse_reference_options(v: str) -> list[dict[str, str]]:
     Expected format: comma-separated entries, each 'label' or 'label|short label'.
     The label is the identity of an option, so duplicate labels (ignoring case)
     are rejected; the optional short label is display-only and need not be unique.
-
-    Returns plain dicts rather than a pydantic model deliberately - this is
-    config-parsing output, not the API response shape (see
-    app.reference.schemas.ReferenceOption for that), so config.py has no reason to
-    know about a feature package. The keys match ReferenceOption's wire (camelCase) names, so a
-    router can return this list as-is and FastAPI's declared response type does the
-    validation/shaping for free. Any other consumer-specific encoding (e.g.
-    URL-friendly values for checkbox inputs) is derived by the consumer from the
-    label, not supplied by the API.
     """
     if not isinstance(v, str):
         msg = (
@@ -202,6 +193,26 @@ class AppConfig(pydantic_settings.BaseSettings):
         cls: type[AppConfig], v: str
     ) -> list[dict[str, str]]:
         return _parse_reference_options(v)
+
+    @pydantic.model_validator(mode="after")
+    def validate_auth_settings(self) -> AppConfig:
+        """
+        Require the issuer and JWKS URI whenever auth is on.
+        """
+        if not self.use_auth:
+            return self
+
+        missing = [
+            name.upper()
+            for name in ("cdp_jwt_issuer", "cdp_jwt_jwks_uri")
+            if not getattr(self, name)
+        ]
+
+        if missing:
+            msg = f"USE_AUTH is enabled but these are not set: {', '.join(missing)}"
+            raise ValueError(msg)
+
+        return self
 
     @pydantic.computed_field  # type: ignore[misc]
     def bedrock(self) -> BedrockConfig:

@@ -9,7 +9,11 @@ from app.common import mongo, s3
 from app.guidance import ids
 from app.guidance.documents.staging import schemas, service, store
 
-router = fastapi.APIRouter(prefix="/guides/staging")
+PREFIX = "/guides/staging"
+
+router = fastapi.APIRouter(prefix=PREFIX)
+callback_router = fastapi.APIRouter(prefix=PREFIX)
+
 logger = getLogger(__name__)
 
 
@@ -32,7 +36,7 @@ def get_staging_service(
     )
 
 
-@router.post("/callback", status_code=fastapi.status.HTTP_202_ACCEPTED)
+@callback_router.post("/callback", status_code=fastapi.status.HTTP_202_ACCEPTED)
 async def handle_callback(
     payload: schemas.UploadCallbackPayload,
     background_tasks: fastapi.BackgroundTasks,

@@ -73,6 +73,7 @@ class TestAllowAllKnown:
             assert caller.name == known
 
 
+@pytest.mark.usefixtures("auth_env")
 class TestVerifyCaller:
     @pytest.mark.parametrize(
         "header",
@@ -87,9 +88,9 @@ class TestVerifyCaller:
         assert exc.value.status_code == fastapi.status.HTTP_401_UNAUTHORIZED
 
     @pytest.mark.parametrize("scheme", ["Bearer", "bearer"])
-    async def test_bearer_prefix_is_stripped(self, mocker, scheme):
+    async def test_bearer_prefix_is_stripped(self, mocker, auth_env, scheme):
         get_key = mocker.patch.object(
-            service._jwk_client, "get_signing_key_from_jwt", return_value=MagicMock()
+            auth_env, "get_signing_key_from_jwt", return_value=MagicMock()
         )
         decode = mocker.patch("jwt.decode", return_value={"sub": "x"})
         request = MagicMock(headers={"Authorization": f"{scheme} abc.def.ghi"})

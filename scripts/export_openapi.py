@@ -14,13 +14,18 @@ import json
 import sys
 from pathlib import Path
 
-from app.entrypoints.fastapi import app
+from app.entrypoints import fastapi as entrypoint
 
 OPENAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
 
 
 def render() -> str:
-    return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
+    # Auth is documented regardless of the environment: the committed file
+    # describes the deployed service, where `USE_AUTH` is on.
+    return (
+        json.dumps(entrypoint.openapi_schema(auth=True), indent=2, sort_keys=True)
+        + "\n"
+    )
 
 
 def main() -> int:

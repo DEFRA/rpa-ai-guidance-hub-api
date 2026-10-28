@@ -9,14 +9,22 @@ import re
 from typing import Annotated
 
 import fastapi
+import jwt
 import pytest
 
 from app import config
 from app.auth import callers, service
 from app.entrypoints import fastapi as entrypoint
+from app.guidance.documents.staging import router as staging_router
 from tests.auth import jwks
+from tests.fixtures import cdp_uploader
 
 AUTH_LOGGER = "app.auth.service"
+
+PUBLIC_OPERATIONS = {
+    ("POST", "/guides/staging/callback"),
+}
+
 LEVELS = ["global", "router", "include", "route", "param"]
 LEVELS_WITH_OPEN_SIBLING = [level for level in LEVELS if level != "global"]
 
@@ -126,7 +134,7 @@ class TestUnauthenticated:
 
         assert response.status_code == 401
         assert response.json()["detail"] == "Missing or malformed bearer token"
-        assert "missing or malformed Authorization header" in caplog.text
+        assert "Missing or malformed Authorization header" in caplog.text
         assert cassette.play_count == 0
 
     def test_expired_token(self, client, jwks_cassette, caplog):
@@ -140,7 +148,7 @@ class TestUnauthenticated:
 
         assert response.status_code == 401
         assert response.json()["detail"] == "Token has expired"
-        assert "token expired" in caplog.text
+        assert "Token expired" in caplog.text
         assert_no_leak(token, response, caplog)
 
     def test_a_token_that_is_not_a_jwt_is_unauthorised_not_a_server_error(
@@ -167,6 +175,8 @@ class TestUnauthenticated:
 
         assert response.status_code == 401
         assert response.json()["detail"] == "Invalid token"
+        assert "No usable signing key for token" in caplog.text
+        assert jwt.get_unverified_header(token)["kid"] not in caplog.text
         assert_no_leak(token, response, caplog)
 
 
@@ -174,13 +184,13 @@ class TestRejectedToken:
     @pytest.mark.parametrize(
         ("token_name", "logged_reason"),
         [
-            ("forged_signature", "token signature is invalid"),
-            ("wrong_issuer", "token issuer is not trusted"),
-            ("wrong_audience", "token audience is not this API"),
-            ("no_expiry", "token is missing a required claim"),
-            ("not_yet_valid", "token is not yet valid"),
-            ("hs256_confusion", "token is invalid"),
-            ("alg_none", "token is invalid"),
+            ("forged_signature", "Token signature is invalid"),
+            ("wrong_issuer", "Token issuer is not trusted"),
+            ("wrong_audience", "Token audience is not this API"),
+            ("no_expiry", "Token is missing a required claim"),
+            ("not_yet_valid", "Token is not yet valid"),
+            ("hs256_confusion", "Token is invalid"),
+            ("alg_none", "Token is invalid"),
         ],
     )
     def test_is_forbidden_and_the_reason_is_only_logged(
@@ -222,7 +232,7 @@ class TestRejectedSubject:
 
         assert response.status_code == 403
         assert response.json()["detail"] == "Forbidden"
-        assert f"subject {sub!r} is not a known caller" in caplog.text
+        assert f"Subject {sub!r} is not a known caller" in caplog.text
         assert_no_leak(token, response, caplog)
 
     def test_known_caller_the_route_does_not_admit(
@@ -240,7 +250,7 @@ class TestRejectedSubject:
         assert response.status_code == 403
         assert response.json()["detail"] == "Forbidden"
         assert (
-            "caller rpa-ai-guidance-hub-ui is not permitted on GET /secure"
+            "Caller rpa-ai-guidance-hub-ui is not permitted on GET /secure"
             in caplog.text
         )
         assert_no_leak(token, response, caplog)
@@ -260,7 +270,7 @@ class TestJwksEndpoint:
 
         assert response.status_code == 503
         assert response.json()["detail"] == "Unable to verify token at this time"
-        assert "could not fetch signing keys" in caplog.text
+        assert "Could not fetch signing keys" in caplog.text
         assert_no_leak(token, response, caplog)
 
     def test_a_malformed_key_set_is_never_a_server_error(self, client, jwks_cassette):
@@ -469,18 +479,91 @@ class TestRealAppWiring:
         Walks the OpenAPI document rather than FastAPI's route tree, whose
         include-time structure is private and changes between releases. Guards
         answer before path/body validation, so placeholder values are enough.
+        Public operations are not requested: with no guard in front, they would
+        reach their real dependencies.
         """
         paths = real_app.app.openapi()["paths"]
-        assert paths
+        operations = {
+            (method.upper(), path)
+            for path, methods in paths.items()
+            for method in methods
+        }
+        assert operations >= PUBLIC_OPERATIONS
 
         with jwks_cassette("no_requests") as cassette:
             statuses = {
-                (method.upper(), path): real_app.request(
+                (method, path): real_app.request(
                     method, re.sub(r"\{[^}]+\}", "x", path)
                 ).status_code
-                for path, operations in paths.items()
-                for method in operations
+                for method, path in operations - PUBLIC_OPERATIONS
             }
 
+        assert statuses
         assert {op: code for op, code in statuses.items() if code != 401} == {}
+        assert cassette.play_count == 0
+
+    def test_the_bearer_scheme_is_documented_on_protected_operations_only(
+        self, real_app
+    ):
+        schema = real_app.app.openapi()
+        unsecured = {
+            (method.upper(), path)
+            for path, methods in schema["paths"].items()
+            for method, operation in methods.items()
+            if "security" not in operation
+        }
+
+        assert schema["components"]["securitySchemes"]["HTTPBearer"] == {
+            "type": "http",
+            "scheme": "bearer",
+        }
+        assert unsecured == PUBLIC_OPERATIONS
+
+    def test_no_authentication_is_documented_while_auth_is_off(
+        self, mocker, make_client
+    ):
+        off = config.get_config().model_copy(update={"use_auth": False})
+        mocker.patch("app.config.get_config", return_value=off)
+        client = make_client(entrypoint.app)
+
+        schema = client.get("/openapi.json").json()
+
+        assert "securitySchemes" not in schema["components"]
+        assert not any(
+            "security" in operation
+            for methods in schema["paths"].values()
+            for operation in methods.values()
+        )
+
+    def test_turning_auth_off_does_not_strip_the_documented_schema_for_later(self):
+        before = entrypoint.openapi_schema(auth=True)
+        entrypoint.openapi_schema(auth=False)
+
+        assert entrypoint.openapi_schema(auth=True) == before
+        assert "securitySchemes" in before["components"]
+
+    def test_the_upload_callback_is_open_and_never_touches_the_issuer(
+        self, real_app, jwks_cassette, mocker
+    ):
+        staging = mocker.Mock(handle_callback=mocker.AsyncMock(return_value=False))
+        real_app.app.dependency_overrides[staging_router.get_staging_service] = lambda: (
+            staging
+        )
+        try:
+            with jwks_cassette("no_requests") as cassette:
+                response = real_app.post(
+                    "/guides/staging/callback",
+                    json=cdp_uploader.cdp_callback_payload(),
+                )
+        finally:
+            real_app.app.dependency_overrides.clear()
+
+        assert response.status_code == 202
+        assert cassette.play_count == 0
+
+    def test_the_rest_of_staging_still_demands_a_token(self, real_app, jwks_cassette):
+        with jwks_cassette("no_requests") as cassette:
+            response = real_app.get("/guides/staging/some-file-id")
+
+        assert response.status_code == 401
         assert cassette.play_count == 0

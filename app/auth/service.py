@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 # Reasons are logged only. Responses stay generic so callers cannot probe which
 # check failed.
 _INVALID_TOKEN_REASONS: dict[type[jwt.InvalidTokenError], str] = {
-    jwt.InvalidSignatureError: "token signature is invalid",
-    jwt.InvalidIssuerError: "token issuer is not trusted",
-    jwt.InvalidAudienceError: "token audience is not this API",
-    jwt.MissingRequiredClaimError: "token is missing a required claim",
-    jwt.ImmatureSignatureError: "token is not yet valid",
+    jwt.InvalidSignatureError: "Token signature is invalid",
+    jwt.InvalidIssuerError: "Token issuer is not trusted",
+    jwt.InvalidAudienceError: "Token audience is not this API",
+    jwt.MissingRequiredClaimError: "Token is missing a required claim",
+    jwt.ImmatureSignatureError: "Token is not yet valid",
 }
 
 _jwk_client: jwt.PyJWKClient | None = None
@@ -57,7 +57,8 @@ def allow(
         caller = callers.get_caller_by_arn(sub) if sub else None
 
         if caller is None:
-            logger.warning("Auth rejected: subject %r is not a known caller", sub)
+            logger.warning("Subject %r is not a known caller", sub)
+
             raise fastapi.HTTPException(
                 status_code=fastapi.status.HTTP_403_FORBIDDEN,
                 detail="Forbidden",
@@ -65,7 +66,7 @@ def allow(
 
         if caller not in allowed:
             logger.warning(
-                "Auth rejected: caller %s is not permitted on %s %s",
+                "Caller %s is not permitted on %s %s",
                 caller.name,
                 request.method,
                 request.url.path,
@@ -96,7 +97,7 @@ def _get_jwk_client() -> jwt.PyJWKClient:
         raise RuntimeError(msg)
 
     if _jwk_client is None:
-        _jwk_client = jwt.PyJWKClient(config.get_config().cdp_jwt_jwks_uri or "")
+        _jwk_client = jwt.PyJWKClient(jwks_uri)
 
     return _jwk_client
 
@@ -117,7 +118,8 @@ async def _verify_caller(request: fastapi.Request) -> dict:
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
 
     if scheme.lower() != "bearer" or not token:
-        logger.warning("Auth rejected: missing or malformed Authorization header")
+        logger.warning("Missing or malformed Authorization header")
+
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
             detail="Missing or malformed bearer token",
@@ -128,13 +130,15 @@ async def _verify_caller(request: fastapi.Request) -> dict:
             jwt_client.get_signing_key_from_jwt, token
         )
     except (jwt.PyJWKClientConnectionError, json.JSONDecodeError) as err:
-        logger.error("Auth failed: could not fetch signing keys")
+        logger.error("Could not fetch signing keys")
+
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to verify token at this time",
         ) from err
     except jwt.PyJWTError as err:
-        logger.warning("Auth rejected: no usable signing key for token: %s", err)
+        logger.warning("No usable signing key for token")
+
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
@@ -150,14 +154,17 @@ async def _verify_caller(request: fastapi.Request) -> dict:
             options={"require": ["exp"]},
         )
     except jwt.ExpiredSignatureError as err:
-        logger.warning("Auth rejected: token expired")
+        logger.warning("Token expired")
+
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
         ) from err
     except jwt.InvalidTokenError as err:
-        reason = _INVALID_TOKEN_REASONS.get(type(err), "token is invalid")
-        logger.warning("Auth rejected: %s (%s)", reason, err)
+        reason = _INVALID_TOKEN_REASONS.get(type(err), "Token is invalid")
+
+        logger.warning("%s (%s)", reason, type(err).__name__)
+
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_403_FORBIDDEN,
             detail="Invalid token",
