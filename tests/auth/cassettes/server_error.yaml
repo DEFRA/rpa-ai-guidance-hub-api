@@ -1,0 +1,18 @@
+# FAKE, test-only keys: these serve the public halves of the throwaway keys in ../keys/
+# and stand in for the real issuer's JWKS endpoint. Do not use anywhere real.
+interactions:
+- request:
+    body: null
+    headers: {}
+    method: GET
+    uri: http://localhost/.well-known/jwks.json
+  response:
+    body:
+      string: boom
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 500
+      message: Internal Server Error
+version: 1

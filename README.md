@@ -5,6 +5,7 @@ This is work-in-progress. See [To Do List](./TODO.md)
 - [rpa-ai-guidance-hub-api](#rpa-ai-guidance-hub-api)
   - [Requirements](#requirements)
     - [Python](#python)
+    - [Environment Variable Configuration](#environment-variable-configuration)
     - [Linting and Formatting](#linting-and-formatting)
     - [Docker](#docker)
   - [Local development](#local-development)
@@ -15,7 +16,10 @@ This is work-in-progress. See [To Do List](./TODO.md)
   - [Where code goes](#where-code-goes)
     - [Schemas and models](#schemas-and-models)
     - [Ids](#ids)
+    - [Guarding routes](#guarding-routes)
+  - [Authentication](#authentication)
   - [API endpoints](#api-endpoints)
+  - [Further reading](#further-reading)
   - [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics)
   - [Pipelines](#pipelines)
     - [Dependabot](#dependabot)
@@ -43,7 +47,7 @@ source .venv/bin/activate
 pre-commit install
 ```
 
-This opinionated template uses the [`Fast API`](https://fastapi.tiangolo.com/) Python API framework.
+This service uses the [`Fast API`](https://fastapi.tiangolo.com/) Python API framework.
 
 ### Environment Variable Configuration
 
@@ -54,6 +58,36 @@ In CDP, environment variables and secrets need to be set using CDP conventions. 
 - [CDP Secrets](https://github.com/DEFRA/cdp-documentation/blob/main/how-to/secrets.md)
 
 For local development - see [instructions below](#local-development).
+
+#### Core Configuration
+
+`AppConfig` validates everything at startup and refuses to start if a required value is missing
+or malformed, naming the offending variable. Copy `.env.example` to `.env` for local development.
+
+| Variable | Required | Description | Default |
+| --- | --- | --- | --- |
+| `AWS_ACCOUNT` | yes (set by CDP) | 12-digit AWS account ID. Also forms the caller role ARNs, see [Authentication](#authentication) | |
+| `SOURCE_DOCS_S3_BUCKET` | yes | Bucket cdp-uploader delivers scanned source documents into | |
+| `MANAGED_DOCS_S3_BUCKET` | yes | Bucket converted guides and their pictures are stored in | |
+| `MONGO_URI` | for Mongo | MongoDB connection string. The API pings Mongo on startup and exits if it is unreachable | |
+| `MONGO_DATABASE` | no | Database name | `rpa-ai-guidance-hub-api` |
+| `MONGO_TRUSTSTORE` | no | Name of the `TRUSTSTORE_*` env var holding the CA cert for Mongo TLS | `TRUSTSTORE_CDP_ROOT_CA` |
+| `FLOCI_ENDPOINT_URL` | local only | Endpoint of the local AWS emulator ([floci](https://github.com/floci-io/floci)) | |
+| `AWS_REGION` | no | AWS region | `eu-west-2` |
+| `HOST` / `PORT` | no | Bind address and port | `127.0.0.1` / `8085` |
+| `HTTP_PROXY` | no | Outbound proxy | |
+| `ENABLE_METRICS` | no | Emit CloudWatch EMF metrics, see [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics) | `false` |
+| `STAGING_RETENTION_SECONDS` | no | How long a staged document's minimal parse is kept awaiting user action | `14400` (4 hours) |
+| `USE_AUTH` | no | Require a CDP web-identity token on API routes, see [Authentication](#authentication) | `false` |
+| `CDP_JWT_ISSUER` | with `USE_AUTH` (set by CDP) | Expected token issuer (`iss`) | |
+| `CDP_JWT_JWKS_URI` | with `USE_AUTH` (set by CDP) | URL of the issuer's JWKS, used to verify token signatures | |
+
+`AWS_ACCOUNT`, `CDP_JWT_ISSUER` and `CDP_JWT_JWKS_URI` are injected automatically by the CDP
+platform, so they are never set in a deployed environment's config. They only need to be in `.env`
+for local runs.
+
+The `.env` file holds *host-side* values (for example `FLOCI_ENDPOINT_URL=http://localhost:4566`).
+`compose.yml` overrides the container-oriented ones, and `tests/test_compose_config.py` guards that.
 
 #### Bedrock Configuration
 
@@ -223,11 +257,37 @@ Ensure the python virtual environment is configured and libraries are installed 
 
 Testing follows the [FastApi documented approach](https://fastapi.tiangolo.com/tutorial/testing/); using pytest & starlette.
 
-To test the application run:
-
 ```bash
-uv run pytest
+uv run task test      # the full gate: lint, mypy, then pytest with coverage
+uv run pytest         # tests only
+uv run task format    # ruff format + ruff check --fix
+uv run task lint      # ruff format --check + ruff check (no fixes)
+uv run task typecheck # mypy over app/ and tests/
+uv run task openapi   # regenerate docs/openapi.json (openapi-check verifies it is current)
 ```
+
+**Docker is required.** Tests that touch MongoDB or S3 start real containers with
+[testcontainers](https://testcontainers.com/) (`tests/support/`), so without a running Docker daemon
+those tests fail rather than skip. Everything else runs offline.
+
+**`tests/conftest.py` seeds the required environment variables** before any app import, and
+`AppConfig` is a singleton, so a test that needs different config should mock
+`app.config.get_config` rather than change env vars after import.
+
+#### Auth tests
+
+`tests/auth/` exercises the real authentication flow offline: a request goes through
+`PyJWKClient`, signature and claim checks, and the caller check, and the test asserts the response
+and the log lines. Nothing touches the network.
+
+- The issuer's JWKS endpoint is played back by [vcrpy](https://vcrpy.readthedocs.io/) from the
+  cassettes in `tests/auth/cassettes/` (`record_mode="none"`, so any unexpected request fails the test).
+- The keys in `tests/auth/keys/` are **fake**, throwaway keys: they are labelled as such, protect
+  nothing, and must never be used anywhere real. They sign the test tokens (`jwks.token("expired")`,
+  `jwks.token("forged_signature")` ...; see `tests/auth/jwks.py`), and the cassettes serve their public
+  halves. If you regenerate a key, regenerate its public JWK in every cassette that serves it.
+- Guards are tested at every level they can be applied: app, router, `include_router`, route and
+  handler parameter, plus stacked guards and the real app's wiring.
 
 ## Where code goes
 
@@ -268,6 +328,62 @@ mypy refuses one where another belongs:
 - **Other services'**, cdp-uploader's `UploadId` and `FileId`, are `str`: taken as
   given, not claimed to be uuids. So is the signed-in user's id.
 
+### Guarding routes
+
+Routes are guarded by a FastAPI dependency from `app/auth/service.py`, and the guard can go at any level:
+
+```python
+from app.auth import callers, service
+
+app = fastapi.FastAPI(dependencies=[fastapi.Depends(service.allow_all_known())])   # whole app
+router = fastapi.APIRouter(dependencies=[fastapi.Depends(service.allow_all_known())])  # one router
+
+@router.get("/thing", dependencies=[fastapi.Depends(service.allow(callers.KnownCallers.GUIDANCE_HUB_UI))])
+async def thing() -> None: ...                                                       # one route
+```
+
+- `allow_all_known()` admits every caller in `KnownCallers`; `allow(*names)` admits only those named.
+  Stacking guards is safe: the most restrictive one wins.
+- To add a caller, add it to `KnownCallers` in `app/auth/callers.py`. Names are checked when the route
+  is declared, so a typo fails at import instead of returning 403s.
+- As built, `app/entrypoints/fastapi.py` puts one guard on a router that holds every route except
+  `/health`, and only when `USE_AUTH` is true. A new router should be included there, or guarded itself.
+  `tests/auth/test_jwks_integration.py` fails if any documented operation answers a tokenless request
+  with something other than 401.
+
+## Authentication
+
+The API can require callers to present a CDP web-identity token. It is **off by default**
+(`USE_AUTH=false`) so local development needs nothing; turn it on with `USE_AUTH=true` plus
+`CDP_JWT_ISSUER` and `CDP_JWT_JWKS_URI` (CDP supplies both in a deployed environment; set them in `.env` locally). When on, every route except `/health` and the generated
+docs (`/docs`, `/redoc`, `/openapi.json`) needs one.
+
+**What a caller sends:** `Authorization: Bearer <jwt>`.
+
+**What the API checks, in order:**
+
+1. The header is a bearer token.
+2. The token's `kid` matches a key in the issuer's JWKS (fetched from `CDP_JWT_JWKS_URI` and cached;
+   PyJWT refreshes it when it sees an unknown `kid`, at most once per cooldown).
+3. The signature is valid, the algorithm is `RS256`, `iss` equals `CDP_JWT_ISSUER`, `aud` is
+   `rpa_ai_guidance_hub_api`, and `exp` is present and in the future (`nbf`, if present, has passed).
+4. The `sub` is a role ARN of the form `arn:aws:iam::<AWS_ACCOUNT>:role/<name>` where `<name>` is a
+   known caller (currently `rpa-ai-guidance-hub-ui`), and that caller is allowed on the route.
+
+**Responses.** They are deliberately generic, so a caller cannot probe which check failed; the
+specific reason is only in the logs (`Auth rejected: ...`).
+
+| Status | Detail | Meaning |
+| --- | --- | --- |
+| 401 | `Missing or malformed bearer token` | No header, wrong scheme, or empty token |
+| 401 | `Token has expired` | `exp` has passed |
+| 401 | `Invalid token` | Not a JWT, or no matching signing key |
+| 403 | `Invalid token` | Bad signature, issuer, audience, algorithm, or a missing/immature claim |
+| 403 | `Forbidden` | Valid token, but the subject is not a known caller, or the caller is not allowed on this route |
+| 503 | `Unable to verify token at this time` | The JWKS endpoint is unreachable or returned something unusable |
+
+Tokens are never logged, and neither are exceptions' tracebacks for auth failures.
+
 ## API endpoints
 
 | Endpoint                        | Description                    |
@@ -286,6 +402,15 @@ mypy refuses one where another belongs:
 | `GET: /guides/{id}/assets/{name}` | Gets asset content by name   |
 | `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
 | `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file (404 if unknown) |
+
+All routes except `/health` and the generated docs require a token when `USE_AUTH=true`, see
+[Authentication](#authentication).
+
+## Further reading
+
+- [`docs/guidance-document-storage.md`](./docs/guidance-document-storage.md) - how a parsed guide is laid out in S3
+- [`docs/markdown-dialect.md`](./docs/markdown-dialect.md) - the Markdown dialect a parsed guide is written in
+- [`docs/openapi.json`](./docs/openapi.json) - the committed OpenAPI document
 
 ## Custom Cloudwatch Metrics
 

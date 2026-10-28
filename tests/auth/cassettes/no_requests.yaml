@@ -1,0 +1,4 @@
+# FAKE, test-only keys: these serve the public halves of the throwaway keys in ../keys/
+# and stand in for the real issuer's JWKS endpoint. Do not use anywhere real.
+interactions: []
+version: 1
