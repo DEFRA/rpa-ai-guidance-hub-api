@@ -3,8 +3,6 @@ The auth flow end to end: HTTP request -> JWKS fetch (played back by vcrpy) ->
 signature/claim checks -> caller check -> response and logs.
 """
 
-import importlib
-import importlib.util
 import json
 import logging
 import re
@@ -15,6 +13,7 @@ import pytest
 
 from app import config
 from app.auth import callers, service
+from app.entrypoints import fastapi as entrypoint
 from tests.auth import jwks
 
 AUTH_LOGGER = "app.auth.service"
@@ -416,22 +415,11 @@ class TestStackedGuards:
         assert cassette.play_count == 1
 
 
-def _load_entrypoint():
-    """A private copy of the entrypoint, so patching config never touches the shared app."""
-    shared = importlib.import_module("app.entrypoints.fastapi")
-    spec = importlib.util.spec_from_file_location("entrypoint_copy", shared.__file__)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 class TestRealAppWiring:
     @pytest.fixture
     def real_app(self, request, make_client):
         request.getfixturevalue("auth_env")
-        return make_client(_load_entrypoint().app)
+        return make_client(entrypoint.app)
 
     def test_health_stays_open_and_never_touches_the_issuer(
         self, real_app, jwks_cassette
@@ -470,7 +458,7 @@ class TestRealAppWiring:
     def test_auth_can_be_switched_off(self, mocker, make_client):
         off = config.get_config().model_copy(update={"use_auth": False})
         mocker.patch("app.config.get_config", return_value=off)
-        client = make_client(_load_entrypoint().app)
+        client = make_client(entrypoint.app)
 
         assert client.get("/reference/schemes").status_code == 200
 

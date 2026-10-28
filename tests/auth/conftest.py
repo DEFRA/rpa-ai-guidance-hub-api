@@ -64,8 +64,6 @@ def jwks_cassette(request) -> Callable[[str], contextlib.AbstractContextManager]
 @pytest.fixture
 def make_client() -> Callable[..., testclient.TestClient]:
     def _make(app) -> testclient.TestClient:
-        # 500s surface as responses, so a leaked exception is a failed assertion
-        # rather than a crashed test.
         return testclient.TestClient(app, raise_server_exceptions=False)
 
     return _make

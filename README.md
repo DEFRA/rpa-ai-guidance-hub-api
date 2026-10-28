@@ -355,7 +355,8 @@ async def thing() -> None: ...  # one route
 - To add a caller, add it to `KnownCallers` in `app/auth/callers.py`. Names are checked when the route
   is declared, so a typo fails at import instead of returning 403s.
 - As built, `app/entrypoints/fastapi.py` puts one guard on a router that holds every route except
-  `/health`, and only when `USE_AUTH` is true. A new router should be included there, or guarded itself.
+  `/health`. The guard checks `USE_AUTH` per request, so importing the app needs no configuration.
+  A new router should be included there, or guarded itself.
   `tests/auth/test_jwks_integration.py` fails if any documented operation answers a tokenless request
   with something other than 401.
 

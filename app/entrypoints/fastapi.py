@@ -21,6 +21,9 @@ logger = getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
+    if app_config.get_config().use_auth:
+        logger.info("Using WebIdentity authentication for API routes")
+
     client = await mongo.get_mongo_client()
     logger.info("MongoDB client connected")
 
@@ -37,13 +40,23 @@ app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")
 
 app.add_middleware(tracing.TraceIdMiddleware)
 
-auth_deps = []
+_known_caller = auth_service.allow_all_known()
 
-if app_config.get_config().use_auth:
-    logger.info("Using WebIdentity authentication for API routes")
-    auth_deps.append(fastapi.Depends(auth_service.allow_all_known()))
 
-protected_routes = fastapi.APIRouter(dependencies=auth_deps)
+async def _require_auth_if_enabled(request: fastapi.Request) -> None:
+    """
+    Guard a route when `USE_AUTH` is on.
+
+    Decided per request rather than when this module is imported, so importing the
+    app (the OpenAPI export, tooling) never needs a valid configuration.
+    """
+    if app_config.get_config().use_auth:
+        await _known_caller(request)
+
+
+protected_routes = fastapi.APIRouter(
+    dependencies=[fastapi.Depends(_require_auth_if_enabled)]
+)
 
 protected_routes.include_router(reference_router.router)
 protected_routes.include_router(review_router.router)
