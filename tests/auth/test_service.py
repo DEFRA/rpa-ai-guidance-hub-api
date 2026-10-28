@@ -43,18 +43,20 @@ class TestAllow:
     async def test_unrecognised_arn_is_forbidden(self, mock_claims):
         mock_claims("arn:aws:iam::123456789012:role/unknown-service")
         check = service.allow(callers.KnownCallers.GUIDANCE_HUB_UI)
+        request = MagicMock()
 
         with pytest.raises(fastapi.HTTPException) as exc:
-            await check(MagicMock())
+            await check(request)
 
         assert exc.value.status_code == fastapi.status.HTTP_403_FORBIDDEN
 
     async def test_missing_sub_is_forbidden(self, mocker):
         mocker.patch.object(service, "_verify_caller", AsyncMock(return_value={}))
         check = service.allow(callers.KnownCallers.GUIDANCE_HUB_UI)
+        request = MagicMock()
 
         with pytest.raises(fastapi.HTTPException) as exc:
-            await check(MagicMock())
+            await check(request)
 
         assert exc.value.status_code == fastapi.status.HTTP_403_FORBIDDEN
 
