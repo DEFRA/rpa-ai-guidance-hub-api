@@ -5,7 +5,7 @@ from app import config
 
 
 def _role_arn_prefix() -> str:
-    return f"arn:aws:iam::{config.get_config().aws_account_id}:role/"
+    return f"arn:aws:iam::{config.get_config().aws_account}:role/"
 
 
 @dataclass(frozen=True)
