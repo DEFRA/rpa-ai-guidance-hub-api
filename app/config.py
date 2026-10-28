@@ -167,6 +167,16 @@ class AppConfig(pydantic_settings.BaseSettings):
     reference_guidance_types: Annotated[
         list[dict[str, str]], pydantic_settings.NoDecode
     ] = pydantic.Field(..., validation_alias="REFERENCE_GUIDANCE_TYPES")
+    use_auth: bool = pydantic.Field(
+        default=False,
+        description="Whether to enable authentication for API routes (default: False)",
+    )
+    cdp_jwt_issuer: str | None = pydantic.Field(
+        None, description="JWT issuer for CDP authentication, if any"
+    )
+    cdp_jwt_jwks_url: str | None = pydantic.Field(
+        None, description="JWKS URL for CDP authentication, if any"
+    )
 
     @pydantic.field_validator("claude_sonnet_model_config", mode="before")
     @classmethod
