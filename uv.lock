@@ -2042,7 +2042,7 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = "==1.45.1" },
     { name = "pydantic-ai-slim", extras = ["bedrock"], specifier = "==2.57.0" },
     { name = "pydantic-settings", specifier = "==2.16.0" },
-    { name = "pyjwt", specifier = ">=2.15.1" },
+    { name = "pyjwt", specifier = "==2.15.1" },
     { name = "pymongo", extras = ["aws", "encryption", "snappy", "zstd"], specifier = "==4.19.0" },
     { name = "python-docx", specifier = "==1.2.0" },
     { name = "urllib3", specifier = "==2.8.0" },

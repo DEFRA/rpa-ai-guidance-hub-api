@@ -138,6 +138,11 @@ class AppConfig(pydantic_settings.BaseSettings):
     source_docs_s3_bucket: str = pydantic.Field(
         ..., description="Bucket cdp-uploader deposits scanned source documents into"
     )
+    aws_account_id: str | None = pydantic.Field(
+        ...,
+        pattern=r"^[0-9]{12}$",
+        description="AWS account ID for Bedrock and other services",
+    )
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )

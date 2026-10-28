@@ -7,6 +7,7 @@ import fastapi
 import uvicorn
 
 from app import config as app_config
+from app.auth import service as auth_service
 from app.common import mongo, tracing
 from app.guidance import records
 from app.guidance import router as guidance_router
@@ -14,7 +15,6 @@ from app.guidance.documents.staging import router as staging_router
 from app.health import router as health_router
 from app.reference import router as reference_router
 from app.review import router as review_router
-from app.auth import service as auth_service
 
 logger = getLogger(__name__)
 
@@ -41,7 +41,7 @@ auth_deps = []
 
 if app_config.get_config().use_auth:
     logger.info("Using WebIdentity authentication for API routes")
-    auth_deps.append(fastapi.Depends(auth_service.verify_caller))
+    auth_deps.append(fastapi.Depends(auth_service.allow_all_known()))
 
 protected_routes = fastapi.APIRouter(dependencies=auth_deps)
 
@@ -52,6 +52,7 @@ protected_routes.include_router(staging_router.router)
 
 app.include_router(health_router.router)
 app.include_router(protected_routes)
+
 
 def main() -> None:  # pragma: no cover
     config = app_config.get_config()

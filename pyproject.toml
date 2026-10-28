@@ -17,7 +17,7 @@ dependencies = [
     "opentelemetry-api==1.45.1",
     "pydantic-ai-slim[bedrock]==2.57.0",
     "pydantic-settings==2.16.0",
-    "pyjwt>=2.15.1",
+    "pyjwt==2.15.1",
     "pymongo[aws,encryption,snappy,zstd]==4.19.0",
     "python-docx==1.2.0",
     "urllib3==2.8.0",
