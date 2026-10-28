@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 
 import fastapi
@@ -6,6 +7,16 @@ import jwt
 
 from app import config
 from app.auth import callers
+
+logger = logging.getLogger(__name__)
+
+_INVALID_TOKEN_REASONS: dict[type[jwt.InvalidTokenError], str] = {
+    jwt.InvalidSignatureError: "Token signature is invalid",
+    jwt.InvalidIssuerError: "Token issuer is not trusted",
+    jwt.InvalidAudienceError: "Token audience is not this API",
+    jwt.MissingRequiredClaimError: "Token is missing a required claim",
+    jwt.ImmatureSignatureError: "Token is not yet valid",
+}
 
 _jwk_client = jwt.PyJWKClient(config.get_config().cdp_jwt_jwks_uri or "")
 
@@ -42,8 +53,24 @@ def allow(
         sub = claims.get("sub")
         caller = callers.get_caller_by_arn(sub) if sub else None
 
-        if caller is None or caller not in allowed:
-            raise fastapi.HTTPException(status_code=fastapi.status.HTTP_403_FORBIDDEN)
+        if caller is None:
+            logger.warning("Auth rejected: subject %r is not a known caller", sub)
+            raise fastapi.HTTPException(
+                status_code=fastapi.status.HTTP_403_FORBIDDEN,
+                detail="Token subject is not a known caller",
+            )
+
+        if caller not in allowed:
+            logger.warning(
+                "Auth rejected: caller %s is not permitted on %s %s",
+                caller.name,
+                request.method,
+                request.url.path,
+            )
+            raise fastapi.HTTPException(
+                status_code=fastapi.status.HTTP_403_FORBIDDEN,
+                detail="Caller is not permitted to access this resource",
+            )
 
         return caller
 
@@ -69,11 +96,28 @@ async def _verify_caller(request: fastapi.Request) -> dict:
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
 
     if scheme.lower() != "bearer" or not token:
-        raise fastapi.HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED)
+        logger.warning("Auth rejected: missing or malformed Authorization header")
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or malformed bearer token",
+        )
 
-    signing_key: jwt.PyJWK = await asyncio.to_thread(
-        _jwk_client.get_signing_key_from_jwt, token
-    )
+    try:
+        signing_key: jwt.PyJWK = await asyncio.to_thread(
+            _jwk_client.get_signing_key_from_jwt, token
+        )
+    except jwt.PyJWKClientConnectionError as err:
+        logger.error("Auth failed: could not fetch signing keys")
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to verify token at this time",
+        ) from err
+    except jwt.PyJWTError as err:
+        logger.warning("Auth rejected: no usable signing key for token")
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
+            detail="Token could not be matched to a signing key",
+        ) from err
 
     try:
         return jwt.decode(
@@ -84,10 +128,15 @@ async def _verify_caller(request: fastapi.Request) -> dict:
             audience="rpa_ai_guidance_hub_api",
         )
     except jwt.ExpiredSignatureError as err:
+        logger.warning("Auth rejected: token expired")
         raise fastapi.HTTPException(
-            status_code=fastapi.status.HTTP_401_UNAUTHORIZED
+            status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
         ) from err
     except jwt.InvalidTokenError as err:
+        reason = _INVALID_TOKEN_REASONS.get(type(err), "Token is invalid")
+        logger.warning("Auth rejected: %s", reason.lower())
         raise fastapi.HTTPException(
-            status_code=fastapi.status.HTTP_403_FORBIDDEN
+            status_code=fastapi.status.HTTP_403_FORBIDDEN,
+            detail=reason,
         ) from err
