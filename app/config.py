@@ -81,15 +81,6 @@ def _parse_reference_options(v: str) -> list[dict[str, str]]:
     Expected format: comma-separated entries, each 'label' or 'label|short label'.
     The label is the identity of an option, so duplicate labels (ignoring case)
     are rejected; the optional short label is display-only and need not be unique.
-
-    Returns plain dicts rather than a pydantic model deliberately - this is
-    config-parsing output, not the API response shape (see
-    app.reference.schemas.ReferenceOption for that), so config.py has no reason to
-    know about a feature package. The keys match ReferenceOption's wire (camelCase) names, so a
-    router can return this list as-is and FastAPI's declared response type does the
-    validation/shaping for free. Any other consumer-specific encoding (e.g.
-    URL-friendly values for checkbox inputs) is derived by the consumer from the
-    label, not supplied by the API.
     """
     if not isinstance(v, str):
         msg = (
@@ -138,6 +129,11 @@ class AppConfig(pydantic_settings.BaseSettings):
     source_docs_s3_bucket: str = pydantic.Field(
         ..., description="Bucket cdp-uploader deposits scanned source documents into"
     )
+    aws_account: str | None = pydantic.Field(
+        ...,
+        pattern=r"^[0-9]{12}$",
+        description="AWS account ID for Bedrock and other services",
+    )
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )
@@ -167,6 +163,16 @@ class AppConfig(pydantic_settings.BaseSettings):
     reference_guidance_types: Annotated[
         list[dict[str, str]], pydantic_settings.NoDecode
     ] = pydantic.Field(..., validation_alias="REFERENCE_GUIDANCE_TYPES")
+    use_auth: bool = pydantic.Field(
+        default=False,
+        description="Whether to enable authentication for API routes (default: False)",
+    )
+    cdp_jwt_issuer: str | None = pydantic.Field(
+        None, description="JWT issuer for CDP authentication, if any"
+    )
+    cdp_jwt_jwks_uri: str | None = pydantic.Field(
+        None, description="JWKS URL for CDP authentication, if any"
+    )
 
     @pydantic.field_validator("claude_sonnet_model_config", mode="before")
     @classmethod
@@ -187,6 +193,26 @@ class AppConfig(pydantic_settings.BaseSettings):
         cls: type[AppConfig], v: str
     ) -> list[dict[str, str]]:
         return _parse_reference_options(v)
+
+    @pydantic.model_validator(mode="after")
+    def validate_auth_settings(self) -> AppConfig:
+        """
+        Require the issuer and JWKS URI whenever auth is on.
+        """
+        if not self.use_auth:
+            return self
+
+        missing = [
+            name.upper()
+            for name in ("cdp_jwt_issuer", "cdp_jwt_jwks_uri")
+            if not getattr(self, name)
+        ]
+
+        if missing:
+            msg = f"USE_AUTH is enabled but these are not set: {', '.join(missing)}"
+            raise ValueError(msg)
+
+        return self
 
     @pydantic.computed_field  # type: ignore[misc]
     def bedrock(self) -> BedrockConfig:

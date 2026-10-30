@@ -24,4 +24,6 @@ os.environ.setdefault("REFERENCE_AUDIENCES", "Caseworker,Customer")
 os.environ.setdefault("REFERENCE_SYSTEMS", "Siti Agri,CRM")
 os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "Process guide")
 
+os.environ.setdefault("AWS_ACCOUNT", "123456789012")
+os.environ.setdefault("CDP_JWT_JWKS_URI", "http://localhost/.well-known/jwks.json")
 pytest_plugins = ["tests.support.mongo", "tests.support.s3", "tests.support.floci"]

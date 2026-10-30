@@ -1,0 +1,19 @@
+# FAKE, test-only keys: these serve the public halves of the throwaway keys in ../keys/
+# and stand in for the real issuer's JWKS endpoint. Do not use anywhere real.
+interactions:
+- request:
+    body: null
+    headers: {}
+    method: GET
+    uri: http://localhost/.well-known/jwks.json
+  response:
+    body:
+      string: '{"keys": [{"kty": "RSA", "key_ops": ["verify"], "n": "1JYad9PNYryrg6P6R90_zXe_-Iur_iJcpao-Lk0c1y5ZzXh-JsDw8uvBa1izk3YU-JH1toDBJ3Uq8w0quOfH3nCGREdxvWhZ19sO5RRPLEY54JmrlPrv5XYLL0i6qb205YYmO-ELyYfAsfDs7O3AvwmnZFmAmiB9ZAz0b1qBv_BbJ7dcN9E1TcWtbK2-pAq54ZRiqL0aVcZAC_5Lp7jGHQdTa8tBWEnImhHWquGh-Csi2HXsrSUVLQ4EldsiMyOi-BIErW2WsJV-Vh9N6GiSXKQHrhRycH7IWdvwhB_9LJafmzmgyj_-wYR61Alafv1X0u2W_N3L8WclsI9C37pOLQ",
+        "e": "AQAB", "kid": "FAKE-test-key-do-not-use-1", "use": "sig", "alg": "RS256"}]}'
+    headers:
+      Content-Type:
+      - application/json
+    status:
+      code: 200
+      message: OK
+version: 1

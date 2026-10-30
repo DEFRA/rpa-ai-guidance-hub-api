@@ -222,6 +222,50 @@ class TestAppConfig:
         assert cfg.reference_systems[0] == {"label": "Siti Agri"}
         assert cfg.reference_guidance_types[0] == {"label": "Process guide"}
 
+    def test_auth_settings_are_optional_while_auth_is_off(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
+            use_auth=False,
+            cdp_jwt_issuer=None,
+            cdp_jwt_jwks_uri=None,
+        )
+
+        assert cfg.use_auth is False
+
+    def test_accepts_auth_with_an_issuer_and_jwks_uri(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
+            use_auth=True,
+            cdp_jwt_issuer="https://issuer.example",
+            cdp_jwt_jwks_uri="https://issuer.example/.well-known/jwks.json",
+        )
+
+        assert cfg.use_auth is True
+
+    @pytest.mark.parametrize(
+        ("auth_settings", "missing"),
+        [
+            ((None, None), "CDP_JWT_ISSUER, CDP_JWT_JWKS_URI"),
+            ((None, "https://issuer.example/jwks"), "CDP_JWT_ISSUER"),
+            (("https://issuer.example", None), "CDP_JWT_JWKS_URI"),
+            (("", ""), "CDP_JWT_ISSUER, CDP_JWT_JWKS_URI"),
+        ],
+    )
+    def test_rejects_auth_without_an_issuer_or_jwks_uri(self, auth_settings, missing):
+        # Both are passed explicitly: conftest.py seeds CDP_JWT_JWKS_URI in the env.
+        issuer, jwks_uri = auth_settings
+
+        with pytest.raises(pydantic.ValidationError, match=rf"not set: {missing} \["):
+            config.AppConfig(
+                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+                **VALID_REFERENCE_KWARGS,
+                use_auth=True,
+                cdp_jwt_issuer=issuer,
+                cdp_jwt_jwks_uri=jwks_uri,
+            )
+
 
 @pytest.mark.usefixtures("unset_config_singleton")
 class TestGetConfig:
