@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: .python-version
 
@@ -43,6 +43,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Build and Publish
-        uses: DEFRA/cdp-build-action/build@3bc79a86e8226a0e3159380bad680ec466c16dcc
+        uses: DEFRA/cdp-build-action/build@3761ef22decf8615b8fd275cd9b7142f8d356a11
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
