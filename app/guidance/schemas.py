@@ -116,13 +116,17 @@ class Version(pydantic.BaseModel):
 
 
 class Document(pydantic.BaseModel):
-    """A document as it is answered: what it is, where it came from, and every
-    version of it there has been.
+    """A document as it is answered: what it is, where it came from, when it was
+    recorded, and every version of it there has been.
+
+    `createdAt` is when the document was recorded, which is when its first version
+    was: the moment it went live, since every upload does.
     """
 
     id: ids.DocumentId
     metadata: dict[str, Any]
     source: Source
+    created_at: dt.datetime = pydantic.Field(alias="createdAt")
     versions: list[Version]
 
     @classmethod
@@ -137,16 +141,19 @@ class Document(pydantic.BaseModel):
                 fileId=document.file_id,
                 filename=document.filename,
             ),
+            createdAt=document.created_at,
             versions=[Version.from_model(version) for version in versions],
         )
 
 
 class DocumentSummary(pydantic.BaseModel):
-    """A document as listed, with its newest version."""
+    """A document as listed, with its newest version, and when the document was
+    recorded (as for `Document`)."""
 
     id: ids.DocumentId
     metadata: dict[str, Any]
     source: Source
+    created_at: dt.datetime = pydantic.Field(alias="createdAt")
     latest_version: Version | None = pydantic.Field(alias="latestVersion")
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
@@ -163,6 +170,7 @@ class DocumentSummary(pydantic.BaseModel):
                 fileId=document.file_id,
                 filename=document.filename,
             ),
+            createdAt=document.created_at,
             latestVersion=None if latest is None else Version.from_model(latest),
         )
 

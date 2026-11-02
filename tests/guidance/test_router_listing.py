@@ -91,6 +91,15 @@ class TestReadingADocument:
             str(oldest.id),
         ]
 
+    async def test_it_carries_when_the_document_was_created(self, client, database):
+        document_id, _ = await _seed(database)
+        stored = await database[records.DOCUMENTS].find_one({"_id": document_id})
+
+        body = (await client.get(f"/guides/{document_id}")).json()
+
+        # As stored: Mongo answers times without their zone, and so does the API.
+        assert dt.datetime.fromisoformat(body["createdAt"]) == stored["createdAt"]
+
     async def test_an_unknown_id_is_not_found(self, client):
         response = await client.get(f"/guides/{ids.new_document_id()}")
 
@@ -113,6 +122,17 @@ class TestListingDocuments:
         (item,) = response.json()["items"]
         assert item["id"] == str(document_id)
         assert item["latestVersion"]["id"] == str(newest.id)
+
+    async def test_each_item_carries_when_its_document_was_created(
+        self, client, database
+    ):
+        document_id, _ = await _seed(database)
+        stored = await database[records.DOCUMENTS].find_one({"_id": document_id})
+
+        (item,) = (await client.get("/guides")).json()["items"]
+
+        # As stored: Mongo answers times without their zone, and so does the API.
+        assert dt.datetime.fromisoformat(item["createdAt"]) == stored["createdAt"]
 
     async def test_a_document_without_versions_is_listed_with_no_latest_version(
         self, client, database
