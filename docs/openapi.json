@@ -41,8 +41,18 @@
         "type": "object"
       },
       "DocumentPage": {
-        "description": "One page of documents; `nextCursor` is null on the last.",
+        "description": "One page of documents; `nextCursor` is null on the last. `counts` has, for\neach filter by its name (`scheme`, `system`, `audience`), the values the guides\nhave, each with how many, so a page can offer the filters from this one call.",
         "properties": {
+          "counts": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/OptionCount"
+              },
+              "type": "array"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/DocumentSummary"
@@ -65,7 +75,8 @@
         },
         "required": [
           "items",
-          "nextCursor"
+          "nextCursor",
+          "counts"
         ],
         "title": "DocumentPage",
         "type": "object"
@@ -152,6 +163,37 @@
           "metadata"
         ],
         "title": "NewDocument",
+        "type": "object"
+      },
+      "OptionCount": {
+        "description": "One value of a filter, labelled as the reference data labels it, and how many\nof the guides have it given the other filters chosen.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "shortLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortlabel"
+          }
+        },
+        "required": [
+          "label",
+          "shortLabel",
+          "count"
+        ],
+        "title": "OptionCount",
         "type": "object"
       },
       "ParsingStatus": {
@@ -452,7 +494,7 @@
   "paths": {
     "/guides": {
       "get": {
-        "description": "The documents there are, a page at a time, in order of when each last\nchanged.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
+        "description": "The documents there are, a page at a time, in order of when each last\nchanged, with each filter's values and how many guides have each.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
         "operationId": "list_documents_guides_get",
         "parameters": [
           {

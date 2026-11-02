@@ -112,7 +112,8 @@ class TestListingDocuments:
         response = await client.get("/guides")
 
         assert response.status_code == 200
-        assert response.json() == {"items": [], "nextCursor": None}
+        assert response.json()["items"] == []
+        assert response.json()["nextCursor"] is None
 
     async def test_each_item_carries_its_newest_version(self, client, database):
         document_id, (_, newest) = await _seed(database, versions=2)
@@ -274,6 +275,95 @@ class TestSortingDocuments:
 
         assert [i["id"] for i in first["items"] + second["items"]] == everything
         assert second["nextCursor"] is None
+
+
+class TestCountingEachOption:
+    async def test_each_filter_counts_the_values_the_guides_have_in_the_reference_datas_order(
+        self, client, database
+    ):
+        await _seed(
+            database,
+            {
+                "schemes": ["Basic Payment Scheme"],
+                "systems": ["CRM"],
+                "audience": ["Caseworker"],
+            },
+        )
+        await _seed(
+            database,
+            {
+                "schemes": ["Basic Payment Scheme", "Countryside Stewardship"],
+                "systems": ["Siti Agri"],
+            },
+        )
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert counts == {
+            "scheme": [
+                {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 2},
+                {"label": "Countryside Stewardship", "shortLabel": None, "count": 1},
+            ],
+            "system": [
+                {"label": "Siti Agri", "shortLabel": None, "count": 1},
+                {"label": "CRM", "shortLabel": None, "count": 1},
+            ],
+            "audience": [{"label": "Caseworker", "shortLabel": None, "count": 1}],
+        }
+
+    async def test_a_filters_counts_are_given_the_other_filters_chosen(
+        self, client, database
+    ):
+        await _seed(database, {"schemes": ["Basic Payment Scheme"], "systems": ["CRM"]})
+        await _seed(
+            database, {"schemes": ["Countryside Stewardship"], "systems": ["Siti Agri"]}
+        )
+
+        counts = (await client.get("/guides", params={"system": "CRM"})).json()[
+            "counts"
+        ]
+
+        assert [(o["label"], o["count"]) for o in counts["scheme"]] == [
+            ("Basic Payment Scheme", 1)
+        ]
+        assert [(o["label"], o["count"]) for o in counts["system"]] == [
+            ("Siti Agri", 1),
+            ("CRM", 1),
+        ]
+
+    async def test_a_chosen_value_no_guide_has_is_counted_at_nothing(
+        self, client, database
+    ):
+        await _seed(database, {"audience": ["Caseworker"]})
+
+        body = (await client.get("/guides", params={"audience": "Customer"})).json()
+
+        assert body["items"] == []
+        assert [(o["label"], o["count"]) for o in body["counts"]["audience"]] == [
+            ("Caseworker", 1),
+            ("Customer", 0),
+        ]
+
+    async def test_a_value_the_reference_data_no_longer_has_comes_after_those_it_has(
+        self, client, database
+    ):
+        await _seed(
+            database, {"schemes": ["Retired Scheme", "Countryside Stewardship"]}
+        )
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert counts["scheme"] == [
+            {"label": "Countryside Stewardship", "shortLabel": None, "count": 1},
+            {"label": "Retired Scheme", "shortLabel": None, "count": 1},
+        ]
+
+    async def test_with_no_guides_nothing_is_counted(self, client):
+        assert (await client.get("/guides")).json()["counts"] == {
+            "scheme": [],
+            "system": [],
+            "audience": [],
+        }
 
 
 BUCKET = "rpa-ai-guidance-hub-managed-docs"

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.guidance import ids
@@ -128,8 +128,19 @@ class DocumentSummary:
 
 
 @dataclass(frozen=True)
+class OptionCount:
+    """One value of a filter, and how many documents have it."""
+
+    label: str
+    short_label: str | None
+    count: int
+
+
+@dataclass(frozen=True)
 class DocumentPage:
-    """One page of documents; `next_cursor` is None on the last."""
+    """One page of documents; `next_cursor` is None on the last. `counts` has, for
+    each filter, its values with how many documents have each."""
 
     items: list[DocumentSummary]
     next_cursor: ids.DocumentId | None = None
+    counts: dict[str, list[OptionCount]] = field(default_factory=dict)

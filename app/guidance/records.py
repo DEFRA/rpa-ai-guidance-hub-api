@@ -141,12 +141,7 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
     """
     direction = -1 if newest_first else 1
     pipeline: list[dict[str, Any]] = [
-        {
-            "$match": {
-                f"{_METADATA}.{key}": {"$in": list(values)}
-                for key, values in metadata.items()
-            }
-        },
+        *_matching(metadata),
         *_updated_at(),
         *await _after(database, after, direction),
         {"$sort": {_UPDATED_AT: direction, "_id": direction}},
@@ -154,6 +149,46 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
     ]
     cursor = await database[DOCUMENTS].aggregate(pipeline)
     return [models.Document.from_document(document) async for document in cursor]
+
+
+async def count_values(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    *,
+    metadata: Mapping[str, Sequence[str]],
+    keys: Sequence[str],
+) -> dict[str, dict[str, int]]:
+    """For each of `keys`, how many documents have each value in their metadata,
+    given the other keys' filters in `metadata` but not its own, so a filter's
+    counts say what choosing another of its values would find. A document with
+    several values counts under each.
+    """
+    facets = {
+        key: [
+            *_matching({k: v for k, v in metadata.items() if k != key}),
+            {"$unwind": f"${_METADATA}.{key}"},
+            {"$group": {"_id": f"${_METADATA}.{key}", "count": {"$sum": 1}}},
+        ]
+        for key in keys
+    }
+    cursor = await database[DOCUMENTS].aggregate([{"$facet": facets}])
+    (counted,) = [result async for result in cursor]
+    return {
+        key: {group["_id"]: group["count"] for group in counted[key]} for key in keys
+    }
+
+
+def _matching(metadata: Mapping[str, Sequence[str]]) -> list[dict[str, Any]]:
+    """The stage keeping only documents whose metadata match: none for no filter."""
+    if not metadata:
+        return []
+    return [
+        {
+            "$match": {
+                f"{_METADATA}.{key}": {"$in": list(values)}
+                for key, values in metadata.items()
+            }
+        }
+    ]
 
 
 # What `_updated_at` works out for each document.

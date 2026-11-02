@@ -175,11 +175,41 @@ class DocumentSummary(pydantic.BaseModel):
         )
 
 
+class OptionCount(pydantic.BaseModel):
+    """One value of a filter, labelled as the reference data labels it, and how many
+    of the guides have it given the other filters chosen."""
+
+    label: str
+    short_label: str | None = pydantic.Field(alias="shortLabel")
+    count: int
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, option: models.OptionCount) -> OptionCount:
+        return cls(
+            label=option.label, shortLabel=option.short_label, count=option.count
+        )
+
+
+def counts_from_model(
+    counts: dict[str, list[models.OptionCount]],
+) -> dict[str, list[OptionCount]]:
+    """Each filter's values with their counts, by the filter's name."""
+    return {
+        name: [OptionCount.from_model(option) for option in options]
+        for name, options in counts.items()
+    }
+
+
 class DocumentPage(pydantic.BaseModel):
-    """One page of documents; `nextCursor` is null on the last."""
+    """One page of documents; `nextCursor` is null on the last. `counts` has, for
+    each filter by its name (`scheme`, `system`, `audience`), the values the guides
+    have, each with how many, so a page can offer the filters from this one call."""
 
     items: list[DocumentSummary]
     next_cursor: ids.DocumentId | None = pydantic.Field(alias="nextCursor")
+    counts: dict[str, list[OptionCount]]
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
@@ -188,4 +218,5 @@ class DocumentPage(pydantic.BaseModel):
         return cls(
             items=[DocumentSummary.from_model(item) for item in page.items],
             nextCursor=page.next_cursor,
+            counts=counts_from_model(page.counts),
         )

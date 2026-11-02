@@ -154,7 +154,7 @@ async def list_documents(
     ] = "updated-newest",
 ) -> schemas.DocumentPage:
     """The documents there are, a page at a time, in order of when each last
-    changed.
+    changed, with each filter's values and how many guides have each.
 
     Filters take values from the reference data and can be repeated. Follow
     `nextCursor` for the next page; it is null on the last.

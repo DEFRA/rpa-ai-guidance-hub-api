@@ -166,6 +166,21 @@ def _refuse_anything_but_an_upload(source_url: str, expected: str) -> None:
         raise SourceRefusedError(message)
 
 
+# The filters that list, for each of their values, how many guides have it.
+COUNTED_FILTERS = ("scheme", "system", "audience")
+
+
+def _filters() -> dict[str, tuple[str, list[dict[str, str]]]]:
+    """Each filter's name, the metadata key it narrows, and its reference data."""
+    reference = config.get_config()
+    return {
+        "scheme": ("schemes", reference.reference_schemes),
+        "system": ("systems", reference.reference_systems),
+        "audience": ("audience", reference.reference_audiences),
+        "guidance_type": ("guidanceType", reference.reference_guidance_types),
+    }
+
+
 def _metadata_filters(
     requested: Mapping[str, Sequence[str]],
 ) -> dict[str, list[str]]:
@@ -174,13 +189,7 @@ def _metadata_filters(
     Raises:
         UnknownFilterValueError: if a value is not in the reference data.
     """
-    reference = config.get_config()
-    known = {
-        "scheme": ("schemes", reference.reference_schemes),
-        "system": ("systems", reference.reference_systems),
-        "audience": ("audience", reference.reference_audiences),
-        "guidance_type": ("guidanceType", reference.reference_guidance_types),
-    }
+    known = _filters()
 
     metadata: dict[str, list[str]] = {}
     for name, values in requested.items():
@@ -197,6 +206,44 @@ def _metadata_filters(
     return metadata
 
 
+async def _option_counts(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    metadata: Mapping[str, Sequence[str]],
+) -> dict[str, list[models.OptionCount]]:
+    """For each counted filter, the values the documents have, each with how many
+    have it given the other filters chosen, and any value chosen even if none has
+    it; in the reference data's order, labelled as it labels them.
+    """
+    known = _filters()
+    keys = {name: known[name][0] for name in COUNTED_FILTERS}
+    counted = await records.count_values(
+        database, metadata=metadata, keys=list(keys.values())
+    )
+    return {
+        name: _counted_options(counted[key], metadata.get(key, []), known[name][1])
+        for name, key in keys.items()
+    }
+
+
+def _counted_options(
+    counted: Mapping[str, int],
+    chosen: Sequence[str],
+    options: Sequence[Mapping[str, str]],
+) -> list[models.OptionCount]:
+    """The values to show for one filter: those counted, and those chosen at 0.
+    A value the reference data no longer has comes after those it has."""
+    counts = {**dict.fromkeys(chosen, 0), **counted}
+    short_labels = {option["label"]: option.get("shortLabel") for option in options}
+    order = {label: position for position, label in enumerate(short_labels)}
+    labels = sorted(counts, key=lambda label: (order.get(label, len(order)), label))
+    return [
+        models.OptionCount(
+            label=label, short_label=short_labels.get(label), count=counts[label]
+        )
+        for label in labels
+    ]
+
+
 # How a list can be sorted, by when each guide last changed: newest first or not.
 SORTS = {"updated-newest": True, "updated-oldest": False}
 
@@ -210,7 +257,7 @@ async def list_page(  # noqa: PLR0913 - each is a separate part of the query
     sort: str = "updated-newest",
 ) -> models.DocumentPage:
     """A page of documents, in order of when each last changed, each with its
-    newest version.
+    newest version, and every filter's values with their counts.
 
     A document matches a filter if it has any of the values given, and must match
     every filter given. `after` is the last document of the previous page.
@@ -240,4 +287,5 @@ async def list_page(  # noqa: PLR0913 - each is a separate part of the query
             for document in documents
         ],
         next_cursor=documents[-1].id if len(found) > limit else None,
+        counts=await _option_counts(database, metadata),
     )
