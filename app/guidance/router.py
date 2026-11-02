@@ -148,6 +148,9 @@ async def list_documents(
     system: Annotated[list[str] | None, fastapi.Query()] = None,
     audience: Annotated[list[str] | None, fastapi.Query()] = None,
     guidance_type: Annotated[list[str] | None, fastapi.Query()] = None,
+    no_scheme: Annotated[
+        bool, fastapi.Query(description="The guides specific to no scheme too")
+    ] = False,
     sort: Annotated[
         Literal["updated-newest", "updated-oldest"],
         fastapi.Query(description="By when each guide last changed"),
@@ -156,19 +159,19 @@ async def list_documents(
     """The documents there are, a page at a time, in order of when each last
     changed, with each filter's values and how many guides have each.
 
-    Filters take values from the reference data and can be repeated. Follow
+    Filters take values from the reference data and can be repeated. `no_scheme`
+    chooses the guides specific to no scheme, beside any `scheme`s chosen. Follow
     `nextCursor` for the next page; it is null on the last.
     """
-    filters = {
-        name: values
-        for name, values in {
+    filters = service.chosen_filters(
+        {
             "scheme": scheme,
             "system": system,
             "audience": audience,
             "guidance_type": guidance_type,
-        }.items()
-        if values
-    }
+        },
+        no_scheme=no_scheme,
+    )
     try:
         page = await service.list_page(
             database, filters=filters, after=cursor, limit=limit, sort=sort

@@ -428,3 +428,51 @@ class TestReadingAnAsset:
         response = await client.get(f"/guides/{document_id}/assets/{name}")
 
         assert response.status_code == 404
+
+
+class TestGuidesWithNoScheme:
+    async def test_are_counted_as_an_entry_of_their_own_after_the_schemes(
+        self, client, database
+    ):
+        await _seed(database, {"schemes": ["Basic Payment Scheme"]})
+        await _seed(database, {"schemes": []})
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert counts["scheme"] == [
+            {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 1},
+            {"label": None, "shortLabel": None, "count": 1},
+        ]
+
+    async def test_are_chosen_by_no_scheme_alone_or_beside_schemes(
+        self, client, database
+    ):
+        bps, _ = await _seed(database, {"schemes": ["Basic Payment Scheme"]})
+        await _seed(database, {"schemes": ["Countryside Stewardship"]})
+        none, _ = await _seed(database, {"schemes": []})
+
+        alone = await client.get("/guides", params={"no_scheme": "true"})
+        beside = await client.get(
+            "/guides", params={"no_scheme": "true", "scheme": "Basic Payment Scheme"}
+        )
+
+        assert [i["id"] for i in alone.json()["items"]] == [str(none)]
+        assert [i["id"] for i in beside.json()["items"]] == [str(none), str(bps)]
+        assert (None, 1) in [
+            (o["label"], o["count"]) for o in alone.json()["counts"]["scheme"]
+        ]
+
+    async def test_include_those_stored_with_the_words_not_scheme_specific(
+        self, client, database
+    ):
+        stored, _ = await _seed(database, {"schemes": ["Not scheme-specific"]})
+
+        body = (await client.get("/guides", params={"no_scheme": "true"})).json()
+        read = (await client.get(f"/guides/{stored}")).json()
+
+        assert [i["id"] for i in body["items"]] == [str(stored)]
+        assert [i["metadata"]["schemes"] for i in body["items"]] == [[]]
+        assert read["metadata"]["schemes"] == []
+        assert body["counts"]["scheme"] == [
+            {"label": None, "shortLabel": None, "count": 1}
+        ]

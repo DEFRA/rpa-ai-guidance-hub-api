@@ -23,6 +23,20 @@ DOCUMENT_ID = "documentId"
 
 FILTERABLE_METADATA = ("schemes", "systems", "audience", "guidanceType")
 
+# The words a guide specific to no scheme is stored with among its schemes. Such a
+# guide has no scheme: its details are read with the words left out.
+NOT_SCHEME_SPECIFIC = "Not scheme-specific"
+
+
+def details_as_now(details: dict[str, Any]) -> dict[str, Any]:
+    """Details as they are read now, whenever they were stored: a guide stored as
+    "Not scheme-specific" has no scheme."""
+    schemes = details.get("schemes")
+    if not isinstance(schemes, list) or NOT_SCHEME_SPECIFIC not in schemes:
+        return details
+    kept = [scheme for scheme in schemes if scheme != NOT_SCHEME_SPECIFIC]
+    return {**details, "schemes": kept}
+
 
 @dataclass(frozen=True)
 class Document:
@@ -129,9 +143,10 @@ class DocumentSummary:
 
 @dataclass(frozen=True)
 class OptionCount:
-    """One value of a filter, and how many documents have it."""
+    """One value of a filter, and how many documents have it; with no label, how
+    many have none of the filter's values."""
 
-    label: str
+    label: str | None
     short_label: str | None
     count: int
 

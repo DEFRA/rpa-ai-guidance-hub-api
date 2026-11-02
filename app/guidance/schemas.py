@@ -135,7 +135,7 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=models.details_as_now(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
@@ -164,7 +164,7 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=models.details_as_now(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
@@ -179,7 +179,9 @@ class OptionCount(pydantic.BaseModel):
     """One value of a filter, labelled as the reference data labels it, and how many
     of the guides have it given the other filters chosen."""
 
-    label: str
+    label: str | None = pydantic.Field(
+        description="Null for the guides with none of the filter's values"
+    )
     short_label: str | None = pydantic.Field(alias="shortLabel")
     count: int
 

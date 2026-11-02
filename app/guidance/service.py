@@ -169,6 +169,10 @@ def _refuse_anything_but_an_upload(source_url: str, expected: str) -> None:
 # The filters that list, for each of their values, how many guides have it.
 COUNTED_FILTERS = ("scheme", "system", "audience")
 
+# The details whose counts include the guides with none of their values: a guide
+# specific to no scheme has none, and is a choice of its own.
+_COUNTING_NONE = ("schemes",)
+
 
 def _filters() -> dict[str, tuple[str, list[dict[str, str]]]]:
     """Each filter's name, the metadata key it narrows, and its reference data."""
@@ -181,21 +185,35 @@ def _filters() -> dict[str, tuple[str, list[dict[str, str]]]]:
     }
 
 
+def chosen_filters(
+    given: Mapping[str, Sequence[str] | None], *, no_scheme: bool
+) -> dict[str, list[str | None]]:
+    """The filters given, by name, with None among the schemes for the guides
+    specific to no scheme."""
+    chosen: dict[str, list[str | None]] = {
+        name: list(values) for name, values in given.items() if values
+    }
+    if no_scheme:
+        chosen["scheme"] = [*chosen.get("scheme", []), None]
+    return chosen
+
+
 def _metadata_filters(
-    requested: Mapping[str, Sequence[str]],
-) -> dict[str, list[str]]:
+    requested: Mapping[str, Sequence[str | None]],
+) -> dict[str, list[str | None]]:
     """Map filter names to the metadata keys they narrow, checking each value.
+    None is the guides with none of the filter's values.
 
     Raises:
         UnknownFilterValueError: if a value is not in the reference data.
     """
     known = _filters()
 
-    metadata: dict[str, list[str]] = {}
+    metadata: dict[str, list[str | None]] = {}
     for name, values in requested.items():
         key, options = known[name]
         allowed = {option["label"] for option in options}
-        unknown = sorted(set(values) - allowed)
+        unknown = sorted({value for value in values if value is not None} - allowed)
         if unknown:
             message = (
                 f"Unknown {name} {', '.join(unknown)}; "
@@ -208,16 +226,20 @@ def _metadata_filters(
 
 async def _option_counts(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    metadata: Mapping[str, Sequence[str]],
+    metadata: Mapping[str, Sequence[str | None]],
 ) -> dict[str, list[models.OptionCount]]:
     """For each counted filter, the values the documents have, each with how many
     have it given the other filters chosen, and any value chosen even if none has
-    it; in the reference data's order, labelled as it labels them.
+    it; in the reference data's order, labelled as it labels them. Guides with no
+    scheme are counted after the schemes, with no label.
     """
     known = _filters()
     keys = {name: known[name][0] for name in COUNTED_FILTERS}
     counted = await records.count_values(
-        database, metadata=metadata, keys=list(keys.values())
+        database,
+        metadata=metadata,
+        keys=list(keys.values()),
+        counting_none=_COUNTING_NONE,
     )
     return {
         name: _counted_options(counted[key], metadata.get(key, []), known[name][1])
@@ -226,16 +248,22 @@ async def _option_counts(
 
 
 def _counted_options(
-    counted: Mapping[str, int],
-    chosen: Sequence[str],
+    counted: Mapping[str | None, int],
+    chosen: Sequence[str | None],
     options: Sequence[Mapping[str, str]],
 ) -> list[models.OptionCount]:
     """The values to show for one filter: those counted, and those chosen at 0.
-    A value the reference data no longer has comes after those it has."""
+    A value the reference data no longer has comes after those it has, and the
+    guides with none of them (None) after that."""
     counts = {**dict.fromkeys(chosen, 0), **counted}
-    short_labels = {option["label"]: option.get("shortLabel") for option in options}
+    short_labels: dict[str | None, str | None] = {
+        option["label"]: option.get("shortLabel") for option in options
+    }
     order = {label: position for position, label in enumerate(short_labels)}
-    labels = sorted(counts, key=lambda label: (order.get(label, len(order)), label))
+    labels = sorted(
+        counts,
+        key=lambda label: (label is None, order.get(label, len(order)), label or ""),
+    )
     return [
         models.OptionCount(
             label=label, short_label=short_labels.get(label), count=counts[label]
@@ -251,7 +279,7 @@ SORTS = {"updated-newest": True, "updated-oldest": False}
 async def list_page(  # noqa: PLR0913 - each is a separate part of the query
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
-    filters: Mapping[str, Sequence[str]],
+    filters: Mapping[str, Sequence[str | None]],
     after: ids.DocumentId | None,
     limit: int,
     sort: str = "updated-newest",

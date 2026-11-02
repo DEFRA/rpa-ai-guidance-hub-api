@@ -173,8 +173,16 @@
             "type": "integer"
           },
           "label": {
-            "title": "Label",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for the guides with none of the filter's values",
+            "title": "Label"
           },
           "shortLabel": {
             "anyOf": [
@@ -494,7 +502,7 @@
   "paths": {
     "/guides": {
       "get": {
-        "description": "The documents there are, a page at a time, in order of when each last\nchanged, with each filter's values and how many guides have each.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
+        "description": "The documents there are, a page at a time, in order of when each last\nchanged, with each filter's values and how many guides have each.\n\nFilters take values from the reference data and can be repeated. `no_scheme`\nchooses the guides specific to no scheme, beside any `scheme`s chosen. Follow\n`nextCursor` for the next page; it is null on the last.",
         "operationId": "list_documents_guides_get",
         "parameters": [
           {
@@ -602,6 +610,18 @@
                 }
               ],
               "title": "Guidance Type"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
             }
           },
           {

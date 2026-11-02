@@ -52,7 +52,7 @@ rather than another one.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pymongo.errors
@@ -87,6 +87,7 @@ _NEWEST = [("createdAt", -1)]
 # The aggregation stages the queries below use more than once.
 _MATCH = "$match"
 _SORT = "$sort"
+_IN = "$in"
 
 
 async def ensure_indexes(
@@ -127,7 +128,7 @@ class UnknownCursorError(LookupError):
 async def list_documents(  # noqa: PLR0913 - each is a separate part of the query
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
-    metadata: Mapping[str, Sequence[str]],
+    metadata: Mapping[str, Sequence[str | None]],
     after: ids.DocumentId | None,
     limit: int,
     newest_first: bool = True,
@@ -145,6 +146,7 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
     """
     direction = -1 if newest_first else 1
     pipeline: list[dict[str, Any]] = [
+        *_as_now(),
         *_matching(metadata),
         *_updated_at(),
         *await _after(database, after, direction),
@@ -158,41 +160,89 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
 async def count_values(
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
-    metadata: Mapping[str, Sequence[str]],
+    metadata: Mapping[str, Sequence[str | None]],
     keys: Sequence[str],
-) -> dict[str, dict[str, int]]:
+    counting_none: Collection[str] = (),
+) -> dict[str, dict[str | None, int]]:
     """For each of `keys`, how many documents have each value in their metadata,
     given the other keys' filters in `metadata` but not its own, so a filter's
     counts say what choosing another of its values would find. A document with
     several values counts under each.
+
+    For a key in `counting_none`, the documents with none of its values count under
+    None.
     """
     facets = {
         key: [
             *_matching({k: v for k, v in metadata.items() if k != key}),
-            {"$unwind": f"${_METADATA}.{key}"},
+            {
+                "$unwind": {
+                    "path": f"${_METADATA}.{key}",
+                    "preserveNullAndEmptyArrays": key in counting_none,
+                }
+            },
             {"$group": {"_id": f"${_METADATA}.{key}", "count": {"$sum": 1}}},
         ]
         for key in keys
     }
-    cursor = await database[DOCUMENTS].aggregate([{"$facet": facets}])
+    cursor = await database[DOCUMENTS].aggregate([*_as_now(), {"$facet": facets}])
     (counted,) = [result async for result in cursor]
     return {
         key: {group["_id"]: group["count"] for group in counted[key]} for key in keys
     }
 
 
-def _matching(metadata: Mapping[str, Sequence[str]]) -> list[dict[str, Any]]:
-    """The stage keeping only documents whose metadata match: none for no filter."""
-    if not metadata:
-        return []
+_SCHEMES = f"{_METADATA}.schemes"
+
+
+def _as_now() -> list[dict[str, Any]]:
+    """The stage reading each document's metadata as now
+    (`models.details_as_now`): a guide stored as "Not scheme-specific" has no
+    scheme.
+
+    The match after it works on what this works out, so it cannot use the
+    metadata indexes.
+    """
     return [
         {
-            _MATCH: {
-                f"{_METADATA}.{key}": {"$in": list(values)}
-                for key, values in metadata.items()
+            "$set": {
+                _SCHEMES: {
+                    "$cond": [
+                        {"$isArray": f"${_SCHEMES}"},
+                        {
+                            "$filter": {
+                                "input": f"${_SCHEMES}",
+                                "cond": {"$ne": ["$$this", models.NOT_SCHEME_SPECIFIC]},
+                            }
+                        },
+                        f"${_SCHEMES}",
+                    ]
+                }
             }
         }
     ]
+
+
+def _matching(metadata: Mapping[str, Sequence[str | None]]) -> list[dict[str, Any]]:
+    """The stage keeping only documents whose metadata match: none for no filter.
+
+    A key matches when the document has any of its values; None among them is a
+    document with none of the key's values at all, an empty list or none given.
+    """
+    if not metadata:
+        return []
+    return [
+        {_MATCH: {"$and": [_any_of(key, values) for key, values in metadata.items()]}}
+    ]
+
+
+def _any_of(key: str, values: Sequence[str | None]) -> dict[str, Any]:
+    """The condition that the document has any of `values` for `key`."""
+    field = f"{_METADATA}.{key}"
+    named = [value for value in values if value is not None]
+    if None not in values:
+        return {field: {_IN: named}}
+    return {"$or": [{field: {_IN: named}}, {field: {_IN: [[], None]}}]}
 
 
 # What `_updated_at` works out for each document.
@@ -265,7 +315,7 @@ async def latest_versions_of(
 ) -> dict[ids.DocumentId, models.Version]:
     """The newest version of each of `document_ids` that has one, in a single query."""
     pipeline: list[dict[str, Any]] = [
-        {_MATCH: {DOCUMENT_ID: {"$in": list(document_ids)}}},
+        {_MATCH: {DOCUMENT_ID: {_IN: list(document_ids)}}},
         {_SORT: dict(_NEWEST)},
         {"$group": {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
     ]
