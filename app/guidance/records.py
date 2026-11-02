@@ -84,6 +84,10 @@ class MisfiledVersionError(RuntimeError):
 # `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
 
+# The aggregation stages the queries below use more than once.
+_MATCH = "$match"
+_SORT = "$sort"
+
 
 async def ensure_indexes(
     database: pymongo.asynchronous.database.AsyncDatabase,
@@ -144,7 +148,7 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
         *_matching(metadata),
         *_updated_at(),
         *await _after(database, after, direction),
-        {"$sort": {_UPDATED_AT: direction, "_id": direction}},
+        {_SORT: {_UPDATED_AT: direction, "_id": direction}},
         {"$limit": limit},
     ]
     cursor = await database[DOCUMENTS].aggregate(pipeline)
@@ -183,7 +187,7 @@ def _matching(metadata: Mapping[str, Sequence[str]]) -> list[dict[str, Any]]:
         return []
     return [
         {
-            "$match": {
+            _MATCH: {
                 f"{_METADATA}.{key}": {"$in": list(values)}
                 for key, values in metadata.items()
             }
@@ -205,7 +209,7 @@ def _updated_at() -> list[dict[str, Any]]:
                 "localField": "_id",
                 "foreignField": DOCUMENT_ID,
                 "pipeline": [
-                    {"$sort": dict(_NEWEST)},
+                    {_SORT: dict(_NEWEST)},
                     {"$limit": 1},
                     {"$project": {"createdAt": 1}},
                 ],
@@ -234,7 +238,7 @@ async def _after(
     found = [
         document
         async for document in await database[DOCUMENTS].aggregate(
-            [{"$match": {"_id": after}}, *_updated_at()]
+            [{_MATCH: {"_id": after}}, *_updated_at()]
         )
     ]
     if not found:
@@ -245,7 +249,7 @@ async def _after(
     updated_at = found[0][_UPDATED_AT]
     return [
         {
-            "$match": {
+            _MATCH: {
                 "$or": [
                     {_UPDATED_AT: {beyond: updated_at}},
                     {_UPDATED_AT: updated_at, "_id": {beyond: after}},
@@ -261,8 +265,8 @@ async def latest_versions_of(
 ) -> dict[ids.DocumentId, models.Version]:
     """The newest version of each of `document_ids` that has one, in a single query."""
     pipeline: list[dict[str, Any]] = [
-        {"$match": {DOCUMENT_ID: {"$in": list(document_ids)}}},
-        {"$sort": dict(_NEWEST)},
+        {_MATCH: {DOCUMENT_ID: {"$in": list(document_ids)}}},
+        {_SORT: dict(_NEWEST)},
         {"$group": {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)
