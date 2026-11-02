@@ -544,7 +544,7 @@ class TestReadingADocumentBack:
         response = client.get(f"/guides/{DOCUMENT}")
 
         assert response.status_code == 200
-        assert response.json()["metadata"] == METADATA
+        assert response.json()["metadata"] == {"schemeYear": 2026, **METADATA}
         assert [version["id"] for version in response.json()["versions"]] == [
             str(VERSION)
         ]

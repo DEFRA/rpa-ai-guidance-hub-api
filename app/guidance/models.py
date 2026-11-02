@@ -27,15 +27,20 @@ FILTERABLE_METADATA = ("schemes", "systems", "audience", "guidanceType")
 # guide has no scheme: its details are read with the words left out.
 NOT_SCHEME_SPECIFIC = "Not scheme-specific"
 
+# The scheme year of every guide stored before guides recorded one: the only one
+# there has been.
+FIRST_SCHEME_YEAR = 2026
+
 
 def details_as_now(details: dict[str, Any]) -> dict[str, Any]:
     """Details as they are read now, whenever they were stored: a guide stored as
-    "Not scheme-specific" has no scheme."""
+    "Not scheme-specific" has no scheme, and one stored without a scheme year is
+    of the first."""
     schemes = details.get("schemes")
-    if not isinstance(schemes, list) or NOT_SCHEME_SPECIFIC not in schemes:
-        return details
-    kept = [scheme for scheme in schemes if scheme != NOT_SCHEME_SPECIFIC]
-    return {**details, "schemes": kept}
+    if isinstance(schemes, list) and NOT_SCHEME_SPECIFIC in schemes:
+        kept = [scheme for scheme in schemes if scheme != NOT_SCHEME_SPECIFIC]
+        details = {**details, "schemes": kept}
+    return {"schemeYear": FIRST_SCHEME_YEAR, **details}
 
 
 @dataclass(frozen=True)

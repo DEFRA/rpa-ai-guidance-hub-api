@@ -74,7 +74,7 @@ class TestReadingADocument:
         body = response.json()
         assert response.status_code == 200
         assert body["id"] == str(document_id)
-        assert body["metadata"] == {"guideTitle": "One"}
+        assert body["metadata"] == {"schemeYear": 2026, "guideTitle": "One"}
         assert [v["id"] for v in body["versions"]] == [str(version.id)]
         assert body["versions"][0]["createdAt"] is not None
 
@@ -476,3 +476,21 @@ class TestGuidesWithNoScheme:
         assert body["counts"]["scheme"] == [
             {"label": None, "shortLabel": None, "count": 1}
         ]
+
+
+class TestTheSchemeYear:
+    async def test_is_kept_with_the_other_details(self, client, database):
+        given, _ = await _seed(database, {"guideTitle": "Given", "schemeYear": 2026})
+
+        read = (await client.get(f"/guides/{given}")).json()
+
+        assert read["metadata"] == {"guideTitle": "Given", "schemeYear": 2026}
+
+    async def test_is_2026_for_a_guide_stored_without_one(self, client, database):
+        since, _ = await _seed(database, {"guideTitle": "Since"})
+
+        items = (await client.get("/guides")).json()["items"]
+
+        assert {i["id"]: i["metadata"]["schemeYear"] for i in items} == {
+            str(since): 2026
+        }
