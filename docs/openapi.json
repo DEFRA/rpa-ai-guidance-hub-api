@@ -2,8 +2,13 @@
   "components": {
     "schemas": {
       "Document": {
-        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.",
+        "description": "A document as it is answered: what it is, where it came from, when it was\nrecorded, and every version of it there has been.\n\n`createdAt` is when the document was recorded, which is when its first version\nwas: the moment it went live, since every upload does.",
         "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -29,6 +34,7 @@
           "id",
           "metadata",
           "source",
+          "createdAt",
           "versions"
         ],
         "title": "Document",
@@ -65,8 +71,13 @@
         "type": "object"
       },
       "DocumentSummary": {
-        "description": "A document as listed, with its newest version.",
+        "description": "A document as listed, with its newest version, and when the document was\nrecorded (as for `Document`).",
         "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -95,6 +106,7 @@
           "id",
           "metadata",
           "source",
+          "createdAt",
           "latestVersion"
         ],
         "title": "DocumentSummary",
@@ -440,7 +452,7 @@
   "paths": {
     "/guides": {
       "get": {
-        "description": "The documents there are, newest first, a page at a time.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
+        "description": "The documents there are, a page at a time, in order of when each last\nchanged.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
         "operationId": "list_documents_guides_get",
         "parameters": [
           {
@@ -548,6 +560,22 @@
                 }
               ],
               "title": "Guidance Type"
+            }
+          },
+          {
+            "description": "By when each guide last changed",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated-newest",
+              "description": "By when each guide last changed",
+              "enum": [
+                "updated-newest",
+                "updated-oldest"
+              ],
+              "title": "Sort",
+              "type": "string"
             }
           }
         ],

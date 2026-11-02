@@ -197,26 +197,37 @@ def _metadata_filters(
     return metadata
 
 
-async def list_page(
+# How a list can be sorted, by when each guide last changed: newest first or not.
+SORTS = {"updated-newest": True, "updated-oldest": False}
+
+
+async def list_page(  # noqa: PLR0913 - each is a separate part of the query
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
     filters: Mapping[str, Sequence[str]],
     after: ids.DocumentId | None,
     limit: int,
+    sort: str = "updated-newest",
 ) -> models.DocumentPage:
-    """A page of documents, newest first, each with its newest version.
+    """A page of documents, in order of when each last changed, each with its
+    newest version.
 
     A document matches a filter if it has any of the values given, and must match
     every filter given. `after` is the last document of the previous page.
 
     Raises:
         UnknownFilterValueError: if a filter value is not in the reference data.
+        records.UnknownCursorError: if `after` is not a document.
     """
     metadata = _metadata_filters(filters)
 
     # One more than a page, to know whether there is another.
     found = await records.list_documents(
-        database, metadata=metadata, after=after, limit=limit + 1
+        database,
+        metadata=metadata,
+        after=after,
+        limit=limit + 1,
+        newest_first=SORTS[sort],
     )
     documents = found[:limit]
     latest = await records.latest_versions_of(

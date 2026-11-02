@@ -116,26 +116,108 @@ async def find(
     return None if found is None else models.Document.from_document(found)
 
 
-async def list_documents(
+class UnknownCursorError(LookupError):
+    """Raised when a page is asked for after a document that is not there."""
+
+
+async def list_documents(  # noqa: PLR0913 - each is a separate part of the query
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
     metadata: Mapping[str, Sequence[str]],
     after: ids.DocumentId | None,
     limit: int,
+    newest_first: bool = True,
 ) -> list[models.Document]:
-    """Up to `limit` documents, newest first, older than `after` if given.
+    """Up to `limit` documents, in order of when each last changed, after `after`.
 
-    A document matches when, for every metadata key, at least one of its values is
-    among those asked for. Ids are time-ordered, so `_id` is order and cursor both.
+    A document last changed when its newest version was made (or, with none, when
+    it was recorded). It matches when, for every metadata key, at least one of its
+    values is among those asked for. The cursor is the last document of the page
+    before: the page goes on from where that document stands in the order now, ties
+    broken by id, so the cursor stays a document id.
+
+    Raises:
+        UnknownCursorError: if `after` is not a document.
     """
-    query: dict[str, Any] = {
-        f"{_METADATA}.{key}": {"$in": list(values)} for key, values in metadata.items()
-    }
-    if after is not None:
-        query["_id"] = {"$lt": after}
-
-    cursor = database[DOCUMENTS].find(query).sort("_id", -1).limit(limit)
+    direction = -1 if newest_first else 1
+    pipeline: list[dict[str, Any]] = [
+        {
+            "$match": {
+                f"{_METADATA}.{key}": {"$in": list(values)}
+                for key, values in metadata.items()
+            }
+        },
+        *_updated_at(),
+        *await _after(database, after, direction),
+        {"$sort": {_UPDATED_AT: direction, "_id": direction}},
+        {"$limit": limit},
+    ]
+    cursor = await database[DOCUMENTS].aggregate(pipeline)
     return [models.Document.from_document(document) async for document in cursor]
+
+
+# What `_updated_at` works out for each document.
+_UPDATED_AT = "updatedAt"
+
+
+def _updated_at() -> list[dict[str, Any]]:
+    """The stages working out when each document last changed: when its newest
+    version was made, or, with none, when it was recorded."""
+    return [
+        {
+            "$lookup": {
+                "from": VERSIONS,
+                "localField": "_id",
+                "foreignField": DOCUMENT_ID,
+                "pipeline": [
+                    {"$sort": dict(_NEWEST)},
+                    {"$limit": 1},
+                    {"$project": {"createdAt": 1}},
+                ],
+                "as": "newest",
+            }
+        },
+        {
+            "$set": {
+                _UPDATED_AT: {
+                    "$ifNull": [{"$first": "$newest.createdAt"}, "$createdAt"]
+                },
+            }
+        },
+    ]
+
+
+async def _after(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    after: ids.DocumentId | None,
+    direction: int,
+) -> list[dict[str, Any]]:
+    """The stage going on after `after`, where it stands in the order now."""
+    if after is None:
+        return []
+
+    found = [
+        document
+        async for document in await database[DOCUMENTS].aggregate(
+            [{"$match": {"_id": after}}, *_updated_at()]
+        )
+    ]
+    if not found:
+        message = f"No document {after} to go on from"
+        raise UnknownCursorError(message)
+
+    beyond = "$lt" if direction < 0 else "$gt"
+    updated_at = found[0][_UPDATED_AT]
+    return [
+        {
+            "$match": {
+                "$or": [
+                    {_UPDATED_AT: {beyond: updated_at}},
+                    {_UPDATED_AT: updated_at, "_id": {beyond: after}},
+                ]
+            }
+        }
+    ]
 
 
 async def latest_versions_of(

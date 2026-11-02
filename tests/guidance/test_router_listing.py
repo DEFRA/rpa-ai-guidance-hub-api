@@ -201,6 +201,81 @@ class TestListingDocuments:
         assert response.status_code == 422
 
 
+async def _add_version(database, document_id) -> None:
+    """A newer version of a document, made now."""
+    await records.create_version(
+        database,
+        models.Version(
+            id=ids.new_version_id(),
+            document_id=document_id,
+            content_url=f"s3://docs/{document_id}/later/content.md",
+            title="Later",
+            created_at=dt.datetime.now(tz=dt.UTC) + dt.timedelta(minutes=1),
+        ),
+    )
+
+
+class TestSortingDocuments:
+    async def test_the_default_order_is_by_when_each_last_changed_newest_first(
+        self, client, database
+    ):
+        changed_later, _ = await _seed(database)
+        changed_earlier, _ = await _seed(database)
+        await _add_version(database, changed_later)
+
+        items = (await client.get("/guides")).json()["items"]
+
+        assert [i["id"] for i in items] == [str(changed_later), str(changed_earlier)]
+
+    async def test_updated_oldest_puts_the_one_that_changed_longest_ago_first(
+        self, client, database
+    ):
+        changed_later, _ = await _seed(database)
+        changed_earlier, _ = await _seed(database)
+        await _add_version(database, changed_later)
+
+        response = await client.get("/guides", params={"sort": "updated-oldest"})
+
+        assert [i["id"] for i in response.json()["items"]] == [
+            str(changed_earlier),
+            str(changed_later),
+        ]
+
+    async def test_a_cursor_that_is_not_a_document_is_refused(self, client):
+        response = await client.get(
+            "/guides", params={"cursor": str(ids.new_document_id())}
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_sort_that_is_not_offered_is_refused(self, client):
+        response = await client.get("/guides", params={"sort": "title"})
+
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize("sort", ["updated-newest", "updated-oldest"])
+    async def test_pages_follow_the_order_to_the_last(self, client, database, sort):
+        seeded = [(await _seed(database))[0] for _ in range(3)]
+        await _add_version(database, seeded[0])
+        everything = [
+            i["id"]
+            for i in (await client.get("/guides", params={"sort": sort})).json()[
+                "items"
+            ]
+        ]
+
+        first = (await client.get("/guides", params={"sort": sort, "limit": 2})).json()
+        second = (
+            await client.get(
+                "/guides",
+                params={"sort": sort, "limit": 2, "cursor": first["nextCursor"]},
+            )
+        ).json()
+
+        assert [i["id"] for i in first["items"] + second["items"]] == everything
+        assert second["nextCursor"] is None
+
+
 BUCKET = "rpa-ai-guidance-hub-managed-docs"
 PICTURE = "a3f9c1.png"
 

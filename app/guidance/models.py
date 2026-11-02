@@ -129,7 +129,7 @@ class DocumentSummary:
 
 @dataclass(frozen=True)
 class DocumentPage:
-    """One page of documents, newest first; `next_cursor` is None on the last."""
+    """One page of documents; `next_cursor` is None on the last."""
 
     items: list[DocumentSummary]
     next_cursor: ids.DocumentId | None = None
