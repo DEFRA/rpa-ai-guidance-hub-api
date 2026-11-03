@@ -136,6 +136,27 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "Identity": {
+        "description": "Who signed in, as the identity provider names them: the tenant, and the\nuser's object id within it. Unique together.",
+        "properties": {
+          "objectId": {
+            "minLength": 1,
+            "title": "Objectid",
+            "type": "string"
+          },
+          "tenantId": {
+            "minLength": 1,
+            "title": "Tenantid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "objectId"
+        ],
+        "title": "Identity",
+        "type": "object"
+      },
       "NewDocument": {
         "description": "An upload to convert, what its author said about the document, and the\nnumber they gave this version of it.",
         "properties": {
@@ -276,6 +297,38 @@
         "title": "ReferenceOption",
         "type": "object"
       },
+      "SignedIn": {
+        "description": "Someone who has just signed in, as the UI knows them from their token.",
+        "properties": {
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "objectId": {
+            "minLength": 1,
+            "title": "Objectid",
+            "type": "string"
+          },
+          "tenantId": {
+            "minLength": 1,
+            "title": "Tenantid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "objectId"
+        ],
+        "title": "SignedIn",
+        "type": "object"
+      },
       "Source": {
         "description": "Which upload the document is, as the front end knows it.\n\nOnly names it: where the file is, and whether it parsed, are read from its\nstaging record, so the caller never says where to read from.",
         "properties": {
@@ -409,6 +462,43 @@
           "uploadStatus"
         ],
         "title": "UploadCallbackPayload",
+        "type": "object"
+      },
+      "User": {
+        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/Identity"
+          }
+        },
+        "required": [
+          "id",
+          "identity",
+          "displayName",
+          "createdAt"
+        ],
+        "title": "User",
         "type": "object"
       },
       "ValidationError": {
@@ -1114,6 +1204,102 @@
           }
         ],
         "summary": "Root"
+      }
+    },
+    "/users": {
+      "post": {
+        "description": "Find the user who has signed in, or make them on their first sign-in.\n\n201 when this made them, 200 when they were there already; either way their\nname is brought up to date.",
+        "operationId": "sign_in_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sign In",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/{user_id}": {
+      "get": {
+        "description": "One user, by the hub's id for them.",
+        "operationId": "read_user_users__user_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read User",
+        "tags": [
+          "users"
+        ]
       }
     }
   }

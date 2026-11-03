@@ -44,6 +44,7 @@ def client(
         "app.common.mongo.get_db", mocker.AsyncMock(return_value=mocker.MagicMock())
     )
     mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
+    mocker.patch("app.users.records.ensure_indexes", mocker.AsyncMock())
 
     fastapi_app = app.entrypoints.fastapi.app
     fastapi_app.dependency_overrides[router.get_staging_service] = lambda: mock_service
