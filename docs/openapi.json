@@ -1,6 +1,31 @@
 {
   "components": {
     "schemas": {
+      "AddOperation": {
+        "additionalProperties": false,
+        "description": "Put `value` at `path`: into a list at a position (`-` is the end), or as a\nmember of an object.",
+        "properties": {
+          "op": {
+            "const": "add",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "required": [
+          "path",
+          "op",
+          "value"
+        ],
+        "title": "AddOperation",
+        "type": "object"
+      },
       "Document": {
         "description": "A document as it is answered: what it is, where it came from, when it was\nrecorded, and every version of it there has been.\n\n`createdAt` is when the document was recorded, which is when its first version\nwas: the moment it went live, since every upload does.",
         "properties": {
@@ -157,6 +182,33 @@
         "title": "Identity",
         "type": "object"
       },
+      "JsonValue": {},
+      "MoveOperation": {
+        "additionalProperties": false,
+        "description": "Take out what `from` names, then add it at `path`, which is read in the\ndocument without it.",
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "op": {
+            "const": "move",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "op",
+          "from"
+        ],
+        "title": "MoveOperation",
+        "type": "object"
+      },
       "NewDocument": {
         "description": "An upload to convert, what its author said about the document, and the\nnumber they gave this version of it.",
         "properties": {
@@ -272,6 +324,33 @@
         "title": "Person",
         "type": "object"
       },
+      "PinnedGuide": {
+        "description": "A guide the user has pinned, as the side navigation names it.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "PinnedGuide",
+        "type": "object"
+      },
       "ReferenceOption": {
         "description": "A reference option as returned on the wire.\n\n`label` is the option's identity: it is what documents store and filters\nmatch on. `short_label` is display-only (e.g. for chips and table columns) and\nis never stored or filtered by; it is omitted from the response when unset.",
         "properties": {
@@ -295,6 +374,27 @@
           "label"
         ],
         "title": "ReferenceOption",
+        "type": "object"
+      },
+      "RemoveOperation": {
+        "additionalProperties": false,
+        "description": "Take out what `path` names.",
+        "properties": {
+          "op": {
+            "const": "remove",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "op"
+        ],
+        "title": "RemoveOperation",
         "type": "object"
       },
       "SignedIn": {
@@ -446,6 +546,31 @@
         "title": "StagedDocumentResponse",
         "type": "object"
       },
+      "TestOperation": {
+        "additionalProperties": false,
+        "description": "Check that `path` still holds `value`, so a patch made on what has changed\nsince applies nothing.",
+        "properties": {
+          "op": {
+            "const": "test",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "required": [
+          "path",
+          "op",
+          "value"
+        ],
+        "title": "TestOperation",
+        "type": "object"
+      },
       "UploadCallbackPayload": {
         "properties": {
           "form": {
@@ -465,7 +590,7 @@
         "type": "object"
       },
       "User": {
-        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin.",
+        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin. With them, the guides they have pinned, in their order, so a page asks\nonce.",
         "properties": {
           "createdAt": {
             "format": "date-time",
@@ -490,13 +615,21 @@
           },
           "identity": {
             "$ref": "#/components/schemas/Identity"
+          },
+          "pinned": {
+            "items": {
+              "$ref": "#/components/schemas/PinnedGuide"
+            },
+            "title": "Pinned",
+            "type": "array"
           }
         },
         "required": [
           "id",
           "identity",
           "displayName",
-          "createdAt"
+          "createdAt",
+          "pinned"
         ],
         "title": "User",
         "type": "object"
@@ -1255,7 +1388,7 @@
     },
     "/users/{user_id}": {
       "get": {
-        "description": "One user, by the hub's id for them.",
+        "description": "One user, by the hub's id for them, with the guides they have pinned.",
         "operationId": "read_user_users__user_id__get",
         "parameters": [
           {
@@ -1297,6 +1430,84 @@
           }
         ],
         "summary": "Read User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/{user_id}/pins": {
+      "patch": {
+        "description": "Change the guides the user has pinned by a JSON Patch (sent as\n`application/json-patch+json`) on their ordered ids:\n`add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level\npositions only. The patch applies whole or not at all.\n\n409 when a `test` fails, as for a page showing pins that have changed since;\n422 for anything else, a guide pinned twice, or a guide there is not.",
+        "operationId": "patch_pins_users__user_id__pins_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "add": "#/components/schemas/AddOperation",
+                      "move": "#/components/schemas/MoveOperation",
+                      "remove": "#/components/schemas/RemoveOperation",
+                      "test": "#/components/schemas/TestOperation"
+                    },
+                    "propertyName": "op"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AddOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RemoveOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MoveOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TestOperation"
+                    }
+                  ]
+                },
+                "title": "Operations",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Pins",
         "tags": [
           "users"
         ]

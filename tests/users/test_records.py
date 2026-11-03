@@ -156,6 +156,33 @@ class TestFindingByTheHubsId:
         assert await records.find(database, uuid.uuid7()) is None
 
 
+class TestPatchingPins:
+    async def test_pins_that_change_under_every_attempt_are_raised(self, database):
+        user, _ = await _sign_in(database, _object_id())
+
+        def patched(read):
+            return [uuid.uuid7(), *read]
+
+        original = records._list_of
+
+        async def always_changed(db, user_id, field):
+            read = await original(db, user_id, field)
+            await db[records.USERS].update_one(
+                {"_id": user_id}, {"$push": {field: uuid.uuid7()}}
+            )
+            return read
+
+        records._list_of = always_changed
+        try:
+            with pytest.raises(records.ListChangingError):
+                await records.patch_pins(database, user.id, patched)
+        finally:
+            records._list_of = original
+
+    async def test_answers_false_for_a_user_there_is_not(self, database):
+        assert not await records.patch_pins(database, uuid.uuid7(), list)
+
+
 class TestIndexes:
     async def test_the_identity_is_unique(self, database):
         indexes = await database[records.USERS].index_information()

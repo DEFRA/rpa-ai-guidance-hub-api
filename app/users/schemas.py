@@ -6,9 +6,11 @@ the OpenAPI document, and spelt in camelCase on the wire; they convert to and fr
 from __future__ import annotations
 
 import datetime as dt
+from typing import Annotated, Literal
 
 import pydantic
 
+from app.guidance import ids as guidance_ids
 from app.users import ids, models
 
 
@@ -28,21 +30,79 @@ class SignedIn(Identity):
     display_name: str | None = pydantic.Field(default=None, alias="displayName")
 
 
+class PinnedGuide(pydantic.BaseModel):
+    """A guide the user has pinned, as the side navigation names it."""
+
+    id: guidance_ids.DocumentId
+    title: str | None
+
+
 class User(pydantic.BaseModel):
     """A user as answered: the hub's own id for them, who they are to the identity
     provider, their name as of their latest sign-in, and when they first signed
-    in."""
+    in. With them, the guides they have pinned, in their order, so a page asks
+    once."""
 
     id: ids.UserId
     identity: Identity
     display_name: str | None = pydantic.Field(alias="displayName")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
+    pinned: list[PinnedGuide]
 
     @classmethod
-    def from_model(cls, user: models.User) -> User:
+    def from_model(
+        cls,
+        user: models.User,
+        pinned: list[tuple[guidance_ids.DocumentId, str | None]],
+    ) -> User:
         return cls(
             id=user.id,
             identity=Identity(tenantId=user.tenant_id, objectId=user.object_id),
             displayName=user.display_name,
             createdAt=user.created_at,
+            pinned=[PinnedGuide(id=pin, title=title) for pin, title in pinned],
         )
+
+
+class _PatchOperation(pydantic.BaseModel):
+    """A JSON Patch operation (RFC 6902) on what its JSON Pointer `path` names."""
+
+    path: str
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+
+class AddOperation(_PatchOperation):
+    """Put `value` at `path`: into a list at a position (`-` is the end), or as a
+    member of an object."""
+
+    op: Literal["add"]
+    value: pydantic.JsonValue
+
+
+class RemoveOperation(_PatchOperation):
+    """Take out what `path` names."""
+
+    op: Literal["remove"]
+
+
+class MoveOperation(_PatchOperation):
+    """Take out what `from` names, then add it at `path`, which is read in the
+    document without it."""
+
+    op: Literal["move"]
+    from_: str = pydantic.Field(alias="from")
+
+
+class TestOperation(_PatchOperation):
+    """Check that `path` still holds `value`, so a patch made on what has changed
+    since applies nothing."""
+
+    op: Literal["test"]
+    value: pydantic.JsonValue
+
+
+PatchOperation = Annotated[
+    AddOperation | RemoveOperation | MoveOperation | TestOperation,
+    pydantic.Field(discriminator="op"),
+]
