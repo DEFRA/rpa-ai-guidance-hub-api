@@ -88,6 +88,8 @@ _NEWEST = [("createdAt", -1)]
 _MATCH = "$match"
 _SORT = "$sort"
 _IN = "$in"
+_GROUP = "$group"
+_OR = "$or"
 
 
 async def ensure_indexes(
@@ -167,10 +169,11 @@ async def count_values(
     """For each of `keys`, how many documents have each value in their metadata,
     given the other keys' filters in `metadata` but not its own, so a filter's
     counts say what choosing another of its values would find. A document with
-    several values counts under each.
+    several values counts once under each, however often it gives one.
 
     For a key in `counting_none`, the documents with none of its values count under
-    None.
+    None. Metadata is stored as sent, so a value that is not words (an object, a
+    number) is not counted, rather than breaking the count of every guide.
     """
     facets = {
         key: [
@@ -181,7 +184,10 @@ async def count_values(
                     "preserveNullAndEmptyArrays": key in counting_none,
                 }
             },
-            {"$group": {"_id": f"${_METADATA}.{key}", "count": {"$sum": 1}}},
+            *_countable(f"{_METADATA}.{key}", none_counts=key in counting_none),
+            # Once for each document and value, then how many documents per value.
+            {_GROUP: {"_id": {"document": "$_id", "value": f"${_METADATA}.{key}"}}},
+            {_GROUP: {"_id": "$_id.value", "count": {"$sum": 1}}},
         ]
         for key in keys
     }
@@ -190,6 +196,13 @@ async def count_values(
     return {
         key: {group["_id"]: group["count"] for group in counted[key]} for key in keys
     }
+
+
+def _countable(field: str, *, none_counts: bool) -> list[dict[str, Any]]:
+    """The stage keeping only values that are words, and, where `none_counts`, the
+    documents with none at all."""
+    words = {field: {"$type": "string"}}
+    return [{_MATCH: {_OR: [words, {field: None}]} if none_counts else words}]
 
 
 _SCHEMES = f"{_METADATA}.schemes"
@@ -242,7 +255,7 @@ def _any_of(key: str, values: Sequence[str | None]) -> dict[str, Any]:
     named = [value for value in values if value is not None]
     if None not in values:
         return {field: {_IN: named}}
-    return {"$or": [{field: {_IN: named}}, {field: {_IN: [[], None]}}]}
+    return {_OR: [{field: {_IN: named}}, {field: {_IN: [[], None]}}]}
 
 
 # What `_updated_at` works out for each document.
@@ -300,7 +313,7 @@ async def _after(
     return [
         {
             _MATCH: {
-                "$or": [
+                _OR: [
                     {_UPDATED_AT: {beyond: updated_at}},
                     {_UPDATED_AT: updated_at, "_id": {beyond: after}},
                 ]
@@ -317,7 +330,7 @@ async def latest_versions_of(
     pipeline: list[dict[str, Any]] = [
         {_MATCH: {DOCUMENT_ID: {_IN: list(document_ids)}}},
         {_SORT: dict(_NEWEST)},
-        {"$group": {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)
     return {

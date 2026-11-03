@@ -373,6 +373,29 @@ class TestCountingEachOption:
             {"label": "Retired Scheme", "shortLabel": None, "count": 1},
         ]
 
+    async def test_a_guide_with_a_value_twice_is_counted_once(self, client, database):
+        await _seed(database, {"systems": ["CRM", "CRM"]})
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert [(o["label"], o["count"]) for o in counts["system"]] == [("CRM", 1)]
+
+    async def test_a_value_stored_as_anything_but_words_is_not_counted(
+        self, client, database
+    ):
+        """Details are stored as sent, so one sent as an object or a number must not
+        break the listing of every guide."""
+        await _seed(database, {"schemes": [{"label": "Basic Payment Scheme"}]})
+        await _seed(database, {"schemes": ["Basic Payment Scheme"], "systems": [7]})
+
+        response = await client.get("/guides")
+
+        assert response.status_code == 200
+        assert response.json()["counts"]["scheme"] == [
+            {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 1}
+        ]
+        assert response.json()["counts"]["system"] == []
+
     async def test_with_no_guides_nothing_is_counted(self, client):
         assert (await client.get("/guides")).json()["counts"] == {
             "scheme": [],
