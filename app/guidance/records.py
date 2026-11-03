@@ -326,6 +326,27 @@ async def _after(
     ]
 
 
+async def find_many(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_ids: Sequence[ids.DocumentId],
+) -> dict[ids.DocumentId, models.Document]:
+    """Those of `document_ids` that are documents, by id, in a single query."""
+    cursor = database[DOCUMENTS].find({"_id": {_IN: list(document_ids)}})
+    return {
+        document["_id"]: models.Document.from_document(document)
+        async for document in cursor
+    }
+
+
+async def existing(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_ids: Sequence[ids.DocumentId],
+) -> set[ids.DocumentId]:
+    """Those of `document_ids` that are documents."""
+    cursor = database[DOCUMENTS].find({"_id": {_IN: list(document_ids)}}, {"_id": 1})
+    return {document["_id"] async for document in cursor}
+
+
 async def latest_versions_of(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],

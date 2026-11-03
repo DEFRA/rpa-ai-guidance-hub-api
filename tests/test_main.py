@@ -21,10 +21,15 @@ def test_lifespan(mocker):
     ensure_indexes = mocker.patch(
         "app.guidance.records.ensure_indexes", mocker.AsyncMock()
     )
+    # And the one that makes a user's identity unique, for the same reason.
+    ensure_user_indexes = mocker.patch(
+        "app.users.records.ensure_indexes", mocker.AsyncMock()
+    )
 
     with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
         mock_get_mongo.assert_called_once()
         ensure_indexes.assert_awaited_once()
+        ensure_user_indexes.assert_awaited_once()
 
     mock_mongo_client.close.assert_awaited_once()
 

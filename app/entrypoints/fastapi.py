@@ -18,6 +18,8 @@ from app.guidance.documents.staging import router as staging_router
 from app.health import router as health_router
 from app.reference import router as reference_router
 from app.review import router as review_router
+from app.users import records as user_records
+from app.users import router as users_router
 
 logger = getLogger(__name__)
 
@@ -32,7 +34,9 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
 
     # Made at startup rather than on the first write, so that whatever races the
     # first two requests is racing an index that already exists.
-    await records.ensure_indexes(await mongo.get_db(client))
+    database = await mongo.get_db(client)
+    await records.ensure_indexes(database)
+    await user_records.ensure_indexes(database)
     yield
     if client:
         await client.close()
@@ -74,6 +78,7 @@ protected_routes.include_router(reference_router.router)
 protected_routes.include_router(review_router.router)
 protected_routes.include_router(guidance_router.router)
 protected_routes.include_router(staging_router.router)
+protected_routes.include_router(users_router.router)
 
 app.include_router(health_router.router)
 app.include_router(staging_router.callback_router)
