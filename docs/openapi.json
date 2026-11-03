@@ -756,7 +756,7 @@
         "type": "object"
       },
       "User": {
-        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin. With them, what the side navigation shows of their own lists, so a page\nasks once: the guides they have pinned, in their order, and how many of the\nguides they opened recently still exist.",
+        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin. With them, the guides they have pinned, in their order, so a page asks\nonce.",
         "properties": {
           "createdAt": {
             "format": "date-time",
@@ -788,10 +788,6 @@
             },
             "title": "Pinned",
             "type": "array"
-          },
-          "recentlyOpenedCount": {
-            "title": "Recentlyopenedcount",
-            "type": "integer"
           }
         },
         "required": [
@@ -799,8 +795,7 @@
           "identity",
           "displayName",
           "createdAt",
-          "pinned",
-          "recentlyOpenedCount"
+          "pinned"
         ],
         "title": "User",
         "type": "object"

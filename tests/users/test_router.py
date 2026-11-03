@@ -540,24 +540,3 @@ class TestTheRecentlyOpenedList:
         response = await client.get(f"/users/{uuid.uuid7()}/recently-opened")
 
         assert response.status_code == 404
-
-
-class TestTheRecentlyOpenedCount:
-    async def test_the_user_carries_how_many_recently_opened_guides_still_exist(
-        self, client, database
-    ):
-        user_id = await _user(client)
-        gone = await _guide(database, "Gone")
-        for guide in (await _guide(database, "One"), await _guide(database, "Two")):
-            await _open(client, user_id, guide)
-        await _open(client, user_id, gone)
-        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
-
-        user = (await client.get(f"/users/{user_id}")).json()
-
-        assert user["recentlyOpenedCount"] == 2
-
-    async def test_a_user_who_has_opened_nothing_has_a_count_of_none(self, client):
-        signed_in = (await client.post("/users", json=_signed_in("o-2"))).json()
-
-        assert signed_in["recentlyOpenedCount"] == 0
