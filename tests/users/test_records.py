@@ -157,27 +157,32 @@ class TestFindingByTheHubsId:
 
 
 class TestPatchingPins:
-    async def test_pins_that_change_under_every_attempt_are_raised(
-        self, database, monkeypatch
-    ):
+    async def test_pins_that_change_under_every_attempt_are_raised(self, database):
+        """This stands in a collection where another change lands between each read
+        and its write, as a second writer's would, so every write finds the pins
+        changed."""
         user, _ = await _sign_in(database, _object_id())
+        real = database[records.USERS]
 
-        def patched(read):
-            return [uuid.uuid7(), *read]
+        class ChangedUnderEveryWrite:
+            writes = 0
 
-        original = records._list_of
+            async def find_one(self, query, projection):
+                return await real.find_one(query, projection)
 
-        async def always_changed(db, user_id, field):
-            read = await original(db, user_id, field)
-            await db[records.USERS].update_one(
-                {"_id": user_id}, {"$push": {field: uuid.uuid7()}}
-            )
-            return read
+            async def update_one(self, query, update):
+                ChangedUnderEveryWrite.writes += 1
+                await real.update_one(
+                    {"_id": query["_id"]}, {"$push": {"pins": uuid.uuid7()}}
+                )
+                return await real.update_one(query, update)
 
-        monkeypatch.setattr(records, "_list_of", always_changed)
+        changing = {records.USERS: ChangedUnderEveryWrite()}
 
         with pytest.raises(records.ListChangingError):
-            await records.patch_pins(database, user.id, patched)
+            await records.patch_pins(changing, user.id, list)
+
+        assert ChangedUnderEveryWrite.writes > 1
 
     async def test_answers_false_for_a_user_there_is_not(self, database):
         assert not await records.patch_pins(database, uuid.uuid7(), list)
