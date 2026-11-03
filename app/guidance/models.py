@@ -11,9 +11,9 @@ auth provider) with no behaviour of their own here.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from typing import Any
 
 from app.guidance import ids
@@ -43,7 +43,7 @@ def details_as_now(details: dict[str, Any]) -> dict[str, Any]:
     return {"schemeYear": FIRST_SCHEME_YEAR, **details}
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Document:
     """What a document is to the people using it, and the upload it came from.
 
@@ -82,7 +82,7 @@ class Document:
         )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Version:
     """One conversion of a document: where its Markdown went, and who made it.
 
@@ -131,7 +131,7 @@ class Version:
         )
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StoredDocument:
     """Where a converted guide went, and what it turned out to be."""
 
@@ -143,7 +143,7 @@ class StoredDocument:
     images: int
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DocumentSummary:
     """A document and its newest version, if it has one."""
 
@@ -151,7 +151,7 @@ class DocumentSummary:
     latest_version: Version | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class OptionCount:
     """One value of a filter, and how many documents have it; with no label, how
     many have none of the filter's values."""
@@ -161,11 +161,11 @@ class OptionCount:
     count: int
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class DocumentPage:
     """One page of documents; `next_cursor` is None on the last. `counts` has, for
     each filter, its values with how many documents have each."""
 
     items: list[DocumentSummary]
     next_cursor: ids.DocumentId | None = None
-    counts: dict[str, list[OptionCount]] = field(default_factory=dict)
+    counts: dict[str, list[OptionCount]] = dataclasses.field(default_factory=dict)
