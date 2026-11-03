@@ -68,6 +68,9 @@ async def patch_pins(
     `add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level
     positions only. The patch applies whole or not at all.
 
+    Positions are as the user's pins are answered, without the guides that no
+    longer exist, which the patch leaves out of the pins it writes.
+
     409 when a `test` fails, as for a page showing pins that have changed since;
     422 for anything else, a guide pinned twice, or a guide there is not.
     """
@@ -75,13 +78,22 @@ async def patch_pins(
         added = pins.guides_added(operations)
     except pins.InvalidPinsError as invalid:
         raise _unprocessable(invalid) from invalid
-    if await guidance_records.count_existing(database, list(added)) != len(added):
+    user = await records.find(database, user_id)
+    if user is None:
+        raise _no_user(user_id)
+    existing_guides = await guidance_records.existing(database, [*user.pins, *added])
+    if not added <= existing_guides:
         missing = "A guide to pin does not exist"
         raise _unprocessable(missing)
+    gone = set(user.pins) - existing_guides
 
     try:
-        found = await records.patch_pins(
-            database, user_id, lambda read: pins.applied(read, operations)
+        patched = await records.patch_pins(
+            database,
+            user_id,
+            lambda read: pins.applied(
+                [pin for pin in read if pin not in gone], operations
+            ),
         )
     except (json_patch.PatchRefusedError, pins.InvalidPinsError) as refused:
         raise _unprocessable(refused) from refused
@@ -89,7 +101,7 @@ async def patch_pins(
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_409_CONFLICT, detail=str(stale)
         ) from stale
-    if not found:
+    if not patched:
         raise _no_user(user_id)
 
 

@@ -338,12 +338,13 @@ async def find_many(
     }
 
 
-async def count_existing(
+async def existing(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],
-) -> int:
-    """How many of `document_ids` are documents."""
-    return await database[DOCUMENTS].count_documents({"_id": {_IN: list(document_ids)}})
+) -> set[ids.DocumentId]:
+    """Those of `document_ids` that are documents."""
+    cursor = database[DOCUMENTS].find({"_id": {_IN: list(document_ids)}}, {"_id": 1})
+    return {document["_id"] async for document in cursor}
 
 
 async def latest_versions_of(

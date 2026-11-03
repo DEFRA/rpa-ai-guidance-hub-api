@@ -274,3 +274,29 @@ class TestPins:
         await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
 
         assert await _pinned_ids(client, user_id) == [str(kept)]
+
+    async def test_a_patch_takes_positions_as_the_user_sees_them_past_a_guide_gone(
+        self, client, database
+    ):
+        user_id = await _user(client)
+        gone, first, second = (
+            await _guide(database, "Gone"),
+            await _guide(database, "First"),
+            await _guide(database, "Second"),
+        )
+        await _patch(
+            client, user_id, *(_add(guide, "/-") for guide in (gone, first, second))
+        )
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
+
+        status = await _patch(
+            client,
+            user_id,
+            {"op": "test", "path": "/0", "value": str(first)},
+            {"op": "remove", "path": "/0"},
+        )
+
+        assert status == 204
+        assert await _pinned_ids(client, user_id) == [str(second)]
+        stored = await database[records.USERS].find_one({"_id": uuid.UUID(user_id)})
+        assert stored["pins"] == [second]
