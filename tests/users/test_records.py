@@ -188,31 +188,36 @@ class TestPatchingPins:
         assert not await records.patch_pins(database, uuid.uuid7(), list)
 
 
+# How far the database's clock may be from the tests', when it stamps a time.
+_CLOCKS_APART = dt.timedelta(seconds=1)
+
+
+def _as_utc(stored: dt.datetime) -> dt.datetime:
+    return stored.replace(tzinfo=dt.UTC)
+
+
 class TestRecordingAGuideAsOpened:
     async def _opened(self, database, user, *guides):
-        start = dt.datetime.now(tz=dt.UTC)
-        for n, guide in enumerate(guides):
-            assert await records.record_opened(
-                database, user.id, guide, start + dt.timedelta(seconds=n)
-            )
+        for guide in guides:
+            assert await records.record_opened(database, user.id, guide)
         found = await records.find(database, user.id)
         return [opened.document_id for opened in found.recently_opened]
 
-    async def test_puts_the_guide_first_with_when_it_was_opened(self, database):
+    async def test_puts_the_guide_first_with_when_the_database_recorded_it(
+        self, database
+    ):
         user, _ = await _sign_in(database, _object_id())
         first, second = uuid.uuid7(), uuid.uuid7()
-        now = dt.datetime.now(tz=dt.UTC).replace(microsecond=0)
+        before = dt.datetime.now(tz=dt.UTC)
 
-        await records.record_opened(database, user.id, first, now)
-        await records.record_opened(
-            database, user.id, second, now + dt.timedelta(seconds=1)
-        )
+        await records.record_opened(database, user.id, first)
+        await records.record_opened(database, user.id, second)
 
+        after = dt.datetime.now(tz=dt.UTC)
         found = await records.find(database, user.id)
         assert [o.document_id for o in found.recently_opened] == [second, first]
-        assert found.recently_opened[0].opened_at.replace(
-            tzinfo=dt.UTC
-        ) == now + dt.timedelta(seconds=1)
+        opened_at = _as_utc(found.recently_opened[0].opened_at)
+        assert before - _CLOCKS_APART <= opened_at <= after + _CLOCKS_APART
 
     async def test_keeps_one_entry_per_guide_moving_a_guide_opened_again_to_the_front(
         self, database
@@ -233,22 +238,31 @@ class TestRecordingAGuideAsOpened:
     ):
         user, _ = await _sign_in(database, _object_id())
         guides = [uuid.uuid7() for _ in range(4)] * 3
-        now = dt.datetime.now(tz=dt.UTC)
 
         await asyncio.gather(
-            *(records.record_opened(database, user.id, g, now) for g in guides)
+            *(records.record_opened(database, user.id, g) for g in guides)
         )
 
         found = await records.find(database, user.id)
         opened = [o.document_id for o in found.recently_opened]
         assert len(opened) == len(set(opened)) == 4
 
-    async def test_answers_false_for_a_user_there_is_not(self, database):
-        now = dt.datetime.now(tz=dt.UTC)
+    async def test_many_opened_at_once_stay_newest_first_whatever_order_they_land(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(8)]
 
-        assert not await records.record_opened(
-            database, uuid.uuid7(), uuid.uuid7(), now
+        await asyncio.gather(
+            *(records.record_opened(database, user.id, g) for g in guides)
         )
+
+        found = await records.find(database, user.id)
+        times = [opened.opened_at for opened in found.recently_opened]
+        assert times == sorted(times, reverse=True)
+
+    async def test_answers_false_for_a_user_there_is_not(self, database):
+        assert not await records.record_opened(database, uuid.uuid7(), uuid.uuid7())
 
     async def test_a_user_who_has_opened_nothing_has_nothing_recently_opened(
         self, database

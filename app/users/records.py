@@ -101,13 +101,14 @@ async def record_opened(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
     document_id: guidance_ids.DocumentId,
-    now: dt.datetime,
 ) -> bool:
     """Put the guide first in the user's recently opened list, with when.
 
     One atomic update of the user's record, so guides opened at once cannot lose
     each other or appear twice: the guide's earlier entry, if any, goes, the guide
-    goes first, and only the newest `RECENTLY_OPENED_KEPT` stay.
+    goes first, and only the newest `RECENTLY_OPENED_KEPT` stay. The time is the
+    database's as it writes, so a request that reaches it late still goes first
+    as the newest, and the list stays newest first.
 
     Returns False if there is no such user.
     """
@@ -115,10 +116,13 @@ async def record_opened(
     kept_others = {
         "$filter": {
             "input": {"$ifNull": [entries, []]},
-            "cond": {"$ne": ["$$this.documentId", document_id]},
+            "cond": {"$ne": [f"$$this.{models.OPENED_GUIDE}", document_id]},
         }
     }
-    opened = models.Opened(document_id=document_id, opened_at=now).to_document()
+    opened = {
+        models.OPENED_GUIDE: {"$literal": document_id},
+        models.OPENED_AT: "$$NOW",
+    }
     result = await database[USERS].update_one(
         {"_id": user_id},
         [
@@ -126,7 +130,7 @@ async def record_opened(
                 "$set": {
                     models.RECENTLY_OPENED: {
                         "$slice": [
-                            {"$concatArrays": [[{"$literal": opened}], kept_others]},
+                            {"$concatArrays": [[opened], kept_others]},
                             RECENTLY_OPENED_KEPT,
                         ]
                     }

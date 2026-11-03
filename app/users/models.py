@@ -21,8 +21,11 @@ OBJECT_ID = f"{IDENTITY}.objectId"
 # The guides the user has pinned, in their own order: the ids alone.
 PINS = "pins"
 
-# The guides the user opened most recently, newest first.
+# The guides the user opened most recently, newest first: each guide's id and
+# when it was opened.
 RECENTLY_OPENED = "recentlyOpened"
+OPENED_GUIDE = "documentId"
+OPENED_AT = "openedAt"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,11 +36,11 @@ class Opened:
     opened_at: dt.datetime
 
     def to_document(self) -> dict[str, Any]:
-        return {"documentId": self.document_id, "openedAt": self.opened_at}
+        return {OPENED_GUIDE: self.document_id, OPENED_AT: self.opened_at}
 
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> Opened:
-        return cls(document_id=document["documentId"], opened_at=document["openedAt"])
+        return cls(document_id=document[OPENED_GUIDE], opened_at=document[OPENED_AT])
 
 
 @dataclasses.dataclass(frozen=True)
