@@ -200,9 +200,13 @@ async def count_values(
 
 def _countable(field: str, *, none_counts: bool) -> list[dict[str, Any]]:
     """The stage keeping only values that are words, and, where `none_counts`, the
-    documents with none at all."""
-    words = {field: {"$type": "string"}}
-    return [{_MATCH: {_OR: [words, {field: None}]} if none_counts else words}]
+    documents with none at all.
+
+    The value's own type, by `$type` in an expression: a query's `$type` would also
+    take a list holding words, which cannot be counted.
+    """
+    types = ["string", "null", "missing"] if none_counts else ["string"]
+    return [{_MATCH: {"$expr": {_IN: [{"$type": f"${field}"}, types]}}}]
 
 
 _SCHEMES = f"{_METADATA}.schemes"

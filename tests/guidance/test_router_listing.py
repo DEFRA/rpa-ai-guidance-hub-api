@@ -415,10 +415,18 @@ class TestCountingEachOption:
     async def test_a_value_stored_as_anything_but_words_is_not_counted(
         self, client, database
     ):
-        """Details are stored as sent, so one sent as an object or a number must not
-        break the listing of every guide."""
+        """Details are stored as sent, so one sent as an object, a number, a list
+        inside the list or nothing must not break the listing of every guide."""
         await _seed(database, {"schemes": [{"label": "Basic Payment Scheme"}]})
         await _seed(database, {"schemes": ["Basic Payment Scheme"], "systems": [7]})
+        await _seed(
+            database,
+            {
+                "schemes": ["Basic Payment Scheme"],
+                "systems": [["CRM"]],
+                "audience": [None],
+            },
+        )
 
         response = await client.get("/guides")
 
@@ -427,11 +435,12 @@ class TestCountingEachOption:
             {
                 "label": "Basic Payment Scheme",
                 "shortLabel": "BPS",
-                "count": 1,
+                "count": 2,
                 "retired": False,
             }
         ]
         assert response.json()["counts"]["system"] == []
+        assert response.json()["counts"]["audience"] == []
 
     async def test_with_no_guides_nothing_is_counted(self, client):
         assert (await client.get("/guides")).json()["counts"] == {
