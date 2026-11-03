@@ -157,7 +157,9 @@ class TestFindingByTheHubsId:
 
 
 class TestPatchingPins:
-    async def test_pins_that_change_under_every_attempt_are_raised(self, database):
+    async def test_pins_that_change_under_every_attempt_are_raised(
+        self, database, monkeypatch
+    ):
         user, _ = await _sign_in(database, _object_id())
 
         def patched(read):
@@ -172,12 +174,10 @@ class TestPatchingPins:
             )
             return read
 
-        records._list_of = always_changed
-        try:
-            with pytest.raises(records.ListChangingError):
-                await records.patch_pins(database, user.id, patched)
-        finally:
-            records._list_of = original
+        monkeypatch.setattr(records, "_list_of", always_changed)
+
+        with pytest.raises(records.ListChangingError):
+            await records.patch_pins(database, user.id, patched)
 
     async def test_answers_false_for_a_user_there_is_not(self, database):
         assert not await records.patch_pins(database, uuid.uuid7(), list)

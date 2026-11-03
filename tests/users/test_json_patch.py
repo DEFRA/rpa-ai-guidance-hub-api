@@ -98,8 +98,10 @@ class TestTesting:
         ],
     )
     def test_a_test_that_finds_another_value_or_none_fails(self, operation):
+        cases, operations = _cases(), PATCH.validate_python([operation])
+
         with pytest.raises(json_patch.PatchTestFailedError):
-            _patched(_cases(), operation)
+            json_patch.applied(cases, operations)
 
     def test_true_is_not_one(self):
         with pytest.raises(json_patch.PatchTestFailedError):
@@ -124,8 +126,10 @@ class TestRefusing:
         ],
     )
     def test_an_operation_that_cannot_apply_is_refused(self, operation):
+        cases, operations = _cases(), PATCH.validate_python([operation])
+
         with pytest.raises(json_patch.PatchRefusedError):
-            _patched(_cases(), operation)
+            json_patch.applied(cases, operations)
 
     def test_an_operation_json_patch_has_but_these_lists_do_not_take_is_refused(self):
         with pytest.raises(pydantic.ValidationError):
