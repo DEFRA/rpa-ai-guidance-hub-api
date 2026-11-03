@@ -32,6 +32,12 @@ class SignedIn(Identity):
     display_name: str | None = pydantic.Field(default=None, alias="displayName")
 
 
+class OpenedGuide(pydantic.BaseModel):
+    """A guide the user has just opened."""
+
+    guide_id: guidance_ids.DocumentId = pydantic.Field(alias="guideId")
+
+
 class PinnedGuide(pydantic.BaseModel):
     """A guide the user has pinned, as the side navigation names it."""
 

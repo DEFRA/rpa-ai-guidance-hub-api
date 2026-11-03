@@ -303,6 +303,40 @@ class TestPins:
         assert stored["pins"] == [second]
 
 
+async def _open(client, user_id: str, guide_id) -> int:
+    response = await client.post(
+        f"/users/{user_id}/recently-opened", json={"guideId": str(guide_id)}
+    )
+    return response.status_code
+
+
+async def _opened_ids(database, user_id: str) -> list[guidance_ids.DocumentId]:
+    user = await records.find(database, uuid.UUID(user_id))
+    return [opened.document_id for opened in user.recently_opened]
+
+
+class TestRecordingAGuideAsOpened:
+    async def test_opening_a_guide_is_recorded_with_nothing_to_answer(
+        self, client, database
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims")
+
+        assert await _open(client, user_id, guide) == 204
+        assert await _opened_ids(database, user_id) == [guide]
+
+    async def test_a_guide_that_does_not_exist_is_refused(self, client, database):
+        user_id = await _user(client)
+
+        assert await _open(client, user_id, guidance_ids.new_document_id()) == 422
+        assert await _opened_ids(database, user_id) == []
+
+    async def test_a_user_there_is_not_is_not_found(self, client, database):
+        guide = await _guide(database, "Anyone's")
+
+        assert await _open(client, str(uuid.uuid7()), guide) == 404
+
+
 async def _listed(client, user_id: str, **filters) -> dict:
     return (await client.get(f"/users/{user_id}/pins", params=filters)).json()
 

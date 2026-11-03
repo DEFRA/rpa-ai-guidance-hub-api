@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 USERS = "users"
 
+# How many guides a user's recently opened list keeps.
+RECENTLY_OPENED_KEPT = 5
+
 
 class VanishedUserError(LookupError):
     """Raised when a user another sign-in made is gone by the time this one looks."""
@@ -92,6 +95,46 @@ async def find(
     """One user by the hub's id."""
     found = await database[USERS].find_one({"_id": user_id})
     return None if found is None else models.User.from_document(found)
+
+
+async def record_opened(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    user_id: ids.UserId,
+    document_id: guidance_ids.DocumentId,
+    now: dt.datetime,
+) -> bool:
+    """Put the guide first in the user's recently opened list, with when.
+
+    One atomic update of the user's record, so guides opened at once cannot lose
+    each other or appear twice: the guide's earlier entry, if any, goes, the guide
+    goes first, and only the newest `RECENTLY_OPENED_KEPT` stay.
+
+    Returns False if there is no such user.
+    """
+    entries = f"${models.RECENTLY_OPENED}"
+    kept_others = {
+        "$filter": {
+            "input": {"$ifNull": [entries, []]},
+            "cond": {"$ne": ["$$this.documentId", document_id]},
+        }
+    }
+    opened = models.Opened(document_id=document_id, opened_at=now).to_document()
+    result = await database[USERS].update_one(
+        {"_id": user_id},
+        [
+            {
+                "$set": {
+                    models.RECENTLY_OPENED: {
+                        "$slice": [
+                            {"$concatArrays": [[{"$literal": opened}], kept_others]},
+                            RECENTLY_OPENED_KEPT,
+                        ]
+                    }
+                }
+            }
+        ],
+    )
+    return result.matched_count == 1
 
 
 # How many times a patch is tried again when the list changes under it.

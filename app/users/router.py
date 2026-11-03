@@ -107,6 +107,27 @@ async def patch_pins(
         raise _no_user(user_id)
 
 
+@router.post(
+    "/{user_id}/recently-opened", status_code=fastapi.status.HTTP_204_NO_CONTENT
+)
+async def record_opened(
+    user_id: ids.UserId, opened: schemas.OpenedGuide, database: Database
+) -> None:
+    """Record that the user has opened a guide: it goes first in their recently
+    opened guides, which keep the newest few, each guide once.
+
+    422 for a guide there is not.
+    """
+    if not await guidance_records.existing(database, [opened.guide_id]):
+        missing = "The guide opened does not exist"
+        raise _unprocessable(missing)
+    recorded = await records.record_opened(
+        database, user_id, opened.guide_id, dt.datetime.now(tz=dt.UTC)
+    )
+    if not recorded:
+        raise _no_user(user_id)
+
+
 @router.get("/{user_id}/pins")
 async def read_pins(
     user_id: ids.UserId,
