@@ -122,3 +122,14 @@ async def pinned_titles(
         return documents[pin].metadata.get("guideTitle")
 
     return [(pin, title(pin)) for pin in user.pins if pin in documents]
+
+
+async def recently_opened_count(
+    database: pymongo.asynchronous.database.AsyncDatabase, user: models.User
+) -> int:
+    """How many of the guides the user opened most recently still exist, for the
+    side navigation."""
+    existing = await guidance_records.existing(
+        database, [opened.document_id for opened in user.recently_opened]
+    )
+    return len(existing)

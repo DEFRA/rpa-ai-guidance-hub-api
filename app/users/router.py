@@ -195,7 +195,8 @@ async def _answered(
     database: pymongo.asynchronous.database.AsyncDatabase, user: models.User
 ) -> schemas.User:
     pinned = await service.pinned_titles(database, user)
-    return schemas.User.from_model(user, pinned)
+    recently_opened = await service.recently_opened_count(database, user)
+    return schemas.User.from_model(user, pinned, recently_opened)
 
 
 def _unprocessable(reason: object) -> fastapi.HTTPException:

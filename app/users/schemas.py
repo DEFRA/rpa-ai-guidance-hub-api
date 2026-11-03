@@ -48,20 +48,23 @@ class PinnedGuide(pydantic.BaseModel):
 class User(pydantic.BaseModel):
     """A user as answered: the hub's own id for them, who they are to the identity
     provider, their name as of their latest sign-in, and when they first signed
-    in. With them, the guides they have pinned, in their order, so a page asks
-    once."""
+    in. With them, what the side navigation shows of their own lists, so a page
+    asks once: the guides they have pinned, in their order, and how many of the
+    guides they opened recently still exist."""
 
     id: ids.UserId
     identity: Identity
     display_name: str | None = pydantic.Field(alias="displayName")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
     pinned: list[PinnedGuide]
+    recently_opened_count: int = pydantic.Field(alias="recentlyOpenedCount")
 
     @classmethod
     def from_model(
         cls,
         user: models.User,
         pinned: list[tuple[guidance_ids.DocumentId, str | None]],
+        recently_opened_count: int,
     ) -> User:
         return cls(
             id=user.id,
@@ -69,6 +72,7 @@ class User(pydantic.BaseModel):
             displayName=user.display_name,
             createdAt=user.created_at,
             pinned=[PinnedGuide(id=pin, title=title) for pin, title in pinned],
+            recentlyOpenedCount=recently_opened_count,
         )
 
 
