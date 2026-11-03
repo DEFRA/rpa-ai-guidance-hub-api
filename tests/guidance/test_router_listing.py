@@ -74,7 +74,7 @@ class TestReadingADocument:
         body = response.json()
         assert response.status_code == 200
         assert body["id"] == str(document_id)
-        assert body["metadata"] == {"guideTitle": "One"}
+        assert body["metadata"] == {"schemeYear": 2026, "guideTitle": "One"}
         assert [v["id"] for v in body["versions"]] == [str(version.id)]
         assert body["versions"][0]["createdAt"] is not None
 
@@ -91,6 +91,30 @@ class TestReadingADocument:
             str(oldest.id),
         ]
 
+    async def test_it_carries_when_the_document_was_created(self, client, database):
+        document_id, _ = await _seed(database)
+        stored = await database[records.DOCUMENTS].find_one({"_id": document_id})
+
+        body = (await client.get(f"/guides/{document_id}")).json()
+
+        # As stored: Mongo answers times without their zone, and so does the API.
+        assert dt.datetime.fromisoformat(body["createdAt"]) == stored["createdAt"]
+
+    async def test_each_version_answers_its_number_and_none_from_before_numbers(
+        self, client, database
+    ):
+        document_id, (older, newer) = await _seed(database, versions=2)
+        await database[records.VERSIONS].update_one(
+            {"_id": newer.id}, {"$set": {"versionNumber": "2.0"}}
+        )
+        await database[records.VERSIONS].update_one(
+            {"_id": older.id}, {"$unset": {"versionNumber": ""}}
+        )
+
+        body = (await client.get(f"/guides/{document_id}")).json()
+
+        assert [v["versionNumber"] for v in body["versions"]] == ["2.0", None]
+
     async def test_an_unknown_id_is_not_found(self, client):
         response = await client.get(f"/guides/{ids.new_document_id()}")
 
@@ -103,7 +127,8 @@ class TestListingDocuments:
         response = await client.get("/guides")
 
         assert response.status_code == 200
-        assert response.json() == {"items": [], "nextCursor": None}
+        assert response.json()["items"] == []
+        assert response.json()["nextCursor"] is None
 
     async def test_each_item_carries_its_newest_version(self, client, database):
         document_id, (_, newest) = await _seed(database, versions=2)
@@ -113,6 +138,17 @@ class TestListingDocuments:
         (item,) = response.json()["items"]
         assert item["id"] == str(document_id)
         assert item["latestVersion"]["id"] == str(newest.id)
+
+    async def test_each_item_carries_when_its_document_was_created(
+        self, client, database
+    ):
+        document_id, _ = await _seed(database)
+        stored = await database[records.DOCUMENTS].find_one({"_id": document_id})
+
+        (item,) = (await client.get("/guides")).json()["items"]
+
+        # As stored: Mongo answers times without their zone, and so does the API.
+        assert dt.datetime.fromisoformat(item["createdAt"]) == stored["createdAt"]
 
     async def test_a_document_without_versions_is_listed_with_no_latest_version(
         self, client, database
@@ -181,6 +217,170 @@ class TestListingDocuments:
         assert response.status_code == 422
 
 
+async def _add_version(database, document_id) -> None:
+    """A newer version of a document, made now."""
+    await records.create_version(
+        database,
+        models.Version(
+            id=ids.new_version_id(),
+            document_id=document_id,
+            content_url=f"s3://docs/{document_id}/later/content.md",
+            title="Later",
+            created_at=dt.datetime.now(tz=dt.UTC) + dt.timedelta(minutes=1),
+        ),
+    )
+
+
+class TestSortingDocuments:
+    async def test_the_default_order_is_by_when_each_last_changed_newest_first(
+        self, client, database
+    ):
+        changed_later, _ = await _seed(database)
+        changed_earlier, _ = await _seed(database)
+        await _add_version(database, changed_later)
+
+        items = (await client.get("/guides")).json()["items"]
+
+        assert [i["id"] for i in items] == [str(changed_later), str(changed_earlier)]
+
+    async def test_updated_oldest_puts_the_one_that_changed_longest_ago_first(
+        self, client, database
+    ):
+        changed_later, _ = await _seed(database)
+        changed_earlier, _ = await _seed(database)
+        await _add_version(database, changed_later)
+
+        response = await client.get("/guides", params={"sort": "updated-oldest"})
+
+        assert [i["id"] for i in response.json()["items"]] == [
+            str(changed_earlier),
+            str(changed_later),
+        ]
+
+    async def test_a_cursor_that_is_not_a_document_is_refused(self, client):
+        response = await client.get(
+            "/guides", params={"cursor": str(ids.new_document_id())}
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_sort_that_is_not_offered_is_refused(self, client):
+        response = await client.get("/guides", params={"sort": "title"})
+
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize("sort", ["updated-newest", "updated-oldest"])
+    async def test_pages_follow_the_order_to_the_last(self, client, database, sort):
+        seeded = [(await _seed(database))[0] for _ in range(3)]
+        await _add_version(database, seeded[0])
+        everything = [
+            i["id"]
+            for i in (await client.get("/guides", params={"sort": sort})).json()[
+                "items"
+            ]
+        ]
+
+        first = (await client.get("/guides", params={"sort": sort, "limit": 2})).json()
+        second = (
+            await client.get(
+                "/guides",
+                params={"sort": sort, "limit": 2, "cursor": first["nextCursor"]},
+            )
+        ).json()
+
+        assert [i["id"] for i in first["items"] + second["items"]] == everything
+        assert second["nextCursor"] is None
+
+
+class TestCountingEachOption:
+    async def test_each_filter_counts_the_values_the_guides_have_in_the_reference_datas_order(
+        self, client, database
+    ):
+        await _seed(
+            database,
+            {
+                "schemes": ["Basic Payment Scheme"],
+                "systems": ["CRM"],
+                "audience": ["Caseworker"],
+            },
+        )
+        await _seed(
+            database,
+            {
+                "schemes": ["Basic Payment Scheme", "Countryside Stewardship"],
+                "systems": ["Siti Agri"],
+            },
+        )
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert counts == {
+            "scheme": [
+                {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 2},
+                {"label": "Countryside Stewardship", "shortLabel": None, "count": 1},
+            ],
+            "system": [
+                {"label": "Siti Agri", "shortLabel": None, "count": 1},
+                {"label": "CRM", "shortLabel": None, "count": 1},
+            ],
+            "audience": [{"label": "Caseworker", "shortLabel": None, "count": 1}],
+        }
+
+    async def test_a_filters_counts_are_given_the_other_filters_chosen(
+        self, client, database
+    ):
+        await _seed(database, {"schemes": ["Basic Payment Scheme"], "systems": ["CRM"]})
+        await _seed(
+            database, {"schemes": ["Countryside Stewardship"], "systems": ["Siti Agri"]}
+        )
+
+        counts = (await client.get("/guides", params={"system": "CRM"})).json()[
+            "counts"
+        ]
+
+        assert [(o["label"], o["count"]) for o in counts["scheme"]] == [
+            ("Basic Payment Scheme", 1)
+        ]
+        assert [(o["label"], o["count"]) for o in counts["system"]] == [
+            ("Siti Agri", 1),
+            ("CRM", 1),
+        ]
+
+    async def test_a_chosen_value_no_guide_has_is_counted_at_nothing(
+        self, client, database
+    ):
+        await _seed(database, {"audience": ["Caseworker"]})
+
+        body = (await client.get("/guides", params={"audience": "Customer"})).json()
+
+        assert body["items"] == []
+        assert [(o["label"], o["count"]) for o in body["counts"]["audience"]] == [
+            ("Caseworker", 1),
+            ("Customer", 0),
+        ]
+
+    async def test_a_value_the_reference_data_no_longer_has_comes_after_those_it_has(
+        self, client, database
+    ):
+        await _seed(
+            database, {"schemes": ["Retired Scheme", "Countryside Stewardship"]}
+        )
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert counts["scheme"] == [
+            {"label": "Countryside Stewardship", "shortLabel": None, "count": 1},
+            {"label": "Retired Scheme", "shortLabel": None, "count": 1},
+        ]
+
+    async def test_with_no_guides_nothing_is_counted(self, client):
+        assert (await client.get("/guides")).json()["counts"] == {
+            "scheme": [],
+            "system": [],
+            "audience": [],
+        }
+
+
 BUCKET = "rpa-ai-guidance-hub-managed-docs"
 PICTURE = "a3f9c1.png"
 
@@ -243,3 +443,69 @@ class TestReadingAnAsset:
         response = await client.get(f"/guides/{document_id}/assets/{name}")
 
         assert response.status_code == 404
+
+
+class TestGuidesWithNoScheme:
+    async def test_are_counted_as_an_entry_of_their_own_after_the_schemes(
+        self, client, database
+    ):
+        await _seed(database, {"schemes": ["Basic Payment Scheme"]})
+        await _seed(database, {"schemes": []})
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert counts["scheme"] == [
+            {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 1},
+            {"label": None, "shortLabel": None, "count": 1},
+        ]
+
+    async def test_are_chosen_by_no_scheme_alone_or_beside_schemes(
+        self, client, database
+    ):
+        bps, _ = await _seed(database, {"schemes": ["Basic Payment Scheme"]})
+        await _seed(database, {"schemes": ["Countryside Stewardship"]})
+        none, _ = await _seed(database, {"schemes": []})
+
+        alone = await client.get("/guides", params={"no_scheme": "true"})
+        beside = await client.get(
+            "/guides", params={"no_scheme": "true", "scheme": "Basic Payment Scheme"}
+        )
+
+        assert [i["id"] for i in alone.json()["items"]] == [str(none)]
+        assert [i["id"] for i in beside.json()["items"]] == [str(none), str(bps)]
+        assert (None, 1) in [
+            (o["label"], o["count"]) for o in alone.json()["counts"]["scheme"]
+        ]
+
+    async def test_include_those_stored_with_the_words_not_scheme_specific(
+        self, client, database
+    ):
+        stored, _ = await _seed(database, {"schemes": ["Not scheme-specific"]})
+
+        body = (await client.get("/guides", params={"no_scheme": "true"})).json()
+        read = (await client.get(f"/guides/{stored}")).json()
+
+        assert [i["id"] for i in body["items"]] == [str(stored)]
+        assert [i["metadata"]["schemes"] for i in body["items"]] == [[]]
+        assert read["metadata"]["schemes"] == []
+        assert body["counts"]["scheme"] == [
+            {"label": None, "shortLabel": None, "count": 1}
+        ]
+
+
+class TestTheSchemeYear:
+    async def test_is_kept_with_the_other_details(self, client, database):
+        given, _ = await _seed(database, {"guideTitle": "Given", "schemeYear": 2026})
+
+        read = (await client.get(f"/guides/{given}")).json()
+
+        assert read["metadata"] == {"guideTitle": "Given", "schemeYear": 2026}
+
+    async def test_is_2026_for_a_guide_stored_without_one(self, client, database):
+        since, _ = await _seed(database, {"guideTitle": "Since"})
+
+        items = (await client.get("/guides")).json()["items"]
+
+        assert {i["id"]: i["metadata"]["schemeYear"] for i in items} == {
+            str(since): 2026
+        }

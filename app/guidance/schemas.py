@@ -8,11 +8,34 @@ convert to and from them, and know nothing of how anything is stored.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Annotated, Any
 
 import pydantic
 
 from app.guidance import ids, models
+
+# The digits a version number is written in: ASCII only, where `str.isdigit` would
+# also take superscripts and other scripts' digits.
+_DIGITS = frozenset("0123456789")
+
+
+def _is_whole_number(text: str) -> bool:
+    return text != "" and set(text) <= _DIGITS
+
+
+def _major_minor(number: str) -> str:
+    """Refuse anything but two whole numbers with a full stop between them, as
+    SharePoint numbers a version of a Word document: `1.0`, `12.3`."""
+    major, stop, minor = number.partition(".")
+    if not (stop and _is_whole_number(major) and _is_whole_number(minor)):
+        message = (
+            "must be two whole numbers with a full stop between them, for example 1.0"
+        )
+        raise ValueError(message)
+    return number
+
+
+VersionNumber = Annotated[str, pydantic.AfterValidator(_major_minor)]
 
 
 class Source(pydantic.BaseModel):
@@ -43,10 +66,15 @@ class Person(pydantic.BaseModel):
 
 
 class NewDocument(pydantic.BaseModel):
-    """An upload to convert, and what its author said about the document."""
+    """An upload to convert, what its author said about the document, and the
+    number they gave this version of it."""
 
     source: Source
     metadata: dict[str, Any]
+    version_number: VersionNumber = pydantic.Field(
+        alias="versionNumber",
+        description="Two whole numbers with a full stop between them, such as 1.0",
+    )
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
 
     def document_for(
@@ -71,6 +99,7 @@ class NewDocument(pydantic.BaseModel):
             document_id=stored.document_id,
             content_url=stored.content,
             title=stored.title,
+            version_number=self.version_number,
             created_by_id=self.created_by.id if self.created_by else None,
             created_by_display_name=(
                 self.created_by.display_name if self.created_by else None
@@ -87,12 +116,15 @@ class Version(pydantic.BaseModel):
     second field pointing at them would be free to disagree with the file.
 
     The title is a copy of what the stored document called itself when this version
-    was made, so that a list of versions reads as something a person can follow.
+    was made, so that a list of versions reads as something a person can follow. The
+    version number is the author's, and null for a version stored before versions
+    had one.
     """
 
     id: ids.VersionId
     content_url: str = pydantic.Field(alias="contentUrl")
     title: str | None = None
+    version_number: str | None = pydantic.Field(default=None, alias="versionNumber")
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
 
@@ -110,19 +142,24 @@ class Version(pydantic.BaseModel):
             id=version.id,
             contentUrl=version.content_url,
             title=version.title,
+            versionNumber=version.version_number,
             createdBy=created_by,
             createdAt=version.created_at,
         )
 
 
 class Document(pydantic.BaseModel):
-    """A document as it is answered: what it is, where it came from, and every
-    version of it there has been.
+    """A document as it is answered: what it is, where it came from, when it was
+    recorded, and every version of it there has been.
+
+    `createdAt` is when the document was recorded, which is when its first version
+    was: the moment it went live, since every upload does.
     """
 
     id: ids.DocumentId
     metadata: dict[str, Any]
     source: Source
+    created_at: dt.datetime = pydantic.Field(alias="createdAt")
     versions: list[Version]
 
     @classmethod
@@ -131,22 +168,25 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=models.details_as_now(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
                 filename=document.filename,
             ),
+            createdAt=document.created_at,
             versions=[Version.from_model(version) for version in versions],
         )
 
 
 class DocumentSummary(pydantic.BaseModel):
-    """A document as listed, with its newest version."""
+    """A document as listed, with its newest version, and when the document was
+    recorded (as for `Document`)."""
 
     id: ids.DocumentId
     metadata: dict[str, Any]
     source: Source
+    created_at: dt.datetime = pydantic.Field(alias="createdAt")
     latest_version: Version | None = pydantic.Field(alias="latestVersion")
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
@@ -157,21 +197,54 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=document.metadata,
+            metadata=models.details_as_now(document.metadata),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
                 filename=document.filename,
             ),
+            createdAt=document.created_at,
             latestVersion=None if latest is None else Version.from_model(latest),
         )
 
 
+class OptionCount(pydantic.BaseModel):
+    """One value of a filter, labelled as the reference data labels it, and how many
+    of the guides have it given the other filters chosen."""
+
+    label: str | None = pydantic.Field(
+        description="Null for the guides with none of the filter's values"
+    )
+    short_label: str | None = pydantic.Field(alias="shortLabel")
+    count: int
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    @classmethod
+    def from_model(cls, option: models.OptionCount) -> OptionCount:
+        return cls(
+            label=option.label, shortLabel=option.short_label, count=option.count
+        )
+
+
+def counts_from_model(
+    counts: dict[str, list[models.OptionCount]],
+) -> dict[str, list[OptionCount]]:
+    """Each filter's values with their counts, by the filter's name."""
+    return {
+        name: [OptionCount.from_model(option) for option in options]
+        for name, options in counts.items()
+    }
+
+
 class DocumentPage(pydantic.BaseModel):
-    """One page of documents; `nextCursor` is null on the last."""
+    """One page of documents; `nextCursor` is null on the last. `counts` has, for
+    each filter by its name (`scheme`, `system`, `audience`), the values the guides
+    have, each with how many, so a page can offer the filters from this one call."""
 
     items: list[DocumentSummary]
     next_cursor: ids.DocumentId | None = pydantic.Field(alias="nextCursor")
+    counts: dict[str, list[OptionCount]]
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
@@ -180,4 +253,5 @@ class DocumentPage(pydantic.BaseModel):
         return cls(
             items=[DocumentSummary.from_model(item) for item in page.items],
             nextCursor=page.next_cursor,
+            counts=counts_from_model(page.counts),
         )

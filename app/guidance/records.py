@@ -52,7 +52,7 @@ rather than another one.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pymongo.errors
@@ -83,6 +83,11 @@ class MisfiledVersionError(RuntimeError):
 # Newest first, by when a version was made. A version id is time-ordered too, but
 # `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
+
+# The aggregation stages the queries below use more than once.
+_MATCH = "$match"
+_SORT = "$sort"
+_IN = "$in"
 
 
 async def ensure_indexes(
@@ -116,26 +121,192 @@ async def find(
     return None if found is None else models.Document.from_document(found)
 
 
-async def list_documents(
+class UnknownCursorError(LookupError):
+    """Raised when a page is asked for after a document that is not there."""
+
+
+async def list_documents(  # noqa: PLR0913 - each is a separate part of the query
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
-    metadata: Mapping[str, Sequence[str]],
+    metadata: Mapping[str, Sequence[str | None]],
     after: ids.DocumentId | None,
     limit: int,
+    newest_first: bool = True,
 ) -> list[models.Document]:
-    """Up to `limit` documents, newest first, older than `after` if given.
+    """Up to `limit` documents, in order of when each last changed, after `after`.
 
-    A document matches when, for every metadata key, at least one of its values is
-    among those asked for. Ids are time-ordered, so `_id` is order and cursor both.
+    A document last changed when its newest version was made (or, with none, when
+    it was recorded). It matches when, for every metadata key, at least one of its
+    values is among those asked for. The cursor is the last document of the page
+    before: the page goes on from where that document stands in the order now, ties
+    broken by id, so the cursor stays a document id.
+
+    Raises:
+        UnknownCursorError: if `after` is not a document.
     """
-    query: dict[str, Any] = {
-        f"{_METADATA}.{key}": {"$in": list(values)} for key, values in metadata.items()
-    }
-    if after is not None:
-        query["_id"] = {"$lt": after}
-
-    cursor = database[DOCUMENTS].find(query).sort("_id", -1).limit(limit)
+    direction = -1 if newest_first else 1
+    pipeline: list[dict[str, Any]] = [
+        *_as_now(),
+        *_matching(metadata),
+        *_updated_at(),
+        *await _after(database, after, direction),
+        {_SORT: {_UPDATED_AT: direction, "_id": direction}},
+        {"$limit": limit},
+    ]
+    cursor = await database[DOCUMENTS].aggregate(pipeline)
     return [models.Document.from_document(document) async for document in cursor]
+
+
+async def count_values(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    *,
+    metadata: Mapping[str, Sequence[str | None]],
+    keys: Sequence[str],
+    counting_none: Collection[str] = (),
+) -> dict[str, dict[str | None, int]]:
+    """For each of `keys`, how many documents have each value in their metadata,
+    given the other keys' filters in `metadata` but not its own, so a filter's
+    counts say what choosing another of its values would find. A document with
+    several values counts under each.
+
+    For a key in `counting_none`, the documents with none of its values count under
+    None.
+    """
+    facets = {
+        key: [
+            *_matching({k: v for k, v in metadata.items() if k != key}),
+            {
+                "$unwind": {
+                    "path": f"${_METADATA}.{key}",
+                    "preserveNullAndEmptyArrays": key in counting_none,
+                }
+            },
+            {"$group": {"_id": f"${_METADATA}.{key}", "count": {"$sum": 1}}},
+        ]
+        for key in keys
+    }
+    cursor = await database[DOCUMENTS].aggregate([*_as_now(), {"$facet": facets}])
+    (counted,) = [result async for result in cursor]
+    return {
+        key: {group["_id"]: group["count"] for group in counted[key]} for key in keys
+    }
+
+
+_SCHEMES = f"{_METADATA}.schemes"
+
+
+def _as_now() -> list[dict[str, Any]]:
+    """The stage reading each document's metadata as now
+    (`models.details_as_now`): a guide stored as "Not scheme-specific" has no
+    scheme.
+
+    The match after it works on what this works out, so it cannot use the
+    metadata indexes.
+    """
+    return [
+        {
+            "$set": {
+                _SCHEMES: {
+                    "$cond": [
+                        {"$isArray": f"${_SCHEMES}"},
+                        {
+                            "$filter": {
+                                "input": f"${_SCHEMES}",
+                                "cond": {"$ne": ["$$this", models.NOT_SCHEME_SPECIFIC]},
+                            }
+                        },
+                        f"${_SCHEMES}",
+                    ]
+                }
+            }
+        }
+    ]
+
+
+def _matching(metadata: Mapping[str, Sequence[str | None]]) -> list[dict[str, Any]]:
+    """The stage keeping only documents whose metadata match: none for no filter.
+
+    A key matches when the document has any of its values; None among them is a
+    document with none of the key's values at all, an empty list or none given.
+    """
+    if not metadata:
+        return []
+    return [
+        {_MATCH: {"$and": [_any_of(key, values) for key, values in metadata.items()]}}
+    ]
+
+
+def _any_of(key: str, values: Sequence[str | None]) -> dict[str, Any]:
+    """The condition that the document has any of `values` for `key`."""
+    field = f"{_METADATA}.{key}"
+    named = [value for value in values if value is not None]
+    if None not in values:
+        return {field: {_IN: named}}
+    return {"$or": [{field: {_IN: named}}, {field: {_IN: [[], None]}}]}
+
+
+# What `_updated_at` works out for each document.
+_UPDATED_AT = "updatedAt"
+
+
+def _updated_at() -> list[dict[str, Any]]:
+    """The stages working out when each document last changed: when its newest
+    version was made, or, with none, when it was recorded."""
+    return [
+        {
+            "$lookup": {
+                "from": VERSIONS,
+                "localField": "_id",
+                "foreignField": DOCUMENT_ID,
+                "pipeline": [
+                    {_SORT: dict(_NEWEST)},
+                    {"$limit": 1},
+                    {"$project": {"createdAt": 1}},
+                ],
+                "as": "newest",
+            }
+        },
+        {
+            "$set": {
+                _UPDATED_AT: {
+                    "$ifNull": [{"$first": "$newest.createdAt"}, "$createdAt"]
+                },
+            }
+        },
+    ]
+
+
+async def _after(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    after: ids.DocumentId | None,
+    direction: int,
+) -> list[dict[str, Any]]:
+    """The stage going on after `after`, where it stands in the order now."""
+    if after is None:
+        return []
+
+    found = [
+        document
+        async for document in await database[DOCUMENTS].aggregate(
+            [{_MATCH: {"_id": after}}, *_updated_at()]
+        )
+    ]
+    if not found:
+        message = f"No document {after} to go on from"
+        raise UnknownCursorError(message)
+
+    beyond = "$lt" if direction < 0 else "$gt"
+    updated_at = found[0][_UPDATED_AT]
+    return [
+        {
+            _MATCH: {
+                "$or": [
+                    {_UPDATED_AT: {beyond: updated_at}},
+                    {_UPDATED_AT: updated_at, "_id": {beyond: after}},
+                ]
+            }
+        }
+    ]
 
 
 async def latest_versions_of(
@@ -144,8 +315,8 @@ async def latest_versions_of(
 ) -> dict[ids.DocumentId, models.Version]:
     """The newest version of each of `document_ids` that has one, in a single query."""
     pipeline: list[dict[str, Any]] = [
-        {"$match": {DOCUMENT_ID: {"$in": list(document_ids)}}},
-        {"$sort": dict(_NEWEST)},
+        {_MATCH: {DOCUMENT_ID: {_IN: list(document_ids)}}},
+        {_SORT: dict(_NEWEST)},
         {"$group": {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)

@@ -58,6 +58,7 @@ def _request(**overrides: Any) -> dict[str, Any]:
             "filename": "CS Revenue Claims.docx",
         },
         "metadata": METADATA,
+        "versionNumber": "1.0",
         "createdBy": AUTHOR,
     }
     body.update(overrides)
@@ -274,6 +275,47 @@ class TestCreatingADocument:
         assert record["metadata"] == METADATA
         assert record["source"]["uploadId"] == UPLOAD
         assert "createdAt" in record
+
+    def test_the_version_number_the_author_gave_is_recorded_and_answered(
+        self, client, versions
+    ):
+        """On the version, beside the guide's details rather than inside them,
+        because the hub reads it."""
+        body = client.post("/guides", json=_request(versionNumber="12.3")).json()
+
+        assert versions.documents[0]["versionNumber"] == "12.3"
+        assert body["versions"][0]["versionNumber"] == "12.3"
+        assert "versionNumber" not in body["metadata"]
+
+    def test_a_document_without_a_version_number_is_refused(self, client, documents):
+        request = _request()
+        del request["versionNumber"]
+
+        response = client.post("/guides", json=request)
+
+        assert response.status_code == 422
+        assert documents.documents == []
+
+    @pytest.mark.parametrize(
+        "number",
+        ["", "1", "1.", ".1", "1.0.0", "a.b", "1.x", " 1.0", "1.0 ", "1,0", "-1.0"]
+        + ["+1.0", "1 .0", "\u0661.\u0660", "\u00b2.0", "1.\u00bd"],
+    )
+    def test_a_version_number_that_is_not_two_whole_numbers_is_refused(
+        self, client, documents, number
+    ):
+        response = client.post("/guides", json=_request(versionNumber=number))
+
+        assert response.status_code == 422
+        assert documents.documents == []
+
+    @pytest.mark.parametrize("number", ["1.0", "0.1", "12.3", "2024.10"])
+    def test_two_whole_numbers_with_a_full_stop_between_are_accepted(
+        self, client, number
+    ):
+        response = client.post("/guides", json=_request(versionNumber=number))
+
+        assert response.status_code == 201
 
     def test_where_the_content_went_is_recorded_against_the_version(
         self, client, versions
@@ -544,7 +586,7 @@ class TestReadingADocumentBack:
         response = client.get(f"/guides/{DOCUMENT}")
 
         assert response.status_code == 200
-        assert response.json()["metadata"] == METADATA
+        assert response.json()["metadata"] == {"schemeYear": 2026, **METADATA}
         assert [version["id"] for version in response.json()["versions"]] == [
             str(VERSION)
         ]

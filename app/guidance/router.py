@@ -27,7 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import mimetypes
 from logging import getLogger
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import fastapi
 from fastapi.concurrency import run_in_threadpool
@@ -148,31 +148,39 @@ async def list_documents(
     system: Annotated[list[str] | None, fastapi.Query()] = None,
     audience: Annotated[list[str] | None, fastapi.Query()] = None,
     guidance_type: Annotated[list[str] | None, fastapi.Query()] = None,
+    no_scheme: Annotated[
+        bool, fastapi.Query(description="The guides specific to no scheme too")
+    ] = False,
+    sort: Annotated[
+        Literal["updated-newest", "updated-oldest"],
+        fastapi.Query(description="By when each guide last changed"),
+    ] = "updated-newest",
 ) -> schemas.DocumentPage:
-    """The documents there are, newest first, a page at a time.
+    """The documents there are, a page at a time, in order of when each last
+    changed, with each filter's values and how many guides have each.
 
-    Filters take values from the reference data and can be repeated. Follow
+    Filters take values from the reference data and can be repeated. `no_scheme`
+    chooses the guides specific to no scheme, beside any `scheme`s chosen. Follow
     `nextCursor` for the next page; it is null on the last.
     """
-    filters = {
-        name: values
-        for name, values in {
+    filters = service.chosen_filters(
+        {
             "scheme": scheme,
             "system": system,
             "audience": audience,
             "guidance_type": guidance_type,
-        }.items()
-        if values
-    }
+        },
+        no_scheme=no_scheme,
+    )
     try:
         page = await service.list_page(
-            database, filters=filters, after=cursor, limit=limit
+            database, filters=filters, after=cursor, limit=limit, sort=sort
         )
-    except service.UnknownFilterValueError as unknown:
+    except (service.UnknownFilterValueError, records.UnknownCursorError) as refused:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(unknown),
-        ) from unknown
+            detail=str(refused),
+        ) from refused
 
     return schemas.DocumentPage.from_model(page)
 

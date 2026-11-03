@@ -2,8 +2,13 @@
   "components": {
     "schemas": {
       "Document": {
-        "description": "A document as it is answered: what it is, where it came from, and every\nversion of it there has been.",
+        "description": "A document as it is answered: what it is, where it came from, when it was\nrecorded, and every version of it there has been.\n\n`createdAt` is when the document was recorded, which is when its first version\nwas: the moment it went live, since every upload does.",
         "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -29,14 +34,25 @@
           "id",
           "metadata",
           "source",
+          "createdAt",
           "versions"
         ],
         "title": "Document",
         "type": "object"
       },
       "DocumentPage": {
-        "description": "One page of documents; `nextCursor` is null on the last.",
+        "description": "One page of documents; `nextCursor` is null on the last. `counts` has, for\neach filter by its name (`scheme`, `system`, `audience`), the values the guides\nhave, each with how many, so a page can offer the filters from this one call.",
         "properties": {
+          "counts": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/OptionCount"
+              },
+              "type": "array"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/DocumentSummary"
@@ -59,14 +75,20 @@
         },
         "required": [
           "items",
-          "nextCursor"
+          "nextCursor",
+          "counts"
         ],
         "title": "DocumentPage",
         "type": "object"
       },
       "DocumentSummary": {
-        "description": "A document as listed, with its newest version.",
+        "description": "A document as listed, with its newest version, and when the document was\nrecorded (as for `Document`).",
         "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -95,6 +117,7 @@
           "id",
           "metadata",
           "source",
+          "createdAt",
           "latestVersion"
         ],
         "title": "DocumentSummary",
@@ -114,7 +137,7 @@
         "type": "object"
       },
       "NewDocument": {
-        "description": "An upload to convert, and what its author said about the document.",
+        "description": "An upload to convert, what its author said about the document, and the\nnumber they gave this version of it.",
         "properties": {
           "createdBy": {
             "anyOf": [
@@ -133,13 +156,58 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source"
+          },
+          "versionNumber": {
+            "description": "Two whole numbers with a full stop between them, such as 1.0",
+            "title": "Versionnumber",
+            "type": "string"
           }
         },
         "required": [
           "source",
-          "metadata"
+          "metadata",
+          "versionNumber"
         ],
         "title": "NewDocument",
+        "type": "object"
+      },
+      "OptionCount": {
+        "description": "One value of a filter, labelled as the reference data labels it, and how many\nof the guides have it given the other filters chosen.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for the guides with none of the filter's values",
+            "title": "Label"
+          },
+          "shortLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortlabel"
+          }
+        },
+        "required": [
+          "label",
+          "shortLabel",
+          "count"
+        ],
+        "title": "OptionCount",
         "type": "object"
       },
       "ParsingStatus": {
@@ -378,7 +446,7 @@
         "type": "object"
       },
       "Version": {
-        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is a copy of what the stored document called itself when this version\nwas made, so that a list of versions reads as something a person can follow.",
+        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is a copy of what the stored document called itself when this version\nwas made, so that a list of versions reads as something a person can follow. The\nversion number is the author's, and null for a version stored before versions\nhad one.",
         "properties": {
           "contentUrl": {
             "title": "Contenturl",
@@ -414,6 +482,17 @@
               }
             ],
             "title": "Title"
+          },
+          "versionNumber": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionnumber"
           }
         },
         "required": [
@@ -440,7 +519,7 @@
   "paths": {
     "/guides": {
       "get": {
-        "description": "The documents there are, newest first, a page at a time.\n\nFilters take values from the reference data and can be repeated. Follow\n`nextCursor` for the next page; it is null on the last.",
+        "description": "The documents there are, a page at a time, in order of when each last\nchanged, with each filter's values and how many guides have each.\n\nFilters take values from the reference data and can be repeated. `no_scheme`\nchooses the guides specific to no scheme, beside any `scheme`s chosen. Follow\n`nextCursor` for the next page; it is null on the last.",
         "operationId": "list_documents_guides_get",
         "parameters": [
           {
@@ -548,6 +627,34 @@
                 }
               ],
               "title": "Guidance Type"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "By when each guide last changed",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated-newest",
+              "description": "By when each guide last changed",
+              "enum": [
+                "updated-newest",
+                "updated-oldest"
+              ],
+              "title": "Sort",
+              "type": "string"
             }
           }
         ],

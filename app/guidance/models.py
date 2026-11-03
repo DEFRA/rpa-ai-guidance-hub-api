@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.guidance import ids
@@ -22,6 +22,25 @@ from app.guidance import ids
 DOCUMENT_ID = "documentId"
 
 FILTERABLE_METADATA = ("schemes", "systems", "audience", "guidanceType")
+
+# The words a guide specific to no scheme is stored with among its schemes. Such a
+# guide has no scheme: its details are read with the words left out.
+NOT_SCHEME_SPECIFIC = "Not scheme-specific"
+
+# The scheme year of every guide stored before guides recorded one: the only one
+# there has been.
+FIRST_SCHEME_YEAR = 2026
+
+
+def details_as_now(details: dict[str, Any]) -> dict[str, Any]:
+    """Details as they are read now, whenever they were stored: a guide stored as
+    "Not scheme-specific" has no scheme, and one stored without a scheme year is
+    of the first."""
+    schemes = details.get("schemes")
+    if isinstance(schemes, list) and NOT_SCHEME_SPECIFIC in schemes:
+        kept = [scheme for scheme in schemes if scheme != NOT_SCHEME_SPECIFIC]
+        details = {**details, "schemes": kept}
+    return {"schemeYear": FIRST_SCHEME_YEAR, **details}
 
 
 @dataclass(frozen=True)
@@ -67,6 +86,8 @@ class Document:
 class Version:
     """One conversion of a document: where its Markdown went, and who made it.
 
+    `version_number` is the number the author gave it, as SharePoint numbers the Word
+    document (`major.minor`), and None for a version stored before versions had one.
     The creator is who was signed in, not who owns the document - see `records`.
     """
 
@@ -75,6 +96,7 @@ class Version:
     content_url: str
     created_at: dt.datetime
     title: str | None = None
+    version_number: str | None = None
     created_by_id: str | None = None
     created_by_display_name: str | None = None
 
@@ -89,6 +111,7 @@ class Version:
             DOCUMENT_ID: self.document_id,
             "contentUrl": self.content_url,
             "title": self.title,
+            "versionNumber": self.version_number,
             "createdBy": created_by,
             "createdAt": self.created_at,
         }
@@ -101,6 +124,7 @@ class Version:
             document_id=document[DOCUMENT_ID],
             content_url=document["contentUrl"],
             title=document.get("title"),
+            version_number=document.get("versionNumber"),
             created_by_id=created_by.get("id"),
             created_by_display_name=created_by.get("displayName"),
             created_at=document["createdAt"],
@@ -128,8 +152,20 @@ class DocumentSummary:
 
 
 @dataclass(frozen=True)
+class OptionCount:
+    """One value of a filter, and how many documents have it; with no label, how
+    many have none of the filter's values."""
+
+    label: str | None
+    short_label: str | None
+    count: int
+
+
+@dataclass(frozen=True)
 class DocumentPage:
-    """One page of documents, newest first; `next_cursor` is None on the last."""
+    """One page of documents; `next_cursor` is None on the last. `counts` has, for
+    each filter, its values with how many documents have each."""
 
     items: list[DocumentSummary]
     next_cursor: ids.DocumentId | None = None
+    counts: dict[str, list[OptionCount]] = field(default_factory=dict)
