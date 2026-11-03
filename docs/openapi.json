@@ -137,7 +137,7 @@
         "type": "object"
       },
       "NewDocument": {
-        "description": "An upload to convert, and what its author said about the document.",
+        "description": "An upload to convert, what its author said about the document, and the\nnumber they gave this version of it.",
         "properties": {
           "createdBy": {
             "anyOf": [
@@ -156,11 +156,17 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source"
+          },
+          "versionNumber": {
+            "description": "Two whole numbers with a full stop between them, such as 1.0",
+            "title": "Versionnumber",
+            "type": "string"
           }
         },
         "required": [
           "source",
-          "metadata"
+          "metadata",
+          "versionNumber"
         ],
         "title": "NewDocument",
         "type": "object"
@@ -440,7 +446,7 @@
         "type": "object"
       },
       "Version": {
-        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is a copy of what the stored document called itself when this version\nwas made, so that a list of versions reads as something a person can follow.",
+        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is a copy of what the stored document called itself when this version\nwas made, so that a list of versions reads as something a person can follow. The\nversion number is the author's, and null for a version stored before versions\nhad one.",
         "properties": {
           "contentUrl": {
             "title": "Contenturl",
@@ -476,6 +482,17 @@
               }
             ],
             "title": "Title"
+          },
+          "versionNumber": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionnumber"
           }
         },
         "required": [

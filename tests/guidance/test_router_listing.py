@@ -100,6 +100,21 @@ class TestReadingADocument:
         # As stored: Mongo answers times without their zone, and so does the API.
         assert dt.datetime.fromisoformat(body["createdAt"]) == stored["createdAt"]
 
+    async def test_each_version_answers_its_number_and_none_from_before_numbers(
+        self, client, database
+    ):
+        document_id, (older, newer) = await _seed(database, versions=2)
+        await database[records.VERSIONS].update_one(
+            {"_id": newer.id}, {"$set": {"versionNumber": "2.0"}}
+        )
+        await database[records.VERSIONS].update_one(
+            {"_id": older.id}, {"$unset": {"versionNumber": ""}}
+        )
+
+        body = (await client.get(f"/guides/{document_id}")).json()
+
+        assert [v["versionNumber"] for v in body["versions"]] == ["2.0", None]
+
     async def test_an_unknown_id_is_not_found(self, client):
         response = await client.get(f"/guides/{ids.new_document_id()}")
 

@@ -25,6 +25,7 @@ VERSION = models.Version(
     document_id="0199b8a2-0000-7000-8000-000000000001",
     content_url="s3://docs/0199b8a2/0199b8a3/content.md",
     title="CS Revenue Claims Processing to Final Payment Guide",
+    version_number="2.1",
     created_by_id="dev-user-123",
     created_by_display_name="Dev User",
     created_at=CREATED,
@@ -58,18 +59,25 @@ class TestADocumentAsStored:
 
 
 class TestAVersionAsStored:
-    def test_is_stored_with_who_made_it_nested_as_its_creator(self):
+    def test_is_stored_with_its_number_and_who_made_it_nested_as_its_creator(self):
         assert VERSION.to_document() == {
             "_id": "0199b8a2-0000-7000-8000-000000000002",
             "documentId": "0199b8a2-0000-7000-8000-000000000001",
             "contentUrl": "s3://docs/0199b8a2/0199b8a3/content.md",
             "title": "CS Revenue Claims Processing to Final Payment Guide",
+            "versionNumber": "2.1",
             "createdBy": {"id": "dev-user-123", "displayName": "Dev User"},
             "createdAt": CREATED,
         }
 
     def test_reads_back_as_it_was_stored(self):
         assert models.Version.from_document(VERSION.to_document()) == VERSION
+
+    def test_one_stored_before_versions_had_numbers_reads_back_with_none(self):
+        stored = VERSION.to_document()
+        del stored["versionNumber"]
+
+        assert models.Version.from_document(stored).version_number is None
 
     def test_a_version_made_by_nobody_is_stored_as_made_by_nobody(self):
         """Not an empty creator: no one at all, which is what an unauthenticated

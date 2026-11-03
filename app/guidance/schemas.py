@@ -8,11 +8,34 @@ convert to and from them, and know nothing of how anything is stored.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Annotated, Any
 
 import pydantic
 
 from app.guidance import ids, models
+
+# The digits a version number is written in: ASCII only, where `str.isdigit` would
+# also take superscripts and other scripts' digits.
+_DIGITS = frozenset("0123456789")
+
+
+def _is_whole_number(text: str) -> bool:
+    return text != "" and set(text) <= _DIGITS
+
+
+def _major_minor(number: str) -> str:
+    """Refuse anything but two whole numbers with a full stop between them, as
+    SharePoint numbers a version of a Word document: `1.0`, `12.3`."""
+    major, stop, minor = number.partition(".")
+    if not (stop and _is_whole_number(major) and _is_whole_number(minor)):
+        message = (
+            "must be two whole numbers with a full stop between them, for example 1.0"
+        )
+        raise ValueError(message)
+    return number
+
+
+VersionNumber = Annotated[str, pydantic.AfterValidator(_major_minor)]
 
 
 class Source(pydantic.BaseModel):
@@ -43,10 +66,15 @@ class Person(pydantic.BaseModel):
 
 
 class NewDocument(pydantic.BaseModel):
-    """An upload to convert, and what its author said about the document."""
+    """An upload to convert, what its author said about the document, and the
+    number they gave this version of it."""
 
     source: Source
     metadata: dict[str, Any]
+    version_number: VersionNumber = pydantic.Field(
+        alias="versionNumber",
+        description="Two whole numbers with a full stop between them, such as 1.0",
+    )
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
 
     def document_for(
@@ -71,6 +99,7 @@ class NewDocument(pydantic.BaseModel):
             document_id=stored.document_id,
             content_url=stored.content,
             title=stored.title,
+            version_number=self.version_number,
             created_by_id=self.created_by.id if self.created_by else None,
             created_by_display_name=(
                 self.created_by.display_name if self.created_by else None
@@ -87,12 +116,15 @@ class Version(pydantic.BaseModel):
     second field pointing at them would be free to disagree with the file.
 
     The title is a copy of what the stored document called itself when this version
-    was made, so that a list of versions reads as something a person can follow.
+    was made, so that a list of versions reads as something a person can follow. The
+    version number is the author's, and null for a version stored before versions
+    had one.
     """
 
     id: ids.VersionId
     content_url: str = pydantic.Field(alias="contentUrl")
     title: str | None = None
+    version_number: str | None = pydantic.Field(default=None, alias="versionNumber")
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
 
@@ -110,6 +142,7 @@ class Version(pydantic.BaseModel):
             id=version.id,
             contentUrl=version.content_url,
             title=version.title,
+            versionNumber=version.version_number,
             createdBy=created_by,
             createdAt=version.created_at,
         )

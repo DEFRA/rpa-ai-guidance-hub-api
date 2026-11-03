@@ -86,6 +86,8 @@ class Document:
 class Version:
     """One conversion of a document: where its Markdown went, and who made it.
 
+    `version_number` is the number the author gave it, as SharePoint numbers the Word
+    document (`major.minor`), and None for a version stored before versions had one.
     The creator is who was signed in, not who owns the document - see `records`.
     """
 
@@ -94,6 +96,7 @@ class Version:
     content_url: str
     created_at: dt.datetime
     title: str | None = None
+    version_number: str | None = None
     created_by_id: str | None = None
     created_by_display_name: str | None = None
 
@@ -108,6 +111,7 @@ class Version:
             DOCUMENT_ID: self.document_id,
             "contentUrl": self.content_url,
             "title": self.title,
+            "versionNumber": self.version_number,
             "createdBy": created_by,
             "createdAt": self.created_at,
         }
@@ -120,6 +124,7 @@ class Version:
             document_id=document[DOCUMENT_ID],
             content_url=document["contentUrl"],
             title=document.get("title"),
+            version_number=document.get("versionNumber"),
             created_by_id=created_by.get("id"),
             created_by_display_name=created_by.get("displayName"),
             created_at=document["createdAt"],
