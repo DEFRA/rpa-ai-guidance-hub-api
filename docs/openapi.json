@@ -339,7 +339,7 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/DocumentSummary"
+              "$ref": "#/components/schemas/PinnedSummary"
             },
             "title": "Items",
             "type": "array"
@@ -377,6 +377,53 @@
           "title"
         ],
         "title": "PinnedGuide",
+        "type": "object"
+      },
+      "PinnedSummary": {
+        "description": "A pinned guide as `GET /guides` lists it, with its position among all the\nuser's pins, which a patch of the pins takes, whatever the filters show.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latestVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Version"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          }
+        },
+        "required": [
+          "id",
+          "metadata",
+          "source",
+          "createdAt",
+          "latestVersion",
+          "position"
+        ],
+        "title": "PinnedSummary",
         "type": "object"
       },
       "ReferenceOption": {

@@ -132,7 +132,10 @@ async def read_pins(
     except guidance_service.UnknownFilterValueError as unknown:
         raise _unprocessable(unknown) from unknown
     return schemas.Pinned(
-        items=[guidance_schemas.DocumentSummary.from_model(item) for item in listed],
+        items=[
+            schemas.PinnedSummary.pinned_at(summary, position)
+            for summary, position in listed
+        ],
         counts=guidance_schemas.counts_from_model(counts),
     )
 

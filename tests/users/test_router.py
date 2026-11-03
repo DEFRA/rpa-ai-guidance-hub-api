@@ -348,6 +348,39 @@ class TestThePinnedList:
             ("CRM", 1),
         ]
 
+    async def test_each_guide_says_where_it_is_among_all_the_pins_whatever_is_shown(
+        self, client, database
+    ):
+        user_id = await _user(client)
+        crm = await _guide(database, "CRM", {"systems": ["CRM"]})
+        siti = await _guide(database, "Siti", {"systems": ["Siti Agri"]})
+        await _patch(client, user_id, _add(crm), _add(siti))
+
+        body = await _listed(client, user_id, system="CRM")
+
+        assert [(item["id"], item["position"]) for item in body["items"]] == [
+            (str(crm), 1)
+        ]
+
+    async def test_positions_leave_out_a_guide_that_has_gone(self, client, database):
+        user_id = await _user(client)
+        gone, first, second = (
+            await _guide(database, "Gone"),
+            await _guide(database, "First"),
+            await _guide(database, "Second"),
+        )
+        await _patch(
+            client, user_id, *(_add(guide, "/-") for guide in (gone, first, second))
+        )
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
+
+        body = await _listed(client, user_id)
+
+        assert [(item["id"], item["position"]) for item in body["items"]] == [
+            (str(first), 0),
+            (str(second), 1),
+        ]
+
     async def test_no_scheme_chooses_the_pinned_guides_specific_to_no_scheme(
         self, client, database
     ):
