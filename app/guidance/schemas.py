@@ -217,13 +217,19 @@ class OptionCount(pydantic.BaseModel):
     )
     short_label: str | None = pydantic.Field(alias="shortLabel")
     count: int
+    retired: bool = pydantic.Field(
+        description="Not in the reference data any more: counted, but not a choice"
+    )
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
     @classmethod
     def from_model(cls, option: models.OptionCount) -> OptionCount:
         return cls(
-            label=option.label, shortLabel=option.short_label, count=option.count
+            label=option.label,
+            shortLabel=option.short_label,
+            count=option.count,
+            retired=option.retired,
         )
 
 

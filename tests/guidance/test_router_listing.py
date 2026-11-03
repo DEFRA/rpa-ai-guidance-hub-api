@@ -316,14 +316,36 @@ class TestCountingEachOption:
 
         assert counts == {
             "scheme": [
-                {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 2},
-                {"label": "Countryside Stewardship", "shortLabel": None, "count": 1},
+                {
+                    "label": "Basic Payment Scheme",
+                    "shortLabel": "BPS",
+                    "count": 2,
+                    "retired": False,
+                },
+                {
+                    "label": "Countryside Stewardship",
+                    "shortLabel": None,
+                    "count": 1,
+                    "retired": False,
+                },
             ],
             "system": [
-                {"label": "Siti Agri", "shortLabel": None, "count": 1},
-                {"label": "CRM", "shortLabel": None, "count": 1},
+                {
+                    "label": "Siti Agri",
+                    "shortLabel": None,
+                    "count": 1,
+                    "retired": False,
+                },
+                {"label": "CRM", "shortLabel": None, "count": 1, "retired": False},
             ],
-            "audience": [{"label": "Caseworker", "shortLabel": None, "count": 1}],
+            "audience": [
+                {
+                    "label": "Caseworker",
+                    "shortLabel": None,
+                    "count": 1,
+                    "retired": False,
+                }
+            ],
         }
 
     async def test_a_filters_counts_are_given_the_other_filters_chosen(
@@ -359,7 +381,7 @@ class TestCountingEachOption:
             ("Customer", 0),
         ]
 
-    async def test_a_value_the_reference_data_no_longer_has_comes_after_those_it_has(
+    async def test_a_value_the_reference_data_no_longer_has_comes_last_marked_retired(
         self, client, database
     ):
         await _seed(
@@ -369,9 +391,56 @@ class TestCountingEachOption:
         counts = (await client.get("/guides")).json()["counts"]
 
         assert counts["scheme"] == [
-            {"label": "Countryside Stewardship", "shortLabel": None, "count": 1},
-            {"label": "Retired Scheme", "shortLabel": None, "count": 1},
+            {
+                "label": "Countryside Stewardship",
+                "shortLabel": None,
+                "count": 1,
+                "retired": False,
+            },
+            {
+                "label": "Retired Scheme",
+                "shortLabel": None,
+                "count": 1,
+                "retired": True,
+            },
         ]
+
+    async def test_a_guide_with_a_value_twice_is_counted_once(self, client, database):
+        await _seed(database, {"systems": ["CRM", "CRM"]})
+
+        counts = (await client.get("/guides")).json()["counts"]
+
+        assert [(o["label"], o["count"]) for o in counts["system"]] == [("CRM", 1)]
+
+    async def test_a_value_stored_as_anything_but_words_is_not_counted(
+        self, client, database
+    ):
+        """Details are stored as sent, so one sent as an object, a number, a list
+        inside the list or nothing must not break the listing of every guide."""
+        await _seed(database, {"schemes": [{"label": "Basic Payment Scheme"}]})
+        await _seed(database, {"schemes": ["Basic Payment Scheme"], "systems": [7]})
+        await _seed(
+            database,
+            {
+                "schemes": ["Basic Payment Scheme"],
+                "systems": [["CRM"]],
+                "audience": [None],
+            },
+        )
+
+        response = await client.get("/guides")
+
+        assert response.status_code == 200
+        assert response.json()["counts"]["scheme"] == [
+            {
+                "label": "Basic Payment Scheme",
+                "shortLabel": "BPS",
+                "count": 2,
+                "retired": False,
+            }
+        ]
+        assert response.json()["counts"]["system"] == []
+        assert response.json()["counts"]["audience"] == []
 
     async def test_with_no_guides_nothing_is_counted(self, client):
         assert (await client.get("/guides")).json()["counts"] == {
@@ -455,8 +524,13 @@ class TestGuidesWithNoScheme:
         counts = (await client.get("/guides")).json()["counts"]
 
         assert counts["scheme"] == [
-            {"label": "Basic Payment Scheme", "shortLabel": "BPS", "count": 1},
-            {"label": None, "shortLabel": None, "count": 1},
+            {
+                "label": "Basic Payment Scheme",
+                "shortLabel": "BPS",
+                "count": 1,
+                "retired": False,
+            },
+            {"label": None, "shortLabel": None, "count": 1, "retired": False},
         ]
 
     async def test_are_chosen_by_no_scheme_alone_or_beside_schemes(
@@ -489,7 +563,7 @@ class TestGuidesWithNoScheme:
         assert [i["metadata"]["schemes"] for i in body["items"]] == [[]]
         assert read["metadata"]["schemes"] == []
         assert body["counts"]["scheme"] == [
-            {"label": None, "shortLabel": None, "count": 1}
+            {"label": None, "shortLabel": None, "count": 1, "retired": False}
         ]
 
 

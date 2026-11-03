@@ -253,8 +253,8 @@ def _counted_options(
     options: Sequence[Mapping[str, str]],
 ) -> list[models.OptionCount]:
     """The values to show for one filter: those counted, and those chosen at 0.
-    A value the reference data no longer has comes after those it has, and the
-    guides with none of them (None) after that."""
+    A value the reference data no longer has comes after those it has, marked
+    retired, and the guides with none of them (None) after that."""
     counts = {**dict.fromkeys(chosen, 0), **counted}
     short_labels: dict[str | None, str | None] = {
         option["label"]: option.get("shortLabel") for option in options
@@ -266,7 +266,10 @@ def _counted_options(
     )
     return [
         models.OptionCount(
-            label=label, short_label=short_labels.get(label), count=counts[label]
+            label=label,
+            short_label=short_labels.get(label),
+            count=counts[label],
+            retired=label is not None and label not in short_labels,
         )
         for label in labels
     ]
