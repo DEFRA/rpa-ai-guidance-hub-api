@@ -29,6 +29,24 @@ Database = Annotated[
 ]
 
 
+def _hub_filters(
+    scheme: Annotated[list[str] | None, fastapi.Query()] = None,
+    system: Annotated[list[str] | None, fastapi.Query()] = None,
+    audience: Annotated[list[str] | None, fastapi.Query()] = None,
+    no_scheme: Annotated[
+        bool, fastapi.Query(description="The guides specific to no scheme too")
+    ] = False,
+) -> dict[str, list[str | None]]:
+    """The hub's filters, as `GET /guides` takes them."""
+    return guidance_service.chosen_filters(
+        {"scheme": scheme, "system": system, "audience": audience},
+        no_scheme=no_scheme,
+    )
+
+
+HubFilters = Annotated[dict[str, list[str | None]], fastapi.Depends(_hub_filters)]
+
+
 @router.post("", status_code=fastapi.status.HTTP_201_CREATED)
 async def sign_in(
     signed_in: schemas.SignedIn, database: Database, response: fastapi.Response
@@ -130,24 +148,13 @@ async def record_opened(
 
 @router.get("/{user_id}/pins")
 async def read_pins(
-    user_id: ids.UserId,
-    database: Database,
-    scheme: Annotated[list[str] | None, fastapi.Query()] = None,
-    system: Annotated[list[str] | None, fastapi.Query()] = None,
-    audience: Annotated[list[str] | None, fastapi.Query()] = None,
-    no_scheme: Annotated[
-        bool, fastapi.Query(description="The guides specific to no scheme too")
-    ] = False,
+    user_id: ids.UserId, database: Database, filters: HubFilters
 ) -> schemas.Pinned:
     """The guides the user has pinned, in their order, as `GET /guides` lists them,
     with the same filters and counts. A guide that no longer exists is left out."""
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
-    filters = guidance_service.chosen_filters(
-        {"scheme": scheme, "system": system, "audience": audience},
-        no_scheme=no_scheme,
-    )
     try:
         listed, counts = await service.pinned(database, user, filters)
     except guidance_service.UnknownFilterValueError as unknown:
@@ -156,6 +163,29 @@ async def read_pins(
         items=[
             schemas.PinnedSummary.pinned_at(summary, position)
             for summary, position in listed
+        ],
+        counts=guidance_schemas.counts_from_model(counts),
+    )
+
+
+@router.get("/{user_id}/recently-opened")
+async def read_recently_opened(
+    user_id: ids.UserId, database: Database, filters: HubFilters
+) -> schemas.RecentlyOpened:
+    """The guides the user opened most recently, newest first, as `GET /guides`
+    lists them, each with when it was opened, with the same filters and counts. A
+    guide that no longer exists is left out."""
+    user = await records.find(database, user_id)
+    if user is None:
+        raise _no_user(user_id)
+    try:
+        listed, counts = await service.recently_opened(database, user, filters)
+    except guidance_service.UnknownFilterValueError as unknown:
+        raise _unprocessable(unknown) from unknown
+    return schemas.RecentlyOpened(
+        items=[
+            schemas.RecentlyOpenedSummary.opened(summary, opened_at)
+            for summary, opened_at in listed
         ],
         counts=guidance_schemas.counts_from_model(counts),
     )

@@ -94,6 +94,28 @@ class Pinned(pydantic.BaseModel):
     counts: dict[str, list[guidance_schemas.OptionCount]]
 
 
+class RecentlyOpenedSummary(guidance_schemas.DocumentSummary):
+    """A guide the user opened recently, as `GET /guides` lists it, with when they
+    last opened it."""
+
+    opened_at: dt.datetime = pydantic.Field(alias="openedAt")
+
+    @classmethod
+    def opened(
+        cls, summary: guidance_models.DocumentSummary, opened_at: dt.datetime
+    ) -> RecentlyOpenedSummary:
+        listed = guidance_schemas.DocumentSummary.from_model(summary)
+        return cls(**listed.model_dump(by_alias=True), openedAt=opened_at)
+
+
+class RecentlyOpened(pydantic.BaseModel):
+    """The guides the user opened most recently, newest first, as `GET /guides`
+    lists them, and each filter's values among them with their counts."""
+
+    items: list[RecentlyOpenedSummary]
+    counts: dict[str, list[guidance_schemas.OptionCount]]
+
+
 class _PatchOperation(pydantic.BaseModel):
     """A JSON Patch operation (RFC 6902) on what its JSON Pointer `path` names."""
 
