@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 import pydantic
 
 from app.guidance import ids as guidance_ids
+from app.guidance import schemas as guidance_schemas
 from app.users import ids, models
 
 
@@ -62,6 +63,14 @@ class User(pydantic.BaseModel):
             createdAt=user.created_at,
             pinned=[PinnedGuide(id=pin, title=title) for pin, title in pinned],
         )
+
+
+class Pinned(pydantic.BaseModel):
+    """The guides the user has pinned, in their order, as `GET /guides` lists them,
+    and each filter's values among them with their counts."""
+
+    items: list[guidance_schemas.DocumentSummary]
+    counts: dict[str, list[guidance_schemas.OptionCount]]
 
 
 class _PatchOperation(pydantic.BaseModel):

@@ -198,7 +198,7 @@ def chosen_filters(
     return chosen
 
 
-def _metadata_filters(
+def metadata_filters(
     requested: Mapping[str, Sequence[str | None]],
 ) -> dict[str, list[str | None]]:
     """Map filter names to the metadata keys they narrow, checking each value.
@@ -224,14 +224,16 @@ def _metadata_filters(
     return metadata
 
 
-async def _option_counts(
+async def option_counts(
     database: pymongo.asynchronous.database.AsyncDatabase,
     metadata: Mapping[str, Sequence[str | None]],
+    only: Sequence[ids.DocumentId] | None = None,
 ) -> dict[str, list[models.OptionCount]]:
     """For each counted filter, the values the documents have, each with how many
     have it given the other filters chosen, and any value chosen even if none has
     it; in the reference data's order, labelled as it labels them. Guides with no
-    scheme are counted after the schemes, with no label.
+    scheme are counted after the schemes, with no label. Only the documents of
+    `only`, if given.
     """
     known = _filters()
     keys = {name: known[name][0] for name in COUNTED_FILTERS}
@@ -240,6 +242,7 @@ async def _option_counts(
         metadata=metadata,
         keys=list(keys.values()),
         counting_none=_COUNTING_NONE,
+        only=only,
     )
     return {
         name: _counted_options(counted[key], metadata.get(key, []), known[name][1])
@@ -297,7 +300,7 @@ async def list_page(  # noqa: PLR0913 - each is a separate part of the query
         UnknownFilterValueError: if a filter value is not in the reference data.
         records.UnknownCursorError: if `after` is not a document.
     """
-    metadata = _metadata_filters(filters)
+    metadata = metadata_filters(filters)
 
     # One more than a page, to know whether there is another.
     found = await records.list_documents(
@@ -318,5 +321,5 @@ async def list_page(  # noqa: PLR0913 - each is a separate part of the query
             for document in documents
         ],
         next_cursor=documents[-1].id if len(found) > limit else None,
-        counts=await _option_counts(database, metadata),
+        counts=await option_counts(database, metadata),
     )

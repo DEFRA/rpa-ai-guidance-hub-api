@@ -301,3 +301,74 @@ class TestPins:
         assert await _pinned_ids(client, user_id) == [str(second)]
         stored = await database[records.USERS].find_one({"_id": uuid.UUID(user_id)})
         assert stored["pins"] == [second]
+
+
+async def _listed(client, user_id: str, **filters) -> dict:
+    return (await client.get(f"/users/{user_id}/pins", params=filters)).json()
+
+
+class TestThePinnedList:
+    async def test_lists_the_pinned_guides_in_the_users_order(self, client, database):
+        user_id = await _user(client)
+        first, second = (
+            await _guide(database, "First"),
+            await _guide(database, "Second"),
+        )
+        await _patch(client, user_id, _add(first), _add(second))
+
+        body = await _listed(client, user_id)
+
+        assert [item["id"] for item in body["items"]] == [str(second), str(first)]
+
+    async def test_the_list_takes_the_hubs_filters_and_counts_its_own_guides(
+        self, client, database
+    ):
+        user_id = await _user(client)
+        crm = await _guide(database, "CRM", {"systems": ["CRM"]})
+        siti = await _guide(database, "Siti", {"systems": ["Siti Agri"]})
+        await _guide(database, "Not pinned", {"systems": ["CRM"]})
+        await _patch(client, user_id, _add(crm), _add(siti))
+
+        body = await _listed(client, user_id, system="CRM")
+
+        assert [item["id"] for item in body["items"]] == [str(crm)]
+        assert [(o["label"], o["count"]) for o in body["counts"]["system"]] == [
+            ("Siti Agri", 1),
+            ("CRM", 1),
+        ]
+
+    async def test_no_scheme_chooses_the_pinned_guides_specific_to_no_scheme(
+        self, client, database
+    ):
+        user_id = await _user(client)
+        any_scheme = await _guide(database, "Any", {"schemes": []})
+        bps = await _guide(database, "BPS", {"schemes": ["Basic Payment Scheme"]})
+        await _patch(client, user_id, _add(any_scheme), _add(bps))
+
+        body = await _listed(client, user_id, no_scheme="true")
+
+        assert [item["id"] for item in body["items"]] == [str(any_scheme)]
+
+    async def test_a_pinned_guide_that_has_gone_is_left_out(self, client, database):
+        user_id = await _user(client)
+        kept, gone = await _guide(database, "Kept"), await _guide(database, "Gone")
+        await _patch(client, user_id, _add(kept), _add(gone))
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
+
+        body = await _listed(client, user_id)
+
+        assert [item["id"] for item in body["items"]] == [str(kept)]
+
+    async def test_a_filter_value_the_hub_does_not_have_is_refused(self, client):
+        user_id = await _user(client)
+
+        response = await client.get(
+            f"/users/{user_id}/pins", params={"system": "Martian"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_user_there_is_not_is_not_found(self, client):
+        response = await client.get(f"/users/{uuid.uuid7()}/pins")
+
+        assert response.status_code == 404

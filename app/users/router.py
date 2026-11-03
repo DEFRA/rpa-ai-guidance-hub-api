@@ -15,6 +15,8 @@ import fastapi
 
 from app.common import mongo
 from app.guidance import records as guidance_records
+from app.guidance import schemas as guidance_schemas
+from app.guidance import service as guidance_service
 from app.users import ids, json_patch, models, pins, records, schemas, service
 
 if TYPE_CHECKING:
@@ -103,6 +105,36 @@ async def patch_pins(
         ) from stale
     if not patched:
         raise _no_user(user_id)
+
+
+@router.get("/{user_id}/pins")
+async def read_pins(
+    user_id: ids.UserId,
+    database: Database,
+    scheme: Annotated[list[str] | None, fastapi.Query()] = None,
+    system: Annotated[list[str] | None, fastapi.Query()] = None,
+    audience: Annotated[list[str] | None, fastapi.Query()] = None,
+    no_scheme: Annotated[
+        bool, fastapi.Query(description="The guides specific to no scheme too")
+    ] = False,
+) -> schemas.Pinned:
+    """The guides the user has pinned, in their order, as `GET /guides` lists them,
+    with the same filters and counts. A guide that no longer exists is left out."""
+    user = await records.find(database, user_id)
+    if user is None:
+        raise _no_user(user_id)
+    filters = guidance_service.chosen_filters(
+        {"scheme": scheme, "system": system, "audience": audience},
+        no_scheme=no_scheme,
+    )
+    try:
+        listed, counts = await service.pinned(database, user, filters)
+    except guidance_service.UnknownFilterValueError as unknown:
+        raise _unprocessable(unknown) from unknown
+    return schemas.Pinned(
+        items=[guidance_schemas.DocumentSummary.from_model(item) for item in listed],
+        counts=guidance_schemas.counts_from_model(counts),
+    )
 
 
 async def _answered(

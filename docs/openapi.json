@@ -324,6 +324,34 @@
         "title": "Person",
         "type": "object"
       },
+      "Pinned": {
+        "description": "The guides the user has pinned, in their order, as `GET /guides` lists them,\nand each filter's values among them with their counts.",
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/OptionCount"
+              },
+              "type": "array"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "counts"
+        ],
+        "title": "Pinned",
+        "type": "object"
+      },
       "PinnedGuide": {
         "description": "A guide the user has pinned, as the side navigation names it.",
         "properties": {
@@ -1436,6 +1464,122 @@
       }
     },
     "/users/{user_id}/pins": {
+      "get": {
+        "description": "The guides the user has pinned, in their order, as `GET /guides` lists them,\nwith the same filters and counts. A guide that no longer exists is left out.",
+        "operationId": "read_pins_users__user_id__pins_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Audience"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pinned"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Pins",
+        "tags": [
+          "users"
+        ]
+      },
       "patch": {
         "description": "Change the guides the user has pinned by a JSON Patch (sent as\n`application/json-patch+json`) on their ordered ids:\n`add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level\npositions only. The patch applies whole or not at all.\n\nPositions are as the user's pins are answered, without the guides that no\nlonger exist, which the patch leaves out of the pins it writes.\n\n409 when a `test` fails, as for a page showing pins that have changed since;\n422 for anything else, a guide pinned twice, or a guide there is not.",
         "operationId": "patch_pins_users__user_id__pins_patch",
