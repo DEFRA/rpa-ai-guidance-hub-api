@@ -139,7 +139,9 @@ async def record_opened(
     if not await guidance_records.existing(database, [opened.guide_id]):
         missing = "The guide opened does not exist"
         raise _unprocessable(missing)
-    recorded = await records.record_opened(database, user_id, opened.guide_id)
+    recorded = await records.record_opened(
+        database, user_id, opened.guide_id, dt.datetime.now(tz=dt.UTC)
+    )
     if not recorded:
         raise _no_user(user_id)
 
