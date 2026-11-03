@@ -154,11 +154,13 @@ class DocumentSummary:
 @dataclasses.dataclass(frozen=True)
 class OptionCount:
     """One value of a filter, and how many documents have it; with no label, how
-    many have none of the filter's values."""
+    many have none of the filter's values. A retired value is one the reference
+    data no longer has, which can be counted but not chosen."""
 
     label: str | None
     short_label: str | None
     count: int
+    retired: bool = False
 
 
 @dataclasses.dataclass(frozen=True)

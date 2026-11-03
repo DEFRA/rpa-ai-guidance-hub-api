@@ -190,6 +190,11 @@
             "description": "Null for the guides with none of the filter's values",
             "title": "Label"
           },
+          "retired": {
+            "description": "Not in the reference data any more: counted, but not a choice",
+            "title": "Retired",
+            "type": "boolean"
+          },
           "shortLabel": {
             "anyOf": [
               {
@@ -205,7 +210,8 @@
         "required": [
           "label",
           "shortLabel",
-          "count"
+          "count",
+          "retired"
         ],
         "title": "OptionCount",
         "type": "object"
