@@ -320,6 +320,17 @@ class TestThePinnedList:
 
         assert [item["id"] for item in body["items"]] == [str(second), str(first)]
 
+    async def test_a_user_with_no_pins_lists_and_counts_nothing(self, client, database):
+        user_id = await _user(client)
+        await _guide(
+            database, "Not pinned", {"systems": ["CRM"], "audience": ["Caseworker"]}
+        )
+
+        body = await _listed(client, user_id)
+
+        assert body["items"] == []
+        assert body["counts"] == {"scheme": [], "system": [], "audience": []}
+
     async def test_the_list_takes_the_hubs_filters_and_counts_its_own_guides(
         self, client, database
     ):
