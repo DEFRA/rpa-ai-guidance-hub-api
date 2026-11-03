@@ -4,9 +4,9 @@ stores, so the names a record is stored under are written down once, here.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from app.guidance import ids as guidance_ids
@@ -22,7 +22,7 @@ OBJECT_ID = f"{IDENTITY}.objectId"
 PINS = "pins"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class User:
     """Someone who has signed in to the hub.
 

@@ -15,7 +15,7 @@ import pytest
 
 from app.users import records
 
-TENANT = "6f504113-6b64-43f2-ade9-242e05780007"
+TENANT = "00000000-0000-0000-0000-000000000456"
 
 
 @pytest.fixture

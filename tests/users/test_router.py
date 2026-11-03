@@ -9,27 +9,28 @@ import uuid
 import httpx2
 import pytest
 
+import app.entrypoints.fastapi
 from app.common import mongo
-from app.entrypoints.fastapi import app
 from app.guidance import ids as guidance_ids
 from app.guidance import models as guidance_models
 from app.guidance import records as guidance_records
 from app.users import records
 
-TENANT = "6f504113-6b64-43f2-ade9-242e05780007"
+TENANT = "00000000-0000-0000-0000-000000000456"
 
 
 @pytest.fixture(autouse=True)
 async def database(mongo_database):
     await records.ensure_indexes(mongo_database)
-    app.dependency_overrides[mongo.get_db] = lambda: mongo_database
+    fastapi_app = app.entrypoints.fastapi.app
+    fastapi_app.dependency_overrides[mongo.get_db] = lambda: mongo_database
     yield mongo_database
-    app.dependency_overrides.pop(mongo.get_db, None)
+    fastapi_app.dependency_overrides.pop(mongo.get_db, None)
 
 
 @pytest.fixture
 async def client():
-    transport = httpx2.ASGITransport(app=app)
+    transport = httpx2.ASGITransport(app=app.entrypoints.fastapi.app)
     async with httpx2.AsyncClient(
         transport=transport, base_url="http://test"
     ) as http_client:
