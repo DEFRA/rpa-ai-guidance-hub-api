@@ -10,6 +10,9 @@ from app.users import json_patch, schemas
 
 PATCH = pydantic.TypeAdapter(list[schemas.PatchOperation])
 
+# A position with more digits than Python turns into a number, which no list has.
+TOO_MANY_DIGITS = "9" * 5000
+
 
 def _patched(document, *operations):
     return json_patch.applied(document, PATCH.validate_python(list(operations)))
@@ -103,6 +106,15 @@ class TestTesting:
         with pytest.raises(json_patch.PatchTestFailedError):
             json_patch.applied(cases, operations)
 
+    def test_a_test_of_a_position_too_long_to_be_one_fails(self):
+        cases = _cases()
+        operations = PATCH.validate_python(
+            [{"op": "test", "path": f"/{TOO_MANY_DIGITS}", "value": None}]
+        )
+
+        with pytest.raises(json_patch.PatchTestFailedError):
+            json_patch.applied(cases, operations)
+
     def test_true_is_not_one(self):
         with pytest.raises(json_patch.PatchTestFailedError):
             _patched([True], {"op": "test", "path": "/0", "value": 1})
@@ -123,6 +135,8 @@ class TestRefusing:
             {"op": "move", "from": "/0", "path": "/0/bookmarks/0"},
             {"op": "add", "path": "/0/ref/x", "value": 1},
             {"op": "add", "path": "/a~2b", "value": 1},
+            {"op": "remove", "path": f"/0/bookmarks/{TOO_MANY_DIGITS}"},
+            {"op": "add", "path": f"/{TOO_MANY_DIGITS}", "value": {}},
         ],
     )
     def test_an_operation_that_cannot_apply_is_refused(self, operation):

@@ -79,11 +79,19 @@ def _unescaped(token: str) -> str:
 
 def _index(part: str, size: int, *, end: bool = False) -> int:
     """The position in a list of `size` that `part` names: `0`, `1` … with no
-    leading zeros, below `size` - or at it, for `end`, which `-` names too."""
+    leading zeros, below `size` - or at it, for `end`, which `-` names too.
+
+    A position with more digits than the limit is past it, and is refused before
+    it is read as a number, which Python refuses past a few thousand digits."""
     if end and part == _END:
         return size
-    is_index = part.isdigit() and part.isascii() and (part == "0" or part[0] != "0")
     limit = size + 1 if end else size
+    is_index = (
+        part.isdigit()
+        and part.isascii()
+        and (part == "0" or part[0] != "0")
+        and len(part) <= len(str(limit))
+    )
     if not is_index or int(part) >= limit:
         message = f"{part!r} is not a position in a list of {size}"
         raise PatchRefusedError(message)

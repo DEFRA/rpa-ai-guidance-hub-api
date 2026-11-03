@@ -219,6 +219,7 @@ class TestPins:
         [
             {"op": "replace", "path": "/0", "value": str(uuid.uuid7())},
             {"op": "remove", "path": "/5"},
+            {"op": "remove", "path": "/" + "9" * 5000},
         ],
     )
     async def test_an_operation_that_cannot_apply_is_refused(
