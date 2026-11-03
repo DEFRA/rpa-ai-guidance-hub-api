@@ -1437,7 +1437,7 @@
     },
     "/users/{user_id}/pins": {
       "patch": {
-        "description": "Change the guides the user has pinned by a JSON Patch (sent as\n`application/json-patch+json`) on their ordered ids:\n`add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level\npositions only. The patch applies whole or not at all.\n\n409 when a `test` fails, as for a page showing pins that have changed since;\n422 for anything else, a guide pinned twice, or a guide there is not.",
+        "description": "Change the guides the user has pinned by a JSON Patch (sent as\n`application/json-patch+json`) on their ordered ids:\n`add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level\npositions only. The patch applies whole or not at all.\n\nPositions are as the user's pins are answered, without the guides that no\nlonger exist, which the patch leaves out of the pins it writes.\n\n409 when a `test` fails, as for a page showing pins that have changed since;\n422 for anything else, a guide pinned twice, or a guide there is not.",
         "operationId": "patch_pins_users__user_id__pins_patch",
         "parameters": [
           {
