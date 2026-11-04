@@ -165,6 +165,7 @@ async def count_values(
     metadata: Mapping[str, Sequence[str | None]],
     keys: Sequence[str],
     counting_none: Collection[str] = (),
+    only: Sequence[ids.DocumentId] | None = None,
 ) -> dict[str, dict[str | None, int]]:
     """For each of `keys`, how many documents have each value in their metadata,
     given the other keys' filters in `metadata` but not its own, so a filter's
@@ -174,7 +175,10 @@ async def count_values(
     For a key in `counting_none`, the documents with none of its values count under
     None. Metadata is stored as sent, so a value that is not words (an object, a
     number) is not counted, rather than breaking the count of every guide.
+
+    Only the documents of `only`, if given.
     """
+    some = [] if only is None else [{_MATCH: {"_id": {_IN: list(only)}}}]
     facets = {
         key: [
             *_matching({k: v for k, v in metadata.items() if k != key}),
@@ -191,7 +195,9 @@ async def count_values(
         ]
         for key in keys
     }
-    cursor = await database[DOCUMENTS].aggregate([*_as_now(), {"$facet": facets}])
+    cursor = await database[DOCUMENTS].aggregate(
+        [*some, *_as_now(), {"$facet": facets}]
+    )
     (counted,) = [result async for result in cursor]
     return {
         key: {group["_id"]: group["count"] for group in counted[key]} for key in keys
@@ -324,6 +330,23 @@ async def _after(
             }
         }
     ]
+
+
+async def matching(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_ids: Sequence[ids.DocumentId],
+    metadata: Mapping[str, Sequence[str | None]],
+) -> set[ids.DocumentId]:
+    """Those of `document_ids` that are documents whose metadata match, by the
+    rule `list_documents` follows."""
+    pipeline: list[dict[str, Any]] = [
+        {_MATCH: {"_id": {_IN: list(document_ids)}}},
+        *_as_now(),
+        *_matching(metadata),
+        {"$project": {"_id": 1}},
+    ]
+    cursor = await database[DOCUMENTS].aggregate(pipeline)
+    return {document["_id"] async for document in cursor}
 
 
 async def find_many(
