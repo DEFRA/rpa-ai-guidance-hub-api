@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from app.guidance import ids as guidance_ids
@@ -93,17 +94,27 @@ async def _listed(
             reference data.
     """
     metadata = guidance_service.metadata_filters(filters)
+    summaries, counts = await asyncio.gather(
+        _summaries(database, document_ids, metadata),
+        guidance_service.option_counts(database, metadata, only=list(document_ids)),
+    )
+    return summaries, counts
+
+
+async def _summaries(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_ids: Sequence[guidance_ids.DocumentId],
+    metadata: Mapping[str, Sequence[str | None]],
+) -> dict[guidance_ids.DocumentId, guidance_models.DocumentSummary]:
+    """Those of the guides whose metadata match, as summaries by id. A guide that
+    no longer exists is left out."""
     shown = await guidance_records.matching(database, document_ids, metadata)
     documents = await guidance_records.find_many(database, list(shown))
     latest = await guidance_records.latest_versions_of(database, list(documents))
-    summaries = {
+    return {
         guide: guidance_models.DocumentSummary(document, latest.get(guide))
         for guide, document in documents.items()
     }
-    counts = await guidance_service.option_counts(
-        database, metadata, only=list(document_ids)
-    )
-    return summaries, counts
 
 
 async def pinned_titles(
