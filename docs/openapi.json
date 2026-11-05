@@ -244,6 +244,21 @@
         "title": "NewDocument",
         "type": "object"
       },
+      "OpenedGuide": {
+        "description": "A guide the user has just opened.",
+        "properties": {
+          "guideId": {
+            "format": "uuid",
+            "title": "Guideid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "guideId"
+        ],
+        "title": "OpenedGuide",
+        "type": "object"
+      },
       "OptionCount": {
         "description": "One value of a filter, labelled as the reference data labels it, and how many\nof the guides have it given the other filters chosen.",
         "properties": {
@@ -424,6 +439,82 @@
           "position"
         ],
         "title": "PinnedSummary",
+        "type": "object"
+      },
+      "RecentlyOpened": {
+        "description": "The guides the user opened most recently, newest first, as `GET /guides`\nlists them, and each filter's values among them with their counts.",
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/OptionCount"
+              },
+              "type": "array"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecentlyOpenedSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "counts"
+        ],
+        "title": "RecentlyOpened",
+        "type": "object"
+      },
+      "RecentlyOpenedSummary": {
+        "description": "A guide the user opened recently, as `GET /guides` lists it, with when they\nlast opened it.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latestVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Version"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "title": "Openedat",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          }
+        },
+        "required": [
+          "id",
+          "metadata",
+          "source",
+          "createdAt",
+          "latestVersion",
+          "openedAt"
+        ],
+        "title": "RecentlyOpenedSummary",
         "type": "object"
       },
       "ReferenceOption": {
@@ -1699,6 +1790,174 @@
           }
         ],
         "summary": "Patch Pins",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/{user_id}/recently-opened": {
+      "get": {
+        "description": "The guides the user opened most recently, newest first, as `GET /guides`\nlists them, each with when it was opened, with the same filters and counts. A\nguide that no longer exists is left out.",
+        "operationId": "read_recently_opened_users__user_id__recently_opened_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Audience"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecentlyOpened"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Recently Opened",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "Record that the user has opened a guide: it goes first in their recently\nopened guides, which keep the newest few, each guide once.\n\n422 for a guide there is not.",
+        "operationId": "record_opened_users__user_id__recently_opened_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenedGuide"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Opened",
         "tags": [
           "users"
         ]

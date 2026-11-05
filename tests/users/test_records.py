@@ -13,7 +13,7 @@ import uuid
 import pymongo.errors
 import pytest
 
-from app.users import records
+from app.users import models, records
 
 TENANT = "00000000-0000-0000-0000-000000000456"
 
@@ -186,6 +186,118 @@ class TestPatchingPins:
 
     async def test_answers_false_for_a_user_there_is_not(self, database):
         assert not await records.patch_pins(database, uuid.uuid7(), list)
+
+
+class TestRecordingAGuideAsOpened:
+    async def _opened(self, database, user, *guides):
+        start = dt.datetime.now(tz=dt.UTC)
+        for n, guide in enumerate(guides):
+            assert await records.record_opened(
+                database, user.id, guide, start + dt.timedelta(seconds=n)
+            )
+        found = await records.find(database, user.id)
+        return [opened.document_id for opened in found.recently_opened]
+
+    async def test_puts_the_guide_first_with_when_it_was_opened(self, database):
+        user, _ = await _sign_in(database, _object_id())
+        first, second = uuid.uuid7(), uuid.uuid7()
+        now = dt.datetime.now(tz=dt.UTC).replace(microsecond=0)
+
+        await records.record_opened(database, user.id, first, now)
+        await records.record_opened(
+            database, user.id, second, now + dt.timedelta(seconds=1)
+        )
+
+        found = await records.find(database, user.id)
+        assert [o.document_id for o in found.recently_opened] == [second, first]
+        assert found.recently_opened[0].opened_at.replace(
+            tzinfo=dt.UTC
+        ) == now + dt.timedelta(seconds=1)
+
+    async def test_keeps_one_entry_per_guide_moving_a_guide_opened_again_to_the_front(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        a, b, c = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+
+        assert await self._opened(database, user, a, b, c, a) == [a, c, b]
+
+    async def test_keeps_the_five_opened_most_recently(self, database):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(7)]
+
+        assert await self._opened(database, user, *guides) == guides[:1:-1]
+
+    async def test_an_opening_that_arrives_late_takes_its_place_by_its_time(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(6)]
+        start = dt.datetime.now(tz=dt.UTC)
+        opened_at = {
+            guide: start + dt.timedelta(seconds=n) for n, guide in enumerate(guides)
+        }
+
+        for guide in [*guides[1:], guides[0]]:
+            await records.record_opened(database, user.id, guide, opened_at[guide])
+
+        found = await records.find(database, user.id)
+        assert [o.document_id for o in found.recently_opened] == guides[:0:-1]
+
+    async def test_an_older_opening_arriving_late_leaves_the_guides_newer_time(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        guide = uuid.uuid7()
+        now = dt.datetime.now(tz=dt.UTC).replace(microsecond=0)
+
+        await records.record_opened(database, user.id, guide, now)
+        await records.record_opened(
+            database, user.id, guide, now - dt.timedelta(seconds=1)
+        )
+
+        found = await records.find(database, user.id)
+        assert [o.opened_at.replace(tzinfo=dt.UTC) for o in found.recently_opened] == [
+            now
+        ]
+
+    async def test_stores_only_what_the_list_shows(self, database):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(7)]
+
+        await self._opened(database, user, *guides, guides[-1], guides[-1])
+
+        stored = await database[records.USERS].find_one({"_id": user.id})
+        assert len(stored[models.RECENTLY_OPENED]) == 5
+
+    async def test_many_opened_at_once_keep_at_most_five_and_no_guide_twice(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(4)] * 3
+        now = dt.datetime.now(tz=dt.UTC)
+
+        await asyncio.gather(
+            *(records.record_opened(database, user.id, g, now) for g in guides)
+        )
+
+        found = await records.find(database, user.id)
+        opened = [o.document_id for o in found.recently_opened]
+        assert len(opened) == len(set(opened)) == 4
+
+    async def test_answers_false_for_a_user_there_is_not(self, database):
+        now = dt.datetime.now(tz=dt.UTC)
+
+        assert not await records.record_opened(
+            database, uuid.uuid7(), uuid.uuid7(), now
+        )
+
+    async def test_a_user_who_has_opened_nothing_has_nothing_recently_opened(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+
+        assert user.recently_opened == ()
 
 
 class TestIndexes:

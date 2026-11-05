@@ -94,6 +94,41 @@ async def find(
     return None if found is None else models.User.from_document(found)
 
 
+async def record_opened(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    user_id: ids.UserId,
+    document_id: guidance_ids.DocumentId,
+    now: dt.datetime,
+) -> bool:
+    """Add that the user opened the guide, and when, to their record.
+
+    Each opening is only added: the list is what `models.User` makes of the openings
+    when it reads them, by their times, so the order they arrive in does not matter.
+    Openings no longer on that list then go, so the record stays small.
+
+    Returns False if there is no such user.
+    """
+    opened = models.Opened(document_id=document_id, opened_at=now).to_document()
+    found = await database[USERS].find_one_and_update(
+        {"_id": user_id},
+        {"$push": {models.RECENTLY_OPENED: opened}},
+        return_document=pymongo.ReturnDocument.AFTER,
+    )
+    if found is None:
+        return False
+    listed = models.User.from_document(found).recently_opened
+    surplus = [
+        entry
+        for entry in found[models.RECENTLY_OPENED]
+        if models.Opened.from_document(entry) not in listed
+    ]
+    if surplus:
+        await database[USERS].update_one(
+            {"_id": user_id}, {"$pull": {models.RECENTLY_OPENED: {"$in": surplus}}}
+        )
+    return True
+
+
 # How many times a patch is tried again when the list changes under it.
 _PATCH_ATTEMPTS = 5
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from app.guidance import ids as guidance_ids
@@ -21,13 +21,44 @@ OBJECT_ID = f"{IDENTITY}.objectId"
 # The guides the user has pinned, in their own order: the ids alone.
 PINS = "pins"
 
+# The user's latest openings of guides, in the order they reached the database.
+RECENTLY_OPENED = "recentlyOpened"
+
+# How many guides a user's recently opened list keeps.
+RECENTLY_OPENED_KEPT = 5
+
+
+@dataclasses.dataclass(frozen=True)
+class Opened:
+    """A guide the user opened, and when they last did."""
+
+    document_id: guidance_ids.DocumentId
+    opened_at: dt.datetime
+
+    def to_document(self) -> dict[str, Any]:
+        return {"documentId": self.document_id, "openedAt": self.opened_at}
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, Any]) -> Opened:
+        return cls(document_id=document["documentId"], opened_at=document["openedAt"])
+
+
+def _recently_opened(openings: Iterable[Opened]) -> tuple[Opened, ...]:
+    """The newest `RECENTLY_OPENED_KEPT` guides, each by its latest opening, newest
+    first."""
+    latest: dict[guidance_ids.DocumentId, Opened] = {}
+    for opening in sorted(openings, key=lambda o: o.opened_at, reverse=True):
+        latest.setdefault(opening.document_id, opening)
+    return tuple(latest.values())[:RECENTLY_OPENED_KEPT]
+
 
 @dataclasses.dataclass(frozen=True)
 class User:
     """Someone who has signed in to the hub.
 
     The display name is a copy from their latest sign-in, so a page can name them
-    without asking a directory. `pins` are in the user's own order.
+    without asking a directory. `pins` are in the user's own order;
+    `recently_opened` is worked out from the stored openings, newest first.
     """
 
     id: ids.UserId
@@ -36,6 +67,7 @@ class User:
     display_name: str | None
     created_at: dt.datetime
     pins: tuple[guidance_ids.DocumentId, ...] = ()
+    recently_opened: tuple[Opened, ...] = ()
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -44,6 +76,7 @@ class User:
             "displayName": self.display_name,
             "createdAt": self.created_at,
             PINS: list(self.pins),
+            RECENTLY_OPENED: [opened.to_document() for opened in self.recently_opened],
         }
 
     @classmethod
@@ -56,4 +89,8 @@ class User:
             display_name=document.get("displayName"),
             created_at=document["createdAt"],
             pins=tuple(document.get(PINS, [])),
+            recently_opened=_recently_opened(
+                Opened.from_document(opened)
+                for opened in document.get(RECENTLY_OPENED, [])
+            ),
         )
