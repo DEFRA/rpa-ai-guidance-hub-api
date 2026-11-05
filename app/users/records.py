@@ -27,9 +27,6 @@ if TYPE_CHECKING:
 
 USERS = "users"
 
-# How many guides a user's recently opened list keeps.
-RECENTLY_OPENED_KEPT = 5
-
 
 class VanishedUserError(LookupError):
     """Raised when a user another sign-in made is gone by the time this one looks."""
@@ -103,38 +100,33 @@ async def record_opened(
     document_id: guidance_ids.DocumentId,
     now: dt.datetime,
 ) -> bool:
-    """Put the guide first in the user's recently opened list, with when.
+    """Add that the user opened the guide, and when, to their record.
 
-    One atomic update of the user's record, so guides opened at once cannot lose
-    each other or appear twice: the guide's earlier entry, if any, goes, the guide
-    goes first, and only the newest `RECENTLY_OPENED_KEPT` stay.
+    Each opening is only added: the list is what `models.User` makes of the openings
+    when it reads them, by their times, so the order they arrive in does not matter.
+    Openings no longer on that list then go, so the record stays small.
 
     Returns False if there is no such user.
     """
-    entries = f"${models.RECENTLY_OPENED}"
-    kept_others = {
-        "$filter": {
-            "input": {"$ifNull": [entries, []]},
-            "cond": {"$ne": ["$$this.documentId", document_id]},
-        }
-    }
     opened = models.Opened(document_id=document_id, opened_at=now).to_document()
-    result = await database[USERS].update_one(
+    found = await database[USERS].find_one_and_update(
         {"_id": user_id},
-        [
-            {
-                "$set": {
-                    models.RECENTLY_OPENED: {
-                        "$slice": [
-                            {"$concatArrays": [[{"$literal": opened}], kept_others]},
-                            RECENTLY_OPENED_KEPT,
-                        ]
-                    }
-                }
-            }
-        ],
+        {"$push": {models.RECENTLY_OPENED: opened}},
+        return_document=pymongo.ReturnDocument.AFTER,
     )
-    return result.matched_count == 1
+    if found is None:
+        return False
+    listed = models.User.from_document(found).recently_opened
+    surplus = [
+        entry
+        for entry in found[models.RECENTLY_OPENED]
+        if models.Opened.from_document(entry) not in listed
+    ]
+    if surplus:
+        await database[USERS].update_one(
+            {"_id": user_id}, {"$pull": {models.RECENTLY_OPENED: {"$in": surplus}}}
+        )
+    return True
 
 
 # How many times a patch is tried again when the list changes under it.

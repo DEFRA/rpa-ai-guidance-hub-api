@@ -13,7 +13,7 @@ import uuid
 import pymongo.errors
 import pytest
 
-from app.users import records
+from app.users import models, records
 
 TENANT = "00000000-0000-0000-0000-000000000456"
 
@@ -227,6 +227,48 @@ class TestRecordingAGuideAsOpened:
         guides = [uuid.uuid7() for _ in range(7)]
 
         assert await self._opened(database, user, *guides) == guides[:1:-1]
+
+    async def test_an_opening_that_arrives_late_takes_its_place_by_its_time(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(6)]
+        start = dt.datetime.now(tz=dt.UTC)
+        opened_at = {
+            guide: start + dt.timedelta(seconds=n) for n, guide in enumerate(guides)
+        }
+
+        for guide in [*guides[1:], guides[0]]:
+            await records.record_opened(database, user.id, guide, opened_at[guide])
+
+        found = await records.find(database, user.id)
+        assert [o.document_id for o in found.recently_opened] == guides[:0:-1]
+
+    async def test_an_older_opening_arriving_late_leaves_the_guides_newer_time(
+        self, database
+    ):
+        user, _ = await _sign_in(database, _object_id())
+        guide = uuid.uuid7()
+        now = dt.datetime.now(tz=dt.UTC).replace(microsecond=0)
+
+        await records.record_opened(database, user.id, guide, now)
+        await records.record_opened(
+            database, user.id, guide, now - dt.timedelta(seconds=1)
+        )
+
+        found = await records.find(database, user.id)
+        assert [o.opened_at.replace(tzinfo=dt.UTC) for o in found.recently_opened] == [
+            now
+        ]
+
+    async def test_stores_only_what_the_list_shows(self, database):
+        user, _ = await _sign_in(database, _object_id())
+        guides = [uuid.uuid7() for _ in range(7)]
+
+        await self._opened(database, user, *guides, guides[-1], guides[-1])
+
+        stored = await database[records.USERS].find_one({"_id": user.id})
+        assert len(stored[models.RECENTLY_OPENED]) == 5
 
     async def test_many_opened_at_once_keep_at_most_five_and_no_guide_twice(
         self, database
