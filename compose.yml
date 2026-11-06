@@ -20,7 +20,7 @@ services:
       - cdp-tenant
 
   mongodb:
-    image: mongo@sha256:4510cf3d7050003e958745adb25d2deb3fb907430716162d9cc1a92eda2a6047 # 7.0.28
+    image: mongo@sha256:452bdaf2127b8ff851e31410a267809b9829eded219979f2210e7c7efb85a058 # 7.0.28
     networks:
       - cdp-tenant
     ports:
