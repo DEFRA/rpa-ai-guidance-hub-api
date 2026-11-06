@@ -19,8 +19,8 @@ import pytest
 from app.background import consumer, sqs
 from app.guidance import conversion, models, records, schemas, service
 from app.guidance.documents.staging import store as staging_store
+from app.guidance.parsing import errors
 from app.guidance.parsing import models as parsing_models
-from app.guidance.parsing.errors import DocumentParseError
 
 _NOW = dt.datetime(2026, 11, 6, 12, 0, tzinfo=dt.UTC)
 
@@ -174,7 +174,7 @@ class TestAFailureRetryingCannotFix:
         [
             service.SourceRefusedError("not the bucket"),
             service.SourceMissingError("nothing there"),
-            DocumentParseError("not a .docx"),
+            errors.DocumentParseError("not a .docx"),
         ],
     )
     async def test_is_recorded_with_its_reason(

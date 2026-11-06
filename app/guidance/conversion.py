@@ -23,15 +23,15 @@ is already there, and a document already committed is only marked as saved.
 from __future__ import annotations
 
 import datetime as dt
-from logging import getLogger
+import logging
 from typing import TYPE_CHECKING, Protocol
 
 import anyio.from_thread
+import fastapi.concurrency
 import pydantic
-from fastapi.concurrency import run_in_threadpool
 
 from app.guidance import ids, records, schemas, service
-from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing import errors
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,13 +41,13 @@ if TYPE_CHECKING:
     from app.background import sqs
     from app.guidance.documents.staging import store as staging_store
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # What converting an upload raises that retrying cannot fix.
 _UNFIXABLE = (
     service.SourceRefusedError,
     service.SourceMissingError,
-    DocumentParseError,
+    errors.DocumentParseError,
     records.MisfiledVersionError,
 )
 
@@ -127,7 +127,7 @@ class ConversionHandler:
         if await records.find_by_upload(self._database, upload_id) is not None:
             return
 
-        stored = await run_in_threadpool(
+        stored = await fastapi.concurrency.run_in_threadpool(
             self._guidance.convert,
             job.source_url,
             document_id=job.document_id,

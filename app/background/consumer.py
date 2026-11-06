@@ -36,10 +36,10 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from logging import getLogger
+import logging
 from typing import Protocol
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # How long to wait before polling again when the queue cannot be worked.
 _RETRY_PAUSE_SECONDS = 5
