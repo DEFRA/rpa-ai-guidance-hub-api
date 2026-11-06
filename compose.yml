@@ -57,6 +57,8 @@ services:
       # Not ${FLOCI_ENDPOINT_URL:-...}: compose interpolates that from ./.env,
       # which holds the host-side value and would win over the default.
       FLOCI_ENDPOINT_URL: http://floci:4566
+      # Not ${CONVERSIONS_SQS_QUEUE_URL:-...}, for the same reason.
+      CONVERSIONS_SQS_QUEUE_URL: http://floci:4566/000000000000/rpa_ai_guidance_hub_conversions
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/}
       HOST: ${HOST:-0.0.0.0}
       # Same bucket name whether run on host or in the container - only the

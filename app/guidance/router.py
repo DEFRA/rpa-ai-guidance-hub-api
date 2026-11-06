@@ -2,8 +2,9 @@
 
 `POST /guides` is what the front end's journey ends in: the .docx has been uploaded
 and scanned, the author has described it, and this is where those two become one
-thing. It converts the upload, stores the version it makes, and records what the
-document is.
+thing. It sends the upload to be converted and answers at once (202), pointing at the
+file's staging record, where the caller follows the save to the end - see
+`conversion` for how the work is run off the queue.
 
 The upload is named by its file id, and everything else about it is read from its
 staging record rather than taken from the caller: where cdp-uploader left it, whether
@@ -17,14 +18,13 @@ The route is still `/guides` because that is what the front end calls and what a
 reader of these documents calls them. Underneath, the thing being stored is a
 document with versions - see `records` for why the two words are not the same.
 
-Converting is done in a worker thread. Parsing a real guidance document is a second
-of arithmetic over a zip archive and the object store calls are blocking, so awaiting
-it on the event loop would stop the service answering anything else meanwhile.
+Converting is done after the reply. A document with many pictures is one object store
+write per picture, and a caller waiting on all of them would wait for as long as the
+slowest save takes.
 """
 
 from __future__ import annotations
 
-import datetime as dt
 import mimetypes
 from logging import getLogger
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -34,12 +34,12 @@ from fastapi.concurrency import run_in_threadpool
 
 from app import config
 from app.common import mongo, s3
-from app.guidance import ids, models, records, schemas, service
+from app.guidance import conversion, ids, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
+from app.guidance.documents.staging import schemas as staging_schemas
 from app.guidance.documents.staging import store as staging_store
-from app.guidance.parsing.errors import DocumentParseError
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
@@ -66,12 +66,6 @@ Staging = Annotated[
 ]
 
 
-def get_guidance_service(
-    s3_client: S3Client,
-) -> service.GuidanceService:
-    return service.GuidanceService(s3_client=s3_client)
-
-
 async def _answered(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> schemas.Document:
@@ -87,22 +81,49 @@ async def _answered(
     return schemas.Document.from_model(document, versions)
 
 
-@router.post("", status_code=fastapi.status.HTTP_201_CREATED)
+def get_conversion_submitter(
+    request: fastapi.Request,
+) -> conversion.ConversionSubmitter:
+    """What the app started with: the queue, or a refusal where none is configured."""
+    submitter: conversion.ConversionSubmitter = request.app.state.conversion_submitter
+    return submitter
+
+
+@router.post(
+    "",
+    status_code=fastapi.status.HTTP_202_ACCEPTED,
+    responses={
+        fastapi.status.HTTP_200_OK: {
+            "model": schemas.Document,
+            "description": "The upload was converted already: its document",
+        },
+        fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "The conversion could not be started; try again",
+        },
+    },
+)
 async def create_document(
     new: schemas.NewDocument,
     database: Database,
     response: fastapi.Response,
-    guidance: Annotated[service.GuidanceService, fastapi.Depends(get_guidance_service)],
     staging: Staging,
-) -> schemas.Document:
-    """Convert an upload and record the document it becomes.
+    submitter: Annotated[
+        conversion.ConversionSubmitter, fastapi.Depends(get_conversion_submitter)
+    ],
+) -> staging_schemas.StagedDocumentResponse | schemas.Document:
+    """Start converting an upload into a document, and answer where to follow it.
 
-    Converting the same upload twice answers the document it made the first time,
-    rather than making a second one. The journey ahead of this can be submitted more
-    than once - a refresh, a back button, a retried request - and every one of those
-    means the same version of the same document: a finished document is answered as
-    it is, and an unfinished one is finished under the ids its first attempt
-    reserved.
+    The answer is the file's staging record, also named by `Location`: it says how
+    far the save has got, and once it is complete, the document it made.
+
+    Submitting the same upload again never starts a second save. The journey ahead of
+    this can be submitted more than once - a refresh, a back button, a retried request
+    - and every one of those means the same version of the same document: a finished
+    document is answered as it is (200), a save under way is answered as it stands,
+    and a save that failed is started again under the ids its first attempt reserved.
+
+    A job that cannot be sent is recorded as a failed save and answered 503, so the
+    caller does not follow a save that will never come.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
@@ -110,30 +131,24 @@ async def create_document(
         return await _answered(database, already.id)
 
     staged, document_id, version_id = await _reserved(staging, new.source)
-    source_url = f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}"
 
-    stored = await _converted(guidance, source_url, document_id, version_id)
+    if await staging.start_saving(staged.file_id):
+        source_url = f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}"
+        await _sent(
+            submitter,
+            staging,
+            conversion.ConversionJob(
+                file_id=staged.file_id,
+                source_url=source_url,
+                document_id=document_id,
+                version_id=version_id,
+                request=new,
+            ),
+        )
 
-    logger.info(
-        "Converted file %s into document %s version %s: %d sections, %d images",
-        staged.file_id,
-        stored.document_id,
-        stored.version_id,
-        stored.sections,
-        stored.images,
-    )
-
-    # Bottom up. The version is recorded only once its content is wholly stored, and
-    # the document last, because writing it is what commits the document: until it
-    # exists nothing can reach the version, and once it does everything beneath it
-    # is there.
-    now = dt.datetime.now(tz=dt.UTC)
-    version = await records.create_version(database, new.version_for(stored, now))
-    document = await records.create(database, new.document_for(stored.document_id, now))
-    await _promote_staged(staging, staged.file_id)
-
-    response.headers["Location"] = f"/guides/{stored.document_id}"
-    return schemas.Document.from_model(document, [version])
+    response.headers["Location"] = f"/guides/staging/{staged.file_id}"
+    saving = await staging.get(staged.file_id)
+    return staging_schemas.StagedDocumentResponse.from_staged_document(saving or staged)
 
 
 @router.get("")
@@ -308,45 +323,18 @@ async def _reserved(
     return reserved, reserved.document_id, reserved.version_id
 
 
-async def _promote_staged(
-    staging: staging_store.StagingStore, file_id: ids.FileId
+async def _sent(
+    submitter: conversion.ConversionSubmitter,
+    staging: staging_store.StagingStore,
+    job: conversion.ConversionJob,
 ) -> None:
-    """Mark the file's staging record as promoted, now its document is committed.
-
-    Best effort: the document is already safe, and is the upload's record from here
-    on, so failing to mark the staging record must not fail the request.
-    """
+    """Send the job, or record that it could not be sent and answer 503."""
     try:
-        await staging.promote(file_id)
-    except Exception:
-        logger.warning(
-            "Could not mark the staging record for file %s as promoted",
-            file_id,
-            exc_info=True,
-        )
-
-
-async def _converted(
-    guidance: service.GuidanceService,
-    source_url: str,
-    document_id: ids.DocumentId,
-    version_id: ids.VersionId,
-) -> models.StoredDocument:
-    """Convert the upload, answering the caller's mistakes as their status codes."""
-    try:
-        return await run_in_threadpool(
-            guidance.convert, source_url, document_id, version_id
-        )
-    except service.SourceRefusedError as refused:
+        await submitter.submit(job)
+    except Exception as unsent:
+        logger.exception("Could not send the conversion of file %s", job.file_id)
+        await staging.fail_saving(job.file_id, "The conversion could not be started")
         raise fastapi.HTTPException(
-            status_code=fastapi.status.HTTP_400_BAD_REQUEST, detail=str(refused)
-        ) from refused
-    except service.SourceMissingError as missing:
-        raise fastapi.HTTPException(
-            status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=str(missing)
-        ) from missing
-    except DocumentParseError as unreadable:
-        raise fastapi.HTTPException(
-            status_code=fastapi.status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(unreadable),
-        ) from unreadable
+            status_code=fastapi.status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The conversion could not be started; try again",
+        ) from unsent

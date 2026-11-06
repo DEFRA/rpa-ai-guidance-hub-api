@@ -3,7 +3,9 @@ import sys
 
 import fastapi.testclient
 
+import app.config
 import app.entrypoints.fastapi
+from app.guidance import conversion
 
 client = fastapi.testclient.TestClient(app.entrypoints.fastapi.app)
 
@@ -32,6 +34,59 @@ def test_lifespan(mocker):
         ensure_user_indexes.assert_awaited_once()
 
     mock_mongo_client.close.assert_awaited_once()
+
+
+def _a_lifespan_with_no_database(mocker):
+    mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
+    mocker.patch(
+        "app.common.mongo.get_db", mocker.AsyncMock(return_value=mocker.MagicMock())
+    )
+    mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
+    mocker.patch("app.users.records.ensure_indexes", mocker.AsyncMock())
+
+
+def test_lifespan_works_the_queue_when_there_is_one(mocker):
+    """The consumer starts with the API and stops with it, working the queue the
+    setting names, and requests send their jobs to that queue."""
+    _a_lifespan_with_no_database(mocker)
+    real = app.config.get_config()
+    mocker.patch(
+        "app.config.get_config",
+        return_value=real.model_copy(
+            update={"conversions_sqs_queue_url": "http://floci:4566/0/q"}
+        ),
+    )
+    mocker.patch("app.background.sqs.client")
+    consumer_class = mocker.patch("app.background.consumer.Consumer")
+    consumer_class.return_value.stop = mocker.AsyncMock()
+    state = app.entrypoints.fastapi.app.state
+    state_before = (state.queue_consumer, state.conversion_submitter)
+
+    try:
+        with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
+            consumer_class.return_value.start.assert_called_once()
+            assert state.queue_consumer is consumer_class.return_value
+            assert isinstance(state.conversion_submitter, conversion.QueueSubmitter)
+            consumer_class.return_value.stop.assert_not_awaited()
+    finally:
+        state.queue_consumer, state.conversion_submitter = state_before
+
+    assert (
+        consumer_class.call_args.kwargs["concurrency"] == real.conversions_concurrency
+    )
+    consumer_class.return_value.stop.assert_awaited_once()
+
+
+def test_lifespan_works_no_queue_when_there_is_none(mocker):
+    _a_lifespan_with_no_database(mocker)
+    consumer_class = mocker.patch("app.background.consumer.Consumer")
+    state = app.entrypoints.fastapi.app.state
+
+    with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
+        assert state.queue_consumer is None
+        assert isinstance(state.conversion_submitter, conversion.NoQueue)
+
+    consumer_class.assert_not_called()
 
 
 def test_root():
