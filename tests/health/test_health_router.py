@@ -34,17 +34,17 @@ class TestHealthProbe:
         assert response.json() == {"status": "ok"}
 
 
-class TestQueueHealth:
+class TestSqsWorkerStatus:
     def test_is_ok_while_the_queue_can_be_worked(self):
         with _a_consumer(healthy=True):
-            response = client.get("/health/queue")
+            response = client.get("/health/sqs-worker/status")
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
 
     def test_is_unavailable_while_the_queue_has_a_problem(self):
         with _a_consumer(healthy=False):
-            response = client.get("/health/queue")
+            response = client.get("/health/sqs-worker/status")
 
         assert response.status_code == 503
         assert response.json() == {"status": "queue unavailable"}
@@ -52,7 +52,7 @@ class TestQueueHealth:
     def test_is_unavailable_with_no_queue_configured(self):
         """Uploads cannot be converted then, so a deployment missing its setting
         shows up here."""
-        response = client.get("/health/queue")
+        response = client.get("/health/sqs-worker/status")
 
         assert response.status_code == 503
         assert response.json() == {"status": "no queue configured"}

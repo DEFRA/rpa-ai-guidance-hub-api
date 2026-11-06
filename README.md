@@ -403,7 +403,7 @@ Tokens are never logged, and neither are exceptions' tracebacks for auth failure
 |:--------------------------------| :----------------------------- |
 | `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
-| `GET: /health/queue`            | Whether uploads can be converted (503 while the queue has a problem, or none is configured) |
+| `GET: /health/sqs-worker/status` | Whether uploads can be converted (503 while the queue has a problem, or none is configured) |
 | `GET: /reference/schemes`       | Scheme options for the "Which scheme does this guidance relate to?" radios |
 | `GET: /reference/audiences`     | Audience options for the "Who is this for?" checkboxes |
 | `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
@@ -417,7 +417,7 @@ Tokens are never logged, and neither are exceptions' tracebacks for auth failure
 | `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
 | `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file, and how far its save has got (404 if unknown) |
 
-All routes except `/health` and the generated docs require a token when `USE_AUTH=true`, see
+All routes except `/health`, `/health/sqs-worker/status` and the generated docs require a token when `USE_AUTH=true`, see
 [Authentication](#authentication).
 
 ## Further reading

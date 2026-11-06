@@ -81,7 +81,7 @@ def _working_the_queue(
 
 app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")
 
-# What `/health/queue` reports on. None where no queue is configured.
+# What `/health/sqs-worker/status` reports on. None where no queue is configured.
 app.state.queue_consumer = None
 # Where `POST /guides` sends its jobs, refused where no queue is configured.
 app.state.conversion_submitter = conversion.NoQueue()

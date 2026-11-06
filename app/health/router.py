@@ -10,8 +10,8 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/health/queue")
-async def queue_health(
+@router.get("/health/sqs-worker/status")
+async def sqs_worker_status(
     request: fastapi.Request, response: fastapi.Response
 ) -> dict[str, str]:
     """Whether uploads can be converted: 503 for as long as the queue has a problem.
