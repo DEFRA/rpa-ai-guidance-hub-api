@@ -128,6 +128,49 @@ class TestSaving:
         assert store.load(_guide(tmp_path, "01JBQ9")) is not None
 
 
+class TestReportingProgress:
+    """A save is one write per picture and one for the Markdown, and it says how far
+    it has got after each, so a caller can show a long save moving."""
+
+    def test_every_write_is_a_step_and_the_markdown_is_the_last(self, tmp_path):
+        steps = []
+        document = _document(_picture(), _picture("b7c2.png", b"other"))
+
+        store.save(
+            document,
+            _guide(tmp_path),
+            RELATIVE,
+            on_progress=lambda done, total: steps.append((done, total)),
+        )
+
+        assert steps == [(0, 3), (1, 3), (2, 3), (3, 3)]
+
+    def test_a_picture_drawn_twice_is_one_step(self, tmp_path):
+        steps = []
+
+        store.save(
+            _document(_picture(), _picture()),
+            _guide(tmp_path),
+            RELATIVE,
+            on_progress=lambda done, total: steps.append((done, total)),
+        )
+
+        assert steps[-1] == (2, 2)
+
+    def test_the_last_step_is_reported_only_once_the_markdown_is_stored(self, tmp_path):
+        stored_when_finished = []
+
+        def on_progress(done: int, total: int) -> None:
+            if done == total:
+                stored_when_finished.append((tmp_path / GUIDE / "content.md").is_file())
+
+        store.save(
+            _document(_picture()), _guide(tmp_path), RELATIVE, on_progress=on_progress
+        )
+
+        assert stored_when_finished == [True]
+
+
 class TestWhereAGuideLives:
     """The scheme is the whole of what says how a guide is reached."""
 

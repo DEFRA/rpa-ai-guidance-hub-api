@@ -440,6 +440,16 @@ class TestRealAppWiring:
         assert response.status_code == 200
         assert cassette.play_count == 0
 
+    def test_the_sqs_worker_status_stays_open_and_never_touches_the_issuer(
+        self, real_app, jwks_cassette
+    ):
+        with jwks_cassette("no_requests") as cassette:
+            response = real_app.get("/health/sqs-worker/status")
+
+        assert response.status_code == 503
+        assert response.json() == {"status": "no queue configured"}
+        assert cassette.play_count == 0
+
     def test_a_protected_route_demands_a_token(self, real_app, jwks_cassette):
         with jwks_cassette("no_requests") as cassette:
             response = real_app.get("/reference/schemes")

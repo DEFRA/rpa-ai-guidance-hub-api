@@ -40,6 +40,19 @@ def test_floci_endpoint_is_pinned_to_the_floci_service():
     assert "floci" in endpoint
 
 
+def test_conversions_queue_is_pinned_to_the_floci_service():
+    """.env holds the host-side address of the queue, which inside the container
+    would point the API at itself."""
+    url = service_environment().get("CONVERSIONS_SQS_QUEUE_URL")
+
+    assert url is not None, (
+        "compose.yml does not set CONVERSIONS_SQS_QUEUE_URL for the service, so the "
+        "host-oriented value in .env reaches the container unchanged"
+    )
+    assert "localhost" not in url
+    assert url.startswith("http://floci:")
+
+
 def test_mongo_uri_is_pinned_to_the_mongodb_service():
     """The same rule, already honoured for mongo - kept so it stays that way."""
     mongo_uri = service_environment().get("MONGO_URI")

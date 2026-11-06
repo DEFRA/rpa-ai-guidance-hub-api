@@ -27,7 +27,15 @@ def stored(mocker):
     """The store, answering with a document and recording what it was asked."""
     calls = {}
 
-    def save(document, document_url_prefix, assets_url_prefix, s3_client=None):  # noqa: ARG001 - the store's signature
+    def save(
+        document,
+        document_url_prefix,
+        assets_url_prefix,
+        s3_client=None,  # noqa: ARG001 - the store's signature
+        on_progress=None,
+    ):
+        if on_progress is not None:
+            on_progress(1, 1)
         calls["document"] = document
         calls["into"] = document_url_prefix
         calls["assets"] = assets_url_prefix
@@ -52,6 +60,17 @@ class TestTheIdsItMints:
 
         assert converted.document_id.version == 7
         assert converted.version_id.version == 7
+
+
+class TestReportingProgress:
+    def test_how_far_the_save_has_got_is_passed_on(self, stored):  # noqa: ARG002 - wanted for its effect
+        steps = []
+
+        service.convert(
+            SOURCE, on_progress=lambda done, total: steps.append((done, total))
+        )
+
+        assert steps == [(1, 1)]
 
 
 class TestWhereAConvertedDocumentGoes:
@@ -172,6 +191,7 @@ class TestGuidanceService:
             document_id="doc1",
             version_id="v1",
             s3_client=mock_client,
+            on_progress=None,
         )
 
     def test_convert_passes_s3_client_to_store(self, mocker):

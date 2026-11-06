@@ -1,4 +1,4 @@
-"""Testcontainers support for S3 tests against floci, a mocked AWS.
+"""Testcontainers support for S3 and SQS tests against floci, a mocked AWS.
 
 moto imitates S3 in memory, and is what the store is tested against: it is fast and
 needs nothing running. floci is the AWS emulator the local stack runs, and it has
@@ -44,7 +44,7 @@ def _client(endpoint_url: str) -> Any:
 
 @pytest.fixture(scope="session")
 def floci_endpoint() -> Iterator[str]:
-    """A running floci for the session, answered as its S3 endpoint URL."""
+    """A running floci for the session, answered as its endpoint URL."""
     with DockerContainer(FLOCI_IMAGE).with_exposed_ports(_PORT) as container:
         endpoint = (
             f"http://{container.get_container_host_ip()}:"
