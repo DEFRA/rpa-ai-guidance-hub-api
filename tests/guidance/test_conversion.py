@@ -279,7 +279,7 @@ class TestSendingAJob:
                 )
             },
         )["QueueUrl"]
-        queue = sqs.SqsQueue(client, url, polling_threads=1)
+        queue = sqs.SqsQueue(client, url)
         working = consumer.Consumer(queue, handler, concurrency=1, wait_seconds=1)
         working.start()
 

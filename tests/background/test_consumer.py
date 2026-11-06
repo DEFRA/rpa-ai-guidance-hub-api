@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from app.background import consumer
+from app.background import consumer, sqs
 from tests.fakes import queue as fake_queue
 
 
@@ -41,7 +41,9 @@ async def _until(condition, timeout: float = 3.0) -> None:
 
 
 def _consuming(queue, handler, concurrency=2) -> consumer.Consumer:
-    started = consumer.Consumer(queue, handler, concurrency=concurrency, wait_seconds=0)
+    started = consumer.Consumer(
+        sqs.SqsQueue(queue, "url"), handler, concurrency=concurrency, wait_seconds=0
+    )
     started.start()
     return started
 
@@ -181,7 +183,18 @@ class TestWorkingMessages:
         handler.released.set()
         await working.stop()
 
-        assert extended_after < queue.visibility_timeout
+        assert extended_after < queue.visibility_timeout * 0.9
+
+    async def test_polls_on_threads_of_its_own(self):
+        """An idle poll holds its thread for 20 seconds, so a loop per message must not
+        take up the threads the API's other work shares (`asyncio.to_thread`'s)."""
+        queue = fake_queue.FakeQueue()
+        working = _consuming(queue, RecordingHandler())
+
+        await _until(lambda: queue.polled_on)
+        await working.stop()
+
+        assert all(name.startswith("sqs-consumer") for name in queue.polled_on)
 
     async def test_keeps_a_message_invisible_past_a_failure_to_extend_it(self, caplog):
         queue = fake_queue.FakeQueue(visibility_timeout=1)
@@ -200,14 +213,16 @@ class TestWorkingMessages:
 
 class TestAQueueWithAProblem:
     @pytest.fixture(autouse=True)
-    def _no_pause_before_trying_again(self, monkeypatch):
-        monkeypatch.setattr(consumer, "_RETRY_PAUSE_SECONDS", 0)
+    def _a_short_pause_before_trying_again(self, monkeypatch):
+        monkeypatch.setattr(consumer, "_RETRY_PAUSE_SECONDS", 0.05)
 
     def test_counts_as_healthy_until_found_otherwise(self):
         """An idle queue's first long poll takes 20 seconds to answer, and /health
         must not fail while it does."""
         assert consumer.Consumer(
-            fake_queue.FakeQueue(), RecordingHandler(), concurrency=1
+            sqs.SqsQueue(fake_queue.FakeQueue(), "url"),
+            RecordingHandler(),
+            concurrency=1,
         ).healthy
 
     async def test_is_reported_until_it_is_over_and_its_messages_then_worked(self):
@@ -233,6 +248,26 @@ class TestAQueueWithAProblem:
         queue.refuse_next(call)
         await _until(lambda: not working.healthy)
         await _until(lambda: working.healthy)
+        await working.stop()
+
+    async def test_that_loses_its_dead_letter_queue_is_not_worked_until_it_has_one(
+        self,
+    ):
+        """The settings are read at every poll, not only on starting: a message failing
+        for ever would never reach the delivery that records its failure."""
+        queue = fake_queue.FakeQueue()
+        handler = RecordingHandler()
+        working = _consuming(queue, handler)
+        await _until(lambda: queue.polled_on)
+
+        queue.has_dead_letter_queue = False
+        await _until(lambda: not working.healthy)
+        receipt = queue.put("a message")
+        await asyncio.sleep(0.1)
+        assert handler.given == []
+
+        queue.has_dead_letter_queue = True
+        await _until(lambda: working.healthy and queue.deleted == [receipt])
         await working.stop()
 
     async def test_does_not_keep_the_consumer_from_stopping(self):
@@ -296,7 +331,6 @@ def test_a_delivery_is_the_last_from_the_queues_max_receive_count(
     receive_count, last_delivery
 ):
     """The count is approximate, so a message past the max is on its last too."""
-    message = consumer.Received("id", "body", "receipt", receive_count)
     settings = consumer.QueueSettings(visibility_timeout=120, max_receive_count=3)
 
-    assert settings.is_last_delivery(message) is last_delivery
+    assert settings.is_last_delivery(receive_count) is last_delivery

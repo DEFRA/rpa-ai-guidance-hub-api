@@ -98,7 +98,7 @@ class TestTheQueue:
     async def test_has_its_settings_read_from_it(self, client, queues):
         url, _ = queues
 
-        settings = await sqs.SqsQueue(client, url, polling_threads=1).settings()
+        settings = await sqs.SqsQueue(client, url).settings()
 
         assert settings == consumer.QueueSettings(VISIBILITY_SECONDS, MAX_RECEIVES)
 
@@ -107,7 +107,7 @@ class TestTheQueue:
             "QueueUrl"
         ]
 
-        queue = sqs.SqsQueue(client, url, polling_threads=1)
+        queue = sqs.SqsQueue(client, url)
 
         with pytest.raises(sqs.QueueConfigurationError):
             await queue.settings()
@@ -116,7 +116,7 @@ class TestTheQueue:
 class TestAMessageSent:
     async def test_is_handled_and_deleted(self, client, queues):
         url, _ = queues
-        queue = sqs.SqsQueue(client, url, polling_threads=2)
+        queue = sqs.SqsQueue(client, url)
         handler = Recorder()
         working = _working(queue, handler)
 
@@ -132,7 +132,7 @@ class TestAMessageSent:
         """Its visibility is kept up while the handler works, so it is not
         delivered again meanwhile."""
         url, _ = queues
-        queue = sqs.SqsQueue(client, url, polling_threads=2)
+        queue = sqs.SqsQueue(client, url)
         handler = Recorder(seconds=3 * VISIBILITY_SECONDS)
         working = _working(queue, handler)
 
@@ -146,7 +146,7 @@ class TestAMessageSent:
         self, client, queues
     ):
         url, dead_letters = queues
-        queue = sqs.SqsQueue(client, url, polling_threads=2)
+        queue = sqs.SqsQueue(client, url)
         handler = Recorder(RuntimeError("database unavailable"))
         working = _working(queue, handler)
 
@@ -172,7 +172,7 @@ class TestAQueueWithAProblem:
     ):
         name = f"plain-{uuid.uuid4().hex[:12]}"
         url = client.create_queue(QueueName=name)["QueueUrl"]
-        queue = sqs.SqsQueue(client, url, polling_threads=2)
+        queue = sqs.SqsQueue(client, url)
         handler = Recorder()
         await queue.send("a message")
         working = _working(queue, handler)
@@ -193,7 +193,7 @@ class TestAQueueWithAProblem:
         name = f"conversions-{uuid.uuid4().hex[:12]}"
         attributes = _with_dead_letters(client, name)
         url = client.create_queue(QueueName=name, Attributes=attributes)["QueueUrl"]
-        queue = sqs.SqsQueue(client, url, polling_threads=2)
+        queue = sqs.SqsQueue(client, url)
         handler = Recorder()
         working = _working(queue, handler)
 

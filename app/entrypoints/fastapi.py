@@ -62,9 +62,7 @@ def _working_the_queue(
         return None
 
     logger.info("Working the queue %s", url)
-    queue = sqs.SqsQueue(
-        sqs.client(), url, polling_threads=config.conversions_concurrency
-    )
+    queue = sqs.SqsQueue(sqs.client(), url)
     handler = conversion.ConversionHandler(
         database,
         staging_store.MongoStagingStore(database, config.staging_retention_seconds),

@@ -20,6 +20,7 @@ dependencies = [
     "pyjwt==2.15.1",
     "pymongo[aws,encryption,snappy,zstd]==4.19.0",
     "python-docx==1.2.0",
+    "sqs-consumer",
     "urllib3==2.8.0",
     "uvicorn==0.54.0",
     "werkzeug==3.1.9",
@@ -123,3 +124,6 @@ exclude-newer = "1 week"
 # drops the Comodo AAA root that cross-signed the compromised eMudhra G3 root.
 exclude-newer-package = { certifi = false, boto3 = false, botocore = false }
 default-groups = ["dev"]
+
+[tool.uv.sources]
+sqs-consumer = { url = "https://github.com/sfitz42/sqs-consumer/archive/755f135071b33e3107729166176915e35b171dea.tar.gz" }
