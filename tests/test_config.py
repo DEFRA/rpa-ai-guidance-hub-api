@@ -194,6 +194,36 @@ class TestAppConfig:
         assert cfg.source_docs_s3_bucket == "rpa-ai-guidance-hub-source-docs"
         assert cfg.http_proxy is None
 
+    def test_works_no_queue_and_two_messages_at_once_unless_told(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
+        )
+
+        assert cfg.conversions_sqs_queue_url is None
+        assert cfg.conversions_concurrency == 2  # noqa: PLR2004 - the default
+
+    def test_reads_the_queue_and_how_many_messages_to_work_at_once(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            CONVERSIONS_SQS_QUEUE_URL="http://floci:4566/000000000000/conversions",
+            CONVERSIONS_CONCURRENCY="3",
+            **VALID_REFERENCE_KWARGS,
+        )
+
+        assert cfg.conversions_sqs_queue_url == (
+            "http://floci:4566/000000000000/conversions"
+        )
+        assert cfg.conversions_concurrency == 3  # noqa: PLR2004
+
+    def test_refuses_to_work_no_messages_at_once(self):
+        with pytest.raises(pydantic.ValidationError):
+            config.AppConfig(
+                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+                CONVERSIONS_CONCURRENCY="0",
+                **VALID_REFERENCE_KWARGS,
+            )
+
     def test_validator_parses_the_packed_model_config(self):
         cfg = config.AppConfig(
             CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",

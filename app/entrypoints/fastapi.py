@@ -45,6 +45,9 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
 
 app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")
 
+# What `/health/queue` reports on. None where no queue is configured.
+app.state.queue_consumer = None
+
 app.add_middleware(tracing.TraceIdMiddleware)
 
 _known_caller = auth_service.allow_all_known()
