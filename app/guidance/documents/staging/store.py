@@ -184,7 +184,8 @@ class MongoStagingStore:
 
         One update, so of two requests racing to start it exactly one does. A save
         that failed can be started again, and so can one with no recent update: its
-        ids are reserved, so the second attempt finishes the same document.
+        ids are reserved, so the second attempt finishes the same document. The record
+        is kept for its retention again from here, so it outlasts the save.
 
         Returns:
             True if this call started the save; False if one is under way and
@@ -219,6 +220,7 @@ class MongoStagingStore:
                     "save_steps_total": None,
                     "save_error": None,
                     "updated_at": now,
+                    "expires_at": now + timedelta(seconds=self._retention_seconds),
                 }
             },
         )

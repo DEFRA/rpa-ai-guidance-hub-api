@@ -384,6 +384,25 @@ class TestSaving:
         assert staged.saving_status == models.SavingStatus.FAILED
         assert staged.save_error == "The document store refused a write"
 
+    async def test_starting_a_save_keeps_its_record_for_the_retention_again(
+        self, staging_store, mongo_database
+    ):
+        """So a save started near the record's expiry can still be followed to its end."""
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        records = mongo_database[store.COLLECTION_NAME]
+        await records.update_one(
+            {"_id": file_id},
+            {"$set": {"expires_at": datetime.now(UTC) + timedelta(minutes=1)}},
+        )
+
+        await staging_store.start_saving(file_id)
+
+        raw = await records.find_one({"_id": file_id})
+        assert raw["expires_at"] == raw["updated_at"] + timedelta(
+            seconds=RETENTION_SECONDS
+        )
+
     async def test_a_finished_save_stays_complete_when_an_overlapping_delivery_fails(
         self, staging_store
     ):
