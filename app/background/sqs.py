@@ -16,7 +16,7 @@ from concurrent import futures
 from typing import Any
 
 import boto3
-from botocore.config import Config
+import botocore.config
 
 from app import config as app_config
 from app.background import consumer
@@ -38,7 +38,9 @@ def client() -> Any:
         "sqs",
         endpoint_url=config.floci_endpoint_url,
         region_name=config.aws_region,
-        config=Config(connect_timeout=_CONNECT_SECONDS, read_timeout=_READ_SECONDS),
+        config=botocore.config.Config(
+            connect_timeout=_CONNECT_SECONDS, read_timeout=_READ_SECONDS
+        ),
     )
 
 

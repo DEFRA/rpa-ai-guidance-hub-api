@@ -11,7 +11,7 @@ import time
 import pytest
 
 from app.background import consumer
-from tests.fakes.queue import FakeQueue
+from tests.fakes import queue as fake_queue
 
 
 class RecordingHandler:
@@ -48,7 +48,7 @@ def _consuming(queue, handler, concurrency=2) -> consumer.Consumer:
 
 class TestAMessage:
     async def test_is_given_to_the_handler_then_deleted_when_it_returns(self):
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         receipt = queue.put("a message")
         working = _consuming(queue, handler)
@@ -59,7 +59,7 @@ class TestAMessage:
         assert handler.given == [("a message", False)]
 
     async def test_is_left_to_be_delivered_again_when_the_handler_raises(self, caplog):
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler(RuntimeError("database unavailable"))
         receipt = queue.put("a message")
         working = _consuming(queue, handler)
@@ -74,7 +74,7 @@ class TestAMessage:
     async def test_tells_the_handler_only_on_its_last_delivery(self):
         """So that what is following the work is not left waiting, as SQS then moves
         the message to the dead-letter queue."""
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler(RuntimeError("database unavailable"))
         receipt = queue.put("a message")
         working = _consuming(queue, handler)
@@ -96,7 +96,7 @@ class TestAMessage:
         self, caplog
     ):
         """It is delivered again, and the handler is safe to repeat."""
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         queue.refuse_next("delete")
         queue.put("a message")
@@ -113,7 +113,7 @@ class TestAMessage:
 
 class TestWorkingMessages:
     async def test_no_more_than_the_concurrency_at_once(self):
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         handler.holding = {f"message {n}" for n in range(5)}
         for name in handler.holding:
@@ -131,7 +131,7 @@ class TestWorkingMessages:
     async def test_a_slow_message_does_not_hold_up_the_others(self):
         """The reason to run a loop per message, rather than work a batch: a batch
         is not followed by the next until its slowest message is done."""
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         handler.holding = {"a big guide"}
         queue.put("a big guide")
@@ -148,7 +148,7 @@ class TestWorkingMessages:
     async def test_keeps_a_message_invisible_only_while_its_handler_works(self):
         """Its visibility is extended every third of its timeout, so a long handler is
         not given the same message twice."""
-        queue = FakeQueue(visibility_timeout=1)
+        queue = fake_queue.FakeQueue(visibility_timeout=1)
         handler = RecordingHandler()
         handler.holding = {"a message"}
         receipt = queue.put("a message")
@@ -167,7 +167,7 @@ class TestWorkingMessages:
     async def test_tries_a_failed_extension_again_before_the_visibility_runs_out(self):
         """Otherwise one failed call could give a message still being worked to another
         consumer, and spend one of its deliveries."""
-        queue = FakeQueue(visibility_timeout=1)
+        queue = fake_queue.FakeQueue(visibility_timeout=1)
         handler = RecordingHandler()
         handler.holding = {"a message"}
         queue.refuse_next("extend")
@@ -184,7 +184,7 @@ class TestWorkingMessages:
         assert extended_after < queue.visibility_timeout
 
     async def test_keeps_a_message_invisible_past_a_failure_to_extend_it(self, caplog):
-        queue = FakeQueue(visibility_timeout=1)
+        queue = fake_queue.FakeQueue(visibility_timeout=1)
         handler = RecordingHandler()
         handler.holding = {"a message"}
         queue.refuse_next("extend")
@@ -206,10 +206,12 @@ class TestAQueueWithAProblem:
     def test_counts_as_healthy_until_found_otherwise(self):
         """An idle queue's first long poll takes 20 seconds to answer, and /health
         must not fail while it does."""
-        assert consumer.Consumer(FakeQueue(), RecordingHandler(), concurrency=1).healthy
+        assert consumer.Consumer(
+            fake_queue.FakeQueue(), RecordingHandler(), concurrency=1
+        ).healthy
 
     async def test_is_reported_until_it_is_over_and_its_messages_then_worked(self):
-        queue = FakeQueue(down=True)
+        queue = fake_queue.FakeQueue(down=True)
         handler = RecordingHandler()
         working = _consuming(queue, handler)
 
@@ -224,7 +226,7 @@ class TestAQueueWithAProblem:
 
     @pytest.mark.parametrize("call", ["settings", "receive"])
     async def test_is_found_by_either_of_the_calls_that_poll(self, call):
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         working = _consuming(queue, handler, concurrency=1)
 
@@ -234,7 +236,7 @@ class TestAQueueWithAProblem:
         await working.stop()
 
     async def test_does_not_keep_the_consumer_from_stopping(self):
-        queue = FakeQueue(down=True)
+        queue = fake_queue.FakeQueue(down=True)
         working = _consuming(queue, RecordingHandler())
         await _until(lambda: not working.healthy)
 
@@ -244,7 +246,7 @@ class TestAQueueWithAProblem:
     async def test_is_logged_once_when_it_starts_and_once_when_it_ends(self, caplog):
         """Not at every attempt, by every loop, for as long as it lasts."""
         caplog.set_level(logging.INFO, logger="app.background.consumer")
-        queue = FakeQueue(down=True)
+        queue = fake_queue.FakeQueue(down=True)
         working = _consuming(queue, RecordingHandler())
 
         await _until(lambda: not working.healthy)
@@ -260,7 +262,7 @@ class TestAQueueWithAProblem:
 
 class TestStopping:
     async def test_lets_a_message_being_worked_finish(self):
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         handler.holding = {"a message"}
         receipt = queue.put("a message")
@@ -276,7 +278,7 @@ class TestStopping:
         assert queue.deleted == [receipt]
 
     async def test_receives_nothing_more(self):
-        queue = FakeQueue()
+        queue = fake_queue.FakeQueue()
         handler = RecordingHandler()
         working = _consuming(queue, handler)
         await working.stop()
