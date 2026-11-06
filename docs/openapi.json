@@ -563,6 +563,16 @@
         "title": "RemoveOperation",
         "type": "object"
       },
+      "SavingStatus": {
+        "description": "How far saving the document this file converts into has got.\n\nNone on a record means no save has been started.",
+        "enum": [
+          "in_progress",
+          "complete",
+          "failed"
+        ],
+        "title": "SavingStatus",
+        "type": "string"
+      },
       "SignedIn": {
         "description": "Someone who has just signed in, as the UI knows them from their token.",
         "properties": {
@@ -681,6 +691,49 @@
               }
             ],
             "title": "Promotedat"
+          },
+          "saveError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saveerror"
+          },
+          "saveStepsCompleted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Savestepscompleted"
+          },
+          "saveStepsTotal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Savestepstotal"
+          },
+          "savingStatus": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavingStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "title": {
             "anyOf": [

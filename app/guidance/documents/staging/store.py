@@ -32,6 +32,14 @@ class StagingStore(Protocol):
 
     async def promote(self, file_id: ids.FileId) -> None: ...
 
+    async def start_saving(self, file_id: ids.FileId) -> bool: ...
+
+    async def record_save_progress(
+        self, file_id: ids.FileId, completed: int, total: int
+    ) -> None: ...
+
+    async def fail_saving(self, file_id: ids.FileId, reason: str) -> None: ...
+
 
 class MongoStagingStore:
     def __init__(
@@ -155,5 +163,74 @@ class MongoStagingStore:
         now = datetime.now(UTC)
         await self._collection.update_one(
             {"_id": file_id},
-            {"$set": {"promoted_at": now, "updated_at": now}},
+            {
+                "$set": {
+                    "promoted_at": now,
+                    "saving_status": staging_models.SavingStatus.COMPLETE.value,
+                    "updated_at": now,
+                }
+            },
+        )
+
+    async def start_saving(self, file_id: ids.FileId) -> bool:
+        """Start saving the document this file converts into, unless it is already
+        being saved or has been.
+
+        One update, so of two requests racing to start it exactly one does. A save
+        that failed can be started again: its ids are reserved, so the second attempt
+        finishes the same document.
+
+        Returns:
+            True if this call started the save; False if one is under way or
+            finished, or the file is not staged with its ids reserved.
+        """
+        result = await self._collection.update_one(
+            {
+                "_id": file_id,
+                "document_id": {"$exists": True},
+                "saving_status": {
+                    "$nin": [
+                        staging_models.SavingStatus.IN_PROGRESS.value,
+                        staging_models.SavingStatus.COMPLETE.value,
+                    ]
+                },
+            },
+            {
+                "$set": {
+                    "saving_status": staging_models.SavingStatus.IN_PROGRESS.value,
+                    "save_steps_completed": 0,
+                    "save_steps_total": None,
+                    "save_error": None,
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+        )
+        return bool(result.modified_count)
+
+    async def record_save_progress(
+        self, file_id: ids.FileId, completed: int, total: int
+    ) -> None:
+        """Record how many of the save's steps are done, out of how many."""
+        await self._collection.update_one(
+            {"_id": file_id},
+            {
+                "$set": {
+                    "save_steps_completed": completed,
+                    "save_steps_total": total,
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+        )
+
+    async def fail_saving(self, file_id: ids.FileId, reason: str) -> None:
+        """Record that the save failed, and why. It can be started again."""
+        await self._collection.update_one(
+            {"_id": file_id},
+            {
+                "$set": {
+                    "saving_status": staging_models.SavingStatus.FAILED.value,
+                    "save_error": reason,
+                    "updated_at": datetime.now(UTC),
+                }
+            },
         )
