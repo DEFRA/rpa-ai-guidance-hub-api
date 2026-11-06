@@ -120,7 +120,8 @@ async def create_document(
     this can be submitted more than once - a refresh, a back button, a retried request
     - and every one of those means the same version of the same document: a finished
     document is answered as it is (200), a save under way is answered as it stands,
-    and a save that failed is started again under the ids its first attempt reserved.
+    and a save that failed, or has had no update for a while, is started again under
+    the ids its first attempt reserved.
 
     A job that cannot be sent is recorded as a failed save and answered 503, so the
     caller does not follow a save that will never come.

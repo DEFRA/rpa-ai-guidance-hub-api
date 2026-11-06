@@ -292,6 +292,71 @@ class TestSaving:
         assert await staging_store.start_saving(file_id) is True
         assert (await staging_store.get(file_id)).save_error is None
 
+    async def _with_no_update_for(
+        self, mongo_database, file_id: str, age: timedelta
+    ) -> None:
+        await mongo_database[store.COLLECTION_NAME].update_one(
+            {"_id": file_id}, {"$set": {"updated_at": datetime.now(UTC) - age}}
+        )
+
+    async def test_a_save_with_no_recent_update_can_be_started_again(
+        self, staging_store, mongo_database
+    ):
+        """Nothing is working on it: its job never reached the queue, say. It finishes
+        the same document, as its ids stay reserved."""
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await staging_store.record_save_progress(file_id, 12, 74)
+        before = await staging_store.get(file_id)
+        await self._with_no_update_for(mongo_database, file_id, timedelta(minutes=11))
+
+        started = await staging_store.start_saving(file_id)
+
+        staged = await staging_store.get(file_id)
+        assert started is True
+        assert staged.saving_status == models.SavingStatus.IN_PROGRESS
+        assert staged.save_steps_completed == 0
+        assert staged.save_steps_total is None
+        assert staged.document_id == before.document_id
+        assert staged.version_id == before.version_id
+
+    async def test_a_save_updated_recently_is_not_started_again(
+        self, staging_store, mongo_database
+    ):
+        """A delivery can wait out a visibility timeout of two minutes between updates."""
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await self._with_no_update_for(mongo_database, file_id, timedelta(minutes=9))
+
+        assert await staging_store.start_saving(file_id) is False
+
+    async def test_requests_racing_to_restart_a_stale_save_restart_it_once(
+        self, staging_store, mongo_database
+    ):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await self._with_no_update_for(mongo_database, file_id, timedelta(minutes=11))
+
+        started = await asyncio.gather(
+            *(staging_store.start_saving(file_id) for _ in range(10))
+        )
+
+        assert started.count(True) == 1
+
+    async def test_a_finished_save_is_never_started_again_however_old(
+        self, staging_store, mongo_database
+    ):
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await staging_store.promote(file_id)
+        await self._with_no_update_for(mongo_database, file_id, timedelta(hours=3))
+
+        assert await staging_store.start_saving(file_id) is False
+
     async def test_a_file_without_reserved_ids_is_not_saved(self, staging_store):
         file_id = f"save-{uuid.uuid4()}"
         await TestReserveIds()._parsed(staging_store, file_id)
