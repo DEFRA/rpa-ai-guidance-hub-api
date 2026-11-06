@@ -14,7 +14,8 @@ it would otherwise leave nobody knowing about. SQS may deliver a message more th
 once anyway, so a handler must be safe to repeat.
 
 While the handler works, the message is kept invisible: its visibility is extended
-every half timeout, so a long piece of work is not given to another consumer too.
+every third of its timeout, so a long piece of work is not given to another consumer
+too, and a failed extension can be tried again before the visibility runs out.
 
 Where bbc/sqs-consumer reads a batch and waits for all of it before polling again,
 this runs `concurrency` loops that take one message each. A long poll can answer with
@@ -173,7 +174,7 @@ class Consumer:
         """Until cancelled. A failure to extend is logged and tried again next time,
         as there may still be time left on the message's visibility."""
         while True:
-            await asyncio.sleep(visibility_seconds / 2)
+            await asyncio.sleep(visibility_seconds / 3)
             try:
                 await self._queue.extend(message.receipt, visibility_seconds)
             except Exception:

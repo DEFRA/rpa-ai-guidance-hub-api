@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import pytest
 
@@ -145,8 +146,8 @@ class TestWorkingMessages:
         await working.stop()
 
     async def test_keeps_a_message_invisible_only_while_its_handler_works(self):
-        """Its visibility is extended every half timeout, so a long handler is not
-        given the same message twice."""
+        """Its visibility is extended every third of its timeout, so a long handler is
+        not given the same message twice."""
         queue = FakeQueue(visibility_timeout=1)
         handler = RecordingHandler()
         handler.holding = {"a message"}
@@ -162,6 +163,25 @@ class TestWorkingMessages:
 
         assert set(queue.extended) == {(receipt, 1)}
         assert len(queue.extended) == extended
+
+    async def test_tries_a_failed_extension_again_before_the_visibility_runs_out(self):
+        """Otherwise one failed call could give a message still being worked to another
+        consumer, and spend one of its deliveries."""
+        queue = FakeQueue(visibility_timeout=1)
+        handler = RecordingHandler()
+        handler.holding = {"a message"}
+        queue.refuse_next("extend")
+        queue.put("a message")
+        working = _consuming(queue, handler)
+        await _until(lambda: handler.given)
+        received = time.monotonic()
+
+        await _until(lambda: queue.extended)
+        extended_after = time.monotonic() - received
+        handler.released.set()
+        await working.stop()
+
+        assert extended_after < queue.visibility_timeout
 
     async def test_keeps_a_message_invisible_past_a_failure_to_extend_it(self, caplog):
         queue = FakeQueue(visibility_timeout=1)
