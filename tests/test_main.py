@@ -57,6 +57,8 @@ def test_lifespan_works_the_queue_when_there_is_one(mocker):
         ),
     )
     mocker.patch("app.background.sqs.client")
+    # Not the real one: it reaches for credentials, and stays behind in a global.
+    get_s3_client = mocker.patch("app.common.s3.get_s3_client")
     consumer_class = mocker.patch("app.background.consumer.Consumer")
     consumer_class.return_value.stop = mocker.AsyncMock()
     state = app.entrypoints.fastapi.app.state
@@ -74,6 +76,7 @@ def test_lifespan_works_the_queue_when_there_is_one(mocker):
     assert (
         consumer_class.call_args.kwargs["concurrency"] == real.conversions_concurrency
     )
+    get_s3_client.assert_called_once()
     consumer_class.return_value.stop.assert_awaited_once()
 
 
