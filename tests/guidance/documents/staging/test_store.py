@@ -384,6 +384,21 @@ class TestSaving:
         assert staged.saving_status == models.SavingStatus.FAILED
         assert staged.save_error == "The document store refused a write"
 
+    async def test_a_finished_save_stays_complete_when_an_overlapping_delivery_fails(
+        self, staging_store
+    ):
+        """SQS can deliver a message twice at once: the guide exists whichever fails."""
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await staging_store.promote(file_id)
+
+        await staging_store.fail_saving(file_id, "The document store refused a write")
+
+        staged = await staging_store.get(file_id)
+        assert staged.saving_status == models.SavingStatus.COMPLETE
+        assert staged.save_error is None
+
     async def test_promoting_the_file_marks_its_save_complete(self, staging_store):
         file_id = f"save-{uuid.uuid4()}"
         await self._reserved(staging_store, file_id)

@@ -240,9 +240,16 @@ class MongoStagingStore:
         )
 
     async def fail_saving(self, file_id: ids.FileId, reason: str) -> None:
-        """Record that the save failed, and why. It can be started again."""
+        """Record that the save failed, and why. It can be started again.
+
+        A save already complete stays so: its document exists, whatever an overlapping
+        delivery of the same message then does.
+        """
         await self._collection.update_one(
-            {"_id": file_id},
+            {
+                "_id": file_id,
+                "saving_status": {"$ne": staging_models.SavingStatus.COMPLETE.value},
+            },
             {
                 "$set": {
                     "saving_status": staging_models.SavingStatus.FAILED.value,
