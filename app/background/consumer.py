@@ -169,12 +169,12 @@ class Consumer:
         finally:
             keeping_invisible.cancel()
 
-    async def _keep_invisible(self, message: Received, timeout: int) -> None:
+    async def _keep_invisible(self, message: Received, visibility_seconds: int) -> None:
         """Until cancelled. A failure to extend is logged and tried again next time,
         as there may still be time left on the message's visibility."""
         while True:
-            await asyncio.sleep(timeout / 2)
+            await asyncio.sleep(visibility_seconds / 2)
             try:
-                await self._queue.extend(message.receipt, timeout)
+                await self._queue.extend(message.receipt, visibility_seconds)
             except Exception:
                 logger.exception("Could not keep message %s invisible", message.id)

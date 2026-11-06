@@ -107,8 +107,10 @@ class TestTheQueue:
             "QueueUrl"
         ]
 
+        queue = sqs.SqsQueue(client, url, polling_threads=1)
+
         with pytest.raises(sqs.QueueConfigurationError):
-            await sqs.SqsQueue(client, url, polling_threads=1).settings()
+            await queue.settings()
 
 
 class TestAMessageSent:
