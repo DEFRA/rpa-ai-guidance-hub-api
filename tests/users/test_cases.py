@@ -16,8 +16,9 @@ NOW = dt.datetime(2026, 11, 8, 18, 0, tzinfo=dt.UTC)
 EARLIER = dt.datetime(2026, 11, 7, 9, 0, tzinfo=dt.UTC)
 KEY, OTHER_KEY = (uuid.uuid4() for _ in range(2))
 
-# Each guide's sections by anchor, as its latest version has them, in its order.
-ONE, TWO, OTHER = (uuid.uuid7() for _ in range(3))
+# Each guide's sections by anchor, as its latest version has them, in its order;
+# GONE was a section of A's that its latest version has not.
+ONE, TWO, OTHER, GONE = (uuid.uuid7() for _ in range(4))
 SECTIONS = {
     A: models.GuideSections({"1-one": ONE, "2-two": TWO}),
     B: models.GuideSections({"1-other": OTHER}),
@@ -196,6 +197,20 @@ class TestBookmarking:
 
         assert [(b.document_id, b.section_id) for b in case.bookmarks] == [(B, OTHER)]
 
+    async def test_a_bookmark_kept_stays_when_its_guide_no_longer_has_its_section(
+        self,
+    ):
+        read = _stored(
+            _case("W1234567", _bookmark(A, GONE)),
+            _case("W7654321", key=OTHER_KEY),
+        )
+
+        _, case = await _patched(
+            read, {"op": "move", "from": "/0/bookmarks/0", "path": "/1/bookmarks/0"}
+        )
+
+        assert case.bookmarks == (_bookmark(A, GONE),)
+
     async def test_a_bookmark_kept_stays_when_its_guide_no_longer_exists(self):
         gone = uuid.uuid7()
         read = _stored(
@@ -332,6 +347,15 @@ class TestRefusing:
     async def test_a_new_bookmark_of_a_guide_there_is_not_is_refused(self):
         operation = _new_case("W1234567", section=None, sectionId=str(ONE))
         operation["value"]["bookmarks"][0]["guideId"] = str(uuid.uuid7())
+
+        with pytest.raises(cases.InvalidCasesError):
+            await _patched([], operation)
+
+    @pytest.mark.parametrize("section_id", [uuid.uuid7(), OTHER, GONE])
+    async def test_a_new_bookmark_of_a_section_id_its_guide_has_not_is_refused(
+        self, section_id
+    ):
+        operation = _new_case("W1234567", section=None, sectionId=str(section_id))
 
         with pytest.raises(cases.InvalidCasesError):
             await _patched([], operation)

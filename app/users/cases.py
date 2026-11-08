@@ -11,9 +11,11 @@ same patch.
 
 What the patch makes is then read as the cases are, whichever operations made it. A
 reference that is not one, a case or a key twice, a section bookmarked twice to one
-case, a guide there is not, or anything the structure does not hold is refused. A patch
-applies whole or not at all: it is applied here to a copy of the cases as read, and they
-are written only if they are still what was read (`records.patch_cases`).
+case, a new bookmark of a guide there is not or of a section its guide has not, or
+anything the structure does not hold is refused. A bookmark kept from before stays,
+even when its guide no longer has its section. A patch applies whole or not at all: it
+is applied here to a copy of the cases as read, and they are written only if they are
+still what was read (`records.patch_cases`).
 """
 
 from __future__ import annotations
@@ -53,9 +55,9 @@ async def applied(
     """The cases, as stored, once the patch is applied to them as answered. A
     bookmark added without when is added `now`. `sections_of` gives guides' sections
     by anchor, leaving out a guide with no version: first for the guides the cases
-    name, to answer them, then for any other guide the patched cases name, which must
-    be one there is. A new case of SBI, or a new reference for one, is refused unless
-    `sbis_allowed`; one already kept stays.
+    name, to answer them, then for any other guide the patched cases name. A new
+    bookmark must be of a section its guide has. A new case of SBI, or a new
+    reference for one, is refused unless `sbis_allowed`; one already kept stays.
 
     Raises:
         InvalidCasesError: if the cases the patch makes are not valid ones.
@@ -73,15 +75,13 @@ async def applied(
 
     added = {b.guide_id for case in proposed for b in case.bookmarks} - named_before
     sections |= await sections_of(added)
-    if not added <= sections.keys():
-        message = "A guide to bookmark does not exist"
-        raise InvalidCasesError(message)
 
     try:
         cases = [case.to_model(now, sections) for case in proposed]
     except schemas.UnknownSectionError as unknown:
         raise InvalidCasesError(str(unknown)) from unknown
 
+    _refuse_new_bookmarks_of_no_section(cases, before, sections)
     _refuse_repeats(cases)
     if not sbis_allowed:
         _refuse_new_sbis(cases, before)
@@ -93,6 +93,29 @@ def _validated(patched: Any) -> list[schemas.Case]:
         return _CASES.validate_python(patched)
     except pydantic.ValidationError as invalid:
         raise InvalidCasesError(str(invalid)) from invalid
+
+
+def _refuse_new_bookmarks_of_no_section(
+    cases: list[models.Case],
+    before: list[models.Case],
+    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+) -> None:
+    """Refuse a bookmark that was not kept before the patch, of a guide there is not
+    or of a section its guide has not."""
+    kept = {(b.document_id, b.section_id) for case in before for b in case.bookmarks}
+    for case in cases:
+        for bookmark in case.bookmarks:
+            if (bookmark.document_id, bookmark.section_id) in kept:
+                continue
+            guide = sections.get(bookmark.document_id)
+            if guide is None:
+                message = "A guide to bookmark does not exist"
+                raise InvalidCasesError(message)
+            if not guide.has(bookmark.section_id):
+                message = (
+                    f"Guide {bookmark.document_id} has no section {bookmark.section_id}"
+                )
+                raise InvalidCasesError(message)
 
 
 def _refuse_repeats(cases: list[models.Case]) -> None:

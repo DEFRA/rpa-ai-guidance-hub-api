@@ -162,6 +162,9 @@ class GuideSections:
     def id_at(self, anchor: str) -> guidance_ids.SectionId | None:
         return self.by_anchor.get(anchor)
 
+    def has(self, section_id: guidance_ids.SectionId) -> bool:
+        return section_id in self.by_anchor.values()
+
     def anchor_of(self, section_id: guidance_ids.SectionId) -> str | None:
         return next((a for a, s in self.by_anchor.items() if s == section_id), None)
 
