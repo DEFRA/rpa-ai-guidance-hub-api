@@ -12,9 +12,9 @@ both, but only once a pull request is raised.
 
 import argparse
 import ast
+import pathlib
 import sys
 from collections.abc import Iterable, Iterator
-from pathlib import Path
 
 
 def _is_raises(item: ast.withitem) -> bool:
@@ -45,7 +45,7 @@ def blocks_with_more_than_one_call(source: str) -> Iterator[int]:
             yield node.lineno
 
 
-def _python_files(paths: Iterable[Path]) -> Iterator[Path]:
+def _python_files(paths: Iterable[pathlib.Path]) -> Iterator[pathlib.Path]:
     for path in paths:
         if path.is_dir():
             yield from sorted(path.rglob("*.py"))
@@ -56,7 +56,10 @@ def _python_files(paths: Iterable[Path]) -> Iterator[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "paths", nargs="+", type=Path, help="files, or folders to search for *.py"
+        "paths",
+        nargs="+",
+        type=pathlib.Path,
+        help="files, or folders to search for *.py",
     )
     args = parser.parse_args(argv)
 
