@@ -23,15 +23,13 @@ async def pinned(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user: models.User,
     filters: Mapping[str, Sequence[str | None]],
-) -> tuple[
-    list[tuple[guidance_models.DocumentSummary, int]],
-    dict[str, list[guidance_models.OptionCount]],
-]:
-    """The whole guides the user has pinned, in their order, that the filters let
-    through, as `GET /guides` lists them, each with its position among all the
-    user's pins, sections too; and each filter's values among all the whole guides
-    pinned, with their counts. A guide that no longer exists is left out, of the
-    list and of the positions, as a patch of the pins leaves it out.
+    s3_client: Any,
+) -> tuple[list[models.ListedPin], dict[str, list[guidance_models.OptionCount]]]:
+    """Every pin of the user's, guides and sections of guides, in their order, whose
+    guide the filters let through, each with its position among all the user's pins;
+    and each filter's values among the guides pinned, whole or by a section, each
+    guide counted once. A guide that no longer exists is left out, of the list and
+    of the positions, as a patch of the pins leaves it out.
 
     Raises:
         guidance_service.UnknownFilterValueError: if a filter value is not in the
@@ -40,18 +38,39 @@ async def pinned(
     named = [pin.document_id for pin in user.pins]
     existing = await guidance_records.existing(database, named)
     live = [pin for pin in user.pins if pin.document_id in existing]
-    whole = {
-        pin.document_id: position
+    guides = list(dict.fromkeys(pin.document_id for pin in live))
+    summaries, counts = await _listed(database, guides, filters)
+    shown = [
+        (position, pin)
         for position, pin in enumerate(live)
-        if pin.section_id is None
-    }
-    summaries, counts = await _listed(database, list(whole), filters)
+        if pin.document_id in summaries
+    ]
+    sections = await guide_sections(
+        database,
+        {pin.document_id for _, pin in shown if pin.section_id is not None},
+        s3_client,
+    )
     listed = [
-        (summaries[guide], position)
-        for guide, position in whole.items()
-        if guide in summaries
+        models.ListedPin(
+            summary=summaries[pin.document_id],
+            pin=pin,
+            anchor=_anchor(pin, sections),
+            position=position,
+        )
+        for position, pin in shown
     ]
     return listed, counts
+
+
+def _anchor(
+    pin: models.Pin,
+    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+) -> str | None:
+    """A pinned section's anchor in its guide's latest version; none for a whole
+    guide, or for a section the guide no longer has."""
+    if pin.section_id is None or pin.document_id not in sections:
+        return None
+    return sections[pin.document_id].anchor_of(pin.section_id)
 
 
 async def recently_opened(

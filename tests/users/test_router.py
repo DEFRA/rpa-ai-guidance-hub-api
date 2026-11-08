@@ -772,7 +772,7 @@ class TestThePinnedList:
             (str(second), 1),
         ]
 
-    async def test_lists_only_whole_guides_each_where_it_is_among_all_the_pins(
+    async def test_lists_a_pinned_section_with_its_anchor_and_heading_in_its_place(
         self, client, database, content_url
     ):
         user_id = await _user(client)
@@ -787,8 +787,40 @@ class TestThePinnedList:
 
         body = await _listed(client, user_id)
 
-        assert [(item["id"], item["position"]) for item in body["items"]] == [
-            (str(whole), 1)
+        assert [
+            {key: item[key] for key in ("id", "position", "section", "heading")}
+            for item in body["items"]
+        ] == [
+            {
+                "id": str(sectioned),
+                "position": 0,
+                "section": "1-one",
+                "heading": "1 One",
+            },
+            {"id": str(whole), "position": 1, "section": None, "heading": None},
+        ]
+        assert uuid.UUID(body["items"][0]["sectionId"]).version == 7
+        assert body["items"][1]["sectionId"] is None
+
+    async def test_a_guide_pinned_whole_and_by_a_section_is_listed_for_each_but_counted_once(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        crm = await _guide(
+            database, "CRM", {"systems": ["CRM"]}, content_url=content_url
+        )
+        await _patch(
+            client, user_id, _add(crm), _add(crm, section="1-one", heading="1 One")
+        )
+
+        body = await _listed(client, user_id, system="CRM")
+
+        assert [(item["id"], item["section"]) for item in body["items"]] == [
+            (str(crm), "1-one"),
+            (str(crm), None),
+        ]
+        assert [(o["label"], o["count"]) for o in body["counts"]["system"]] == [
+            ("CRM", 1)
         ]
 
     async def test_no_scheme_chooses_the_pinned_guides_specific_to_no_scheme(

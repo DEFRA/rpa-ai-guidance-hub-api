@@ -176,22 +176,32 @@ class User(pydantic.BaseModel):
 
 
 class PinnedSummary(guidance_schemas.DocumentSummary):
-    """A pinned guide as `GET /guides` lists it, with its position among all the
-    user's pins, which a patch of the pins takes, whatever the filters show."""
+    """A pin as the Pinned page lists it: its guide as `GET /guides` lists it, with
+    the pin's position among all the user's pins, which a patch of the pins takes,
+    whatever the filters show; and for a section, its id, its anchor in the guide's
+    latest version and its heading as it read when it was pinned."""
 
     position: int
+    section_id: guidance_ids.SectionId | None = pydantic.Field(alias="sectionId")
+    section: str | None
+    heading: str | None
 
     @classmethod
-    def pinned_at(
-        cls, summary: guidance_models.DocumentSummary, position: int
-    ) -> PinnedSummary:
-        listed = guidance_schemas.DocumentSummary.from_model(summary)
-        return cls(**listed.model_dump(by_alias=True), position=position)
+    def from_listed(cls, listed: models.ListedPin) -> PinnedSummary:
+        summary = guidance_schemas.DocumentSummary.from_model(listed.summary)
+        return cls(
+            **summary.model_dump(by_alias=True),
+            position=listed.position,
+            sectionId=listed.pin.section_id,
+            section=listed.anchor,
+            heading=listed.pin.heading,
+        )
 
 
 class Pinned(pydantic.BaseModel):
-    """The guides the user has pinned, in their order, as `GET /guides` lists them,
-    and each filter's values among them with their counts."""
+    """The user's pins, guides and sections of guides, in their order, each with its
+    guide as `GET /guides` lists it, and each filter's values among their guides
+    with their counts."""
 
     items: list[PinnedSummary]
     counts: dict[str, list[guidance_schemas.OptionCount]]

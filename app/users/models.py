@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
 from app.guidance import ids as guidance_ids
+from app.guidance import models as guidance_models
 from app.users import ids
 
 # Who signed in, as the identity provider names them: the tenant and the user's
@@ -201,6 +202,19 @@ class GuideSections:
         if section_id in in_order:
             return in_order.index(section_id)
         return len(in_order)
+
+
+@dataclasses.dataclass(frozen=True)
+class ListedPin:
+    """A pin as the Pinned page lists it: its guide as `GET /guides` lists it, the
+    pin, a section's anchor in the guide's latest version (none for a whole guide,
+    or a section it no longer has), and where the pin is among all the user's
+    pins."""
+
+    summary: guidance_models.DocumentSummary
+    pin: Pin
+    anchor: str | None
+    position: int
 
 
 @dataclasses.dataclass(frozen=True)

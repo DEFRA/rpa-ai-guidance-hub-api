@@ -221,23 +221,25 @@ async def record_opened(
 
 @router.get("/{user_id}/pins")
 async def read_pins(
-    user_id: ids.UserId, database: Database, filters: HubFilters
+    user_id: ids.UserId,
+    database: Database,
+    filters: HubFilters,
+    s3_client: S3Client,
 ) -> schemas.Pinned:
-    """The whole guides the user has pinned, in their order, as `GET /guides` lists
-    them, with the same filters and counts, each with its position among all the
-    user's pins. A guide that no longer exists is left out."""
+    """The user's pins, guides and sections of guides, in their order, each with its
+    guide as `GET /guides` lists it and its position among all the user's pins, and
+    a section with its id, anchor and heading. The hub's filters narrow the list by
+    each pin's guide, and the counts are among the guides pinned, each counted once.
+    A guide that no longer exists is left out."""
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
     try:
-        listed, counts = await service.pinned(database, user, filters)
+        listed, counts = await service.pinned(database, user, filters, s3_client)
     except guidance_service.UnknownFilterValueError as unknown:
         raise _unprocessable(unknown) from unknown
     return schemas.Pinned(
-        items=[
-            schemas.PinnedSummary.pinned_at(summary, position)
-            for summary, position in listed
-        ],
+        items=[schemas.PinnedSummary.from_listed(pin) for pin in listed],
         counts=guidance_schemas.counts_from_model(counts),
     )
 

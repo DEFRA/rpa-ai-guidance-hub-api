@@ -476,7 +476,7 @@
         "type": "object"
       },
       "Pinned": {
-        "description": "The guides the user has pinned, in their order, as `GET /guides` lists them,\nand each filter's values among them with their counts.",
+        "description": "The user's pins, guides and sections of guides, in their order, each with its\nguide as `GET /guides` lists it, and each filter's values among their guides\nwith their counts.",
         "properties": {
           "counts": {
             "additionalProperties": {
@@ -504,12 +504,23 @@
         "type": "object"
       },
       "PinnedSummary": {
-        "description": "A pinned guide as `GET /guides` lists it, with its position among all the\nuser's pins, which a patch of the pins takes, whatever the filters show.",
+        "description": "A pin as the Pinned page lists it: its guide as `GET /guides` lists it, with\nthe pin's position among all the user's pins, which a patch of the pins takes,\nwhatever the filters show; and for a section, its id, its anchor in the guide's\nlatest version and its heading as it read when it was pinned.",
         "properties": {
           "createdAt": {
             "format": "date-time",
             "title": "Createdat",
             "type": "string"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
           },
           "id": {
             "format": "uuid",
@@ -535,6 +546,29 @@
             "title": "Position",
             "type": "integer"
           },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "sectionId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sectionid"
+          },
           "source": {
             "$ref": "#/components/schemas/Source"
           }
@@ -545,7 +579,10 @@
           "source",
           "createdAt",
           "latestVersion",
-          "position"
+          "position",
+          "sectionId",
+          "section",
+          "heading"
         ],
         "title": "PinnedSummary",
         "type": "object"
@@ -1916,7 +1953,7 @@
     },
     "/users/{user_id}/pins": {
       "get": {
-        "description": "The whole guides the user has pinned, in their order, as `GET /guides` lists\nthem, with the same filters and counts, each with its position among all the\nuser's pins. A guide that no longer exists is left out.",
+        "description": "The user's pins, guides and sections of guides, in their order, each with its\nguide as `GET /guides` lists it and its position among all the user's pins, and\na section with its id, anchor and heading. The hub's filters narrow the list by\neach pin's guide, and the counts are among the guides pinned, each counted once.\nA guide that no longer exists is left out.",
         "operationId": "read_pins_users__user_id__pins_get",
         "parameters": [
           {
