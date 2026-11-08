@@ -362,6 +362,19 @@ class TestPins:
         assert await _patch(client, user_id, _add(guide, section="9-gone")) == 422
         assert await _pinned_ids(client, user_id) == []
 
+    async def test_a_section_id_of_another_guide_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        other = await _guide(database, "Payments", content_url=content_url)
+        await _patch(client, user_id, _add(other, section="1-one", heading="1 One"))
+        [pinned] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+        operation = _add(guide, "/-", sectionId=pinned["sectionId"])
+
+        assert await _patch(client, user_id, operation) == 422
+        assert await _pinned_ids(client, user_id) == [str(other)]
+
 
 async def _open(client, user_id: str, guide_id) -> int:
     response = await client.post(

@@ -59,6 +59,27 @@ class TestAdding:
 
         assert _patched([], _add(added)) == [_pin(A, ONE, "1 One")]
 
+    def test_a_section_added_by_an_id_its_guide_does_not_have_is_refused(self):
+        operation = _add({"guideId": str(A), "sectionId": str(uuid.uuid7())})
+
+        with pytest.raises(REFUSED):
+            _patched([], operation)
+
+    def test_a_section_of_another_guide_added_by_its_id_is_refused(self):
+        operation = _add({"guideId": str(B), "sectionId": str(ONE)})
+
+        with pytest.raises(REFUSED):
+            _patched([], operation)
+
+    def test_a_pinned_section_its_guide_no_longer_has_stays(self):
+        gone = uuid.uuid7()
+        current = [_pin(A, gone, "Gone"), _pin(B)]
+
+        assert _patched(current, {"op": "move", "from": "/1", "path": "/0"}) == [
+            _pin(B),
+            _pin(A, gone, "Gone"),
+        ]
+
     def test_a_guide_and_a_section_of_it_can_both_be_pinned(self):
         added = {"guideId": str(A), "section": "1-one", "heading": "1 One"}
 

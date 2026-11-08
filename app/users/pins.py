@@ -8,9 +8,10 @@ nothing.
 Only those four, and `add`, `remove` and `move` only on top-level positions. The patch
 is applied by `json_patch` to the pins as answered, and what it makes is then read as
 pins are: a section kept by its id, one added by its anchor the section the guide has
-there, and each guide or section once. A patch applies whole or not at all: it is
-applied here to a copy of the pins as read, and they are then written only if they
-are still what was read (`records.patch_pins`).
+there, a new pin of a section its guide has, and each guide or section once. A pin
+kept from before stays, even when its guide no longer has its section. A patch
+applies whole or not at all: it is applied here to a copy of the pins as read, and
+they are then written only if they are still what was read (`records.patch_pins`).
 """
 
 from __future__ import annotations
@@ -66,6 +67,7 @@ def applied(
     except (pydantic.ValidationError, schemas.UnknownSectionError) as invalid:
         raise InvalidPinsError(str(invalid)) from invalid
 
+    _refuse_new_pins_of_no_section(kept, pins, sections)
     places = [(pin.document_id, pin.section_id) for pin in kept]
     if len(set(places)) != len(places):
         message = "A guide, or a section of one, can be pinned only once"
@@ -125,4 +127,21 @@ def _refuse_below_a_position(operations: Sequence[schemas.PatchOperation]) -> No
         deepest = 2 if isinstance(operation, schemas.TestOperation) else 1
         if any(not 1 <= pointer.count("/") <= deepest for pointer in pointers):
             message = f"{operation.path!r} is not a position in the pins"
+            raise InvalidPinsError(message)
+
+
+def _refuse_new_pins_of_no_section(
+    kept: Sequence[models.Pin],
+    before: Sequence[models.Pin],
+    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+) -> None:
+    """Refuse a pin of a section that was not pinned before the patch, unless its
+    guide has that section."""
+    pinned = {(pin.document_id, pin.section_id) for pin in before}
+    for pin in kept:
+        if pin.section_id is None or (pin.document_id, pin.section_id) in pinned:
+            continue
+        guide = sections.get(pin.document_id)
+        if guide is None or not guide.has(pin.section_id):
+            message = f"Guide {pin.document_id} has no section {pin.section_id}"
             raise InvalidPinsError(message)
