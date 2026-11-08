@@ -9,26 +9,31 @@ bookmarks or cases at once, and a `test` keeps a patch made on cases that have c
 since from applying. A case left with no bookmarks stays, for the UI to remove in the
 same patch.
 
-What the patch makes is then read as the cases are, so a reference that is not one, a
-case or a key twice, a section bookmarked twice to one case, or anything the structure
-does not hold is refused whichever operation made it. A patch applies whole or not at
-all: it is applied here to a copy of the cases as read, and they are written only if
-they are still what was read (`records.patch_cases`).
+What the patch makes is then read as the cases are, whichever operations made it. A
+reference that is not one, a case or a key twice, a section bookmarked twice to one
+case, a guide there is not, or anything the structure does not hold is refused. A patch
+applies whole or not at all: it is applied here to a copy of the cases as read, and they
+are written only if they are still what was read (`records.patch_cases`).
 """
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING, Any
 
 import pydantic
 
-from app.guidance import ids as guidance_ids
 from app.users import json_patch, models, schemas
 
 if TYPE_CHECKING:
     import datetime as dt
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
+
+    from app.guidance import ids as guidance_ids
+
+    type SectionsOf = Callable[
+        [set[guidance_ids.DocumentId]],
+        Awaitable[Mapping[guidance_ids.DocumentId, models.GuideSections]],
+    ]
 
 _CASES = pydantic.TypeAdapter(list[schemas.Case])
 
@@ -37,18 +42,20 @@ class InvalidCasesError(ValueError):
     """Raised for a patch whose cases would not be valid ones."""
 
 
-def applied(
+async def applied(
     read: Sequence[Mapping[str, Any]],
     operations: Sequence[schemas.PatchOperation],
     now: dt.datetime,
-    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+    sections_of: SectionsOf,
     *,
     sbis_allowed: bool,
 ) -> list[dict[str, Any]]:
     """The cases, as stored, once the patch is applied to them as answered. A
-    bookmark added without when is added `now`. `sections` has, for every guide the
-    cases and the patch name, its sections by anchor. A new case of SBI, or a new
-    reference for one, is refused unless `sbis_allowed`; one already kept stays.
+    bookmark added without when is added `now`. `sections_of` gives guides' sections
+    by anchor, leaving out a guide with no version: first for the guides the cases
+    name, to answer them, then for any other guide the patched cases name, which must
+    be one there is. A new case of SBI, or a new reference for one, is refused unless
+    `sbis_allowed`; one already kept stays.
 
     Raises:
         InvalidCasesError: if the cases the patch makes are not valid ones.
@@ -56,17 +63,24 @@ def applied(
         json_patch.PatchTestFailedError: if a `test` fails.
     """
     before = [models.Case.from_document(case) for case in read]
+    named_before = {b.document_id for case in before for b in case.bookmarks}
+    sections = dict(await sections_of(named_before))
     answered = [
         schemas.Case.from_model(case, sections).model_dump(by_alias=True, mode="json")
         for case in before
     ]
-    patched = json_patch.applied(answered, operations)
+    proposed = _validated(json_patch.applied(answered, operations))
+
+    added = {b.guide_id for case in proposed for b in case.bookmarks} - named_before
+    sections |= await sections_of(added)
+    if not added <= sections.keys():
+        message = "A guide to bookmark does not exist"
+        raise InvalidCasesError(message)
+
     try:
-        cases = [
-            case.to_model(now, sections) for case in _CASES.validate_python(patched)
-        ]
-    except (pydantic.ValidationError, schemas.UnknownSectionError) as invalid:
-        raise InvalidCasesError(str(invalid)) from invalid
+        cases = [case.to_model(now, sections) for case in proposed]
+    except schemas.UnknownSectionError as unknown:
+        raise InvalidCasesError(str(unknown)) from unknown
 
     _refuse_repeats(cases)
     if not sbis_allowed:
@@ -74,53 +88,11 @@ def applied(
     return [case.to_document() for case in cases]
 
 
-def guides_in(read: Sequence[Mapping[str, Any]]) -> set[guidance_ids.DocumentId]:
-    """Every guide bookmarked to the cases, as stored."""
-    return {
-        bookmark.document_id
-        for case in read
-        for bookmark in models.Case.from_document(case).bookmarks
-    }
-
-
-def guides_added(
-    operations: Sequence[schemas.PatchOperation],
-) -> set[guidance_ids.DocumentId]:
-    """Every guide an `add` puts in, at whatever depth, so the caller can check
-    they exist.
-
-    Raises:
-        InvalidCasesError: if a guide id is not one.
-    """
-    added = (
-        operation.value
-        for operation in operations
-        if isinstance(operation, schemas.AddOperation)
-    )
-    return {_guide_id(text) for value in added for text in _guide_ids_in(value)}
-
-
-def _guide_ids_in(value: Any) -> list[Any]:
-    """Every `guideId` in a JSON value, at any depth."""
-    found: list[Any] = []
-    pending = [value]
-    while pending:
-        current = pending.pop()
-        if isinstance(current, dict):
-            if "guideId" in current:
-                found.append(current["guideId"])
-            pending.extend(current.values())
-        elif isinstance(current, list):
-            pending.extend(current)
-    return found
-
-
-def _guide_id(text: Any) -> guidance_ids.DocumentId:
+def _validated(patched: Any) -> list[schemas.Case]:
     try:
-        return guidance_ids.DocumentId(uuid.UUID(str(text)))
-    except ValueError as invalid:
-        message = f"{text!r} is not a guide id"
-        raise InvalidCasesError(message) from invalid
+        return _CASES.validate_python(patched)
+    except pydantic.ValidationError as invalid:
+        raise InvalidCasesError(str(invalid)) from invalid
 
 
 def _refuse_repeats(cases: list[models.Case]) -> None:

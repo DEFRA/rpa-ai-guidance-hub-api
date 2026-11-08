@@ -23,6 +23,8 @@ from app.users import cases, ids, json_patch, models, pins, records, schemas, se
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
 
+    from app.guidance import ids as guidance_ids
+
 router = fastapi.APIRouter(prefix="/users", tags=["users"])
 
 Database = Annotated[
@@ -166,20 +168,17 @@ async def patch_cases(
     an SBI where SBIs are switched off, a case or a key twice, a section bookmarked
     twice to one case, a guide there is not, or a section it has not.
     """
-    try:
-        added = cases.guides_added(operations)
-    except cases.InvalidCasesError as invalid:
-        raise _unprocessable(invalid) from invalid
-    if not added <= await guidance_records.existing(database, list(added)):
-        missing = "A guide to bookmark does not exist"
-        raise _unprocessable(missing)
-
     now = dt.datetime.now(tz=dt.UTC)
 
+    async def sections_of(
+        guides: set[guidance_ids.DocumentId],
+    ) -> dict[guidance_ids.DocumentId, models.GuideSections]:
+        return await service.guide_sections(database, guides, s3_client)
+
     async def patched(read: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        named = cases.guides_in(read) | added
-        sections = await service.guide_sections(database, named, s3_client)
-        return cases.applied(read, operations, now, sections, sbis_allowed=sbis_allowed)
+        return await cases.applied(
+            read, operations, now, sections_of, sbis_allowed=sbis_allowed
+        )
 
     try:
         found = await records.patch_cases(database, user_id, patched)

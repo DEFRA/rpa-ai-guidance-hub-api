@@ -40,14 +40,20 @@ def _bookmark(guide=A, section_id=ONE, heading="1 One"):
     )
 
 
-def _patched(read, *operations, sbis=True):
+async def _sections_of(guides):
+    """The sections of only the guides asked for, as the router reads them, so a
+    guide the patch names but the caller is not asked about has none."""
+    return {guide: SECTIONS[guide] for guide in guides if guide in SECTIONS}
+
+
+async def _patched(read, *operations, sbis=True):
     return [
         models.Case.from_document(document)
-        for document in cases.applied(
+        for document in await cases.applied(
             read,
             PATCH.validate_python(list(operations)),
             NOW,
-            SECTIONS,
+            _sections_of,
             sbis_allowed=sbis,
         )
     ]
@@ -66,8 +72,10 @@ def _new_case(ref, case_type="case", section="1-one", **bookmark):
 
 
 class TestBookmarking:
-    def test_a_bookmark_to_a_new_case_makes_the_case_with_a_key_and_when(self):
-        [case] = _patched([], _new_case("W1234567", section="2-two", heading="2 Two"))
+    async def test_a_bookmark_to_a_new_case_makes_the_case_with_a_key_and_when(self):
+        [case] = await _patched(
+            [], _new_case("W1234567", section="2-two", heading="2 Two")
+        )
 
         assert case.key.version == 4
         assert case == _case(
@@ -78,13 +86,13 @@ class TestBookmarking:
             key=case.key,
         )
 
-    def test_a_section_named_by_its_anchor_is_kept_by_its_id(self):
-        [case] = _patched([], _new_case("W1234567", section="2-two"))
+    async def test_a_section_named_by_its_anchor_is_kept_by_its_id(self):
+        [case] = await _patched([], _new_case("W1234567", section="2-two"))
 
         assert [bookmark.section_id for bookmark in case.bookmarks] == [TWO]
 
-    def test_a_patch_reads_each_bookmarked_section_at_its_anchor(self):
-        [case] = _patched(
+    async def test_a_patch_reads_each_bookmarked_section_at_its_anchor(self):
+        [case] = await _patched(
             _stored(_case("W1234567", _bookmark(A, TWO), _bookmark(A, ONE))),
             {"op": "test", "path": "/0/bookmarks/0/section", "value": "2-two"},
             {"op": "remove", "path": "/0/bookmarks/0"},
@@ -92,10 +100,10 @@ class TestBookmarking:
 
         assert case.bookmarks == (_bookmark(A, ONE),)
 
-    def test_a_bookmark_added_to_a_case_keeps_the_case_and_its_others_as_they_were(
+    async def test_a_bookmark_added_to_a_case_keeps_the_case_and_its_others_as_they_were(
         self,
     ):
-        [case] = _patched(
+        [case] = await _patched(
             _stored(_case("W1234567", _bookmark())),
             {"op": "test", "path": "/0/key", "value": str(KEY)},
             {
@@ -113,39 +121,41 @@ class TestBookmarking:
             ),
         )
 
-    def test_a_case_id_is_kept_in_upper_case(self):
-        [case] = _patched([], _new_case("w1234567"))
+    async def test_a_case_id_is_kept_in_upper_case(self):
+        [case] = await _patched([], _new_case("w1234567"))
 
         assert case.ref == "W1234567"
 
     @pytest.mark.parametrize("sbi", ["105000000", "999999999"])
-    def test_an_sbi_from_105000000_to_999999999_is_kept(self, sbi):
-        [case] = _patched([], _new_case(sbi, case_type="sbi"))
+    async def test_an_sbi_from_105000000_to_999999999_is_kept(self, sbi):
+        [case] = await _patched([], _new_case(sbi, case_type="sbi"))
 
         assert (case.type, case.ref) == ("sbi", sbi)
 
-    def test_an_sbi_already_kept_stays_when_sbis_are_switched_off(self):
+    async def test_an_sbi_already_kept_stays_when_sbis_are_switched_off(self):
         read = _stored(_case("123456789", _bookmark(), case_type="sbi"))
 
-        [case] = _patched(read, {"op": "remove", "path": "/0/bookmarks/0"}, sbis=False)
+        [case] = await _patched(
+            read, {"op": "remove", "path": "/0/bookmarks/0"}, sbis=False
+        )
 
         assert (case.type, case.ref, case.bookmarks) == ("sbi", "123456789", ())
 
-    def test_removing_a_case_s_last_bookmark_leaves_the_case(self):
-        [case] = _patched(
+    async def test_removing_a_case_s_last_bookmark_leaves_the_case(self):
+        [case] = await _patched(
             _stored(_case("W1234567", _bookmark())),
             {"op": "remove", "path": "/0/bookmarks/0"},
         )
 
         assert case.bookmarks == ()
 
-    def test_several_bookmarks_move_in_one_patch_each_keeping_its_section(self):
+    async def test_several_bookmarks_move_in_one_patch_each_keeping_its_section(self):
         read = _stored(
             _case("W1234567", _bookmark(A, ONE), _bookmark(A, TWO)),
             _case("W7654321", key=OTHER_KEY),
         )
 
-        first, second = _patched(
+        first, second = await _patched(
             read,
             {"op": "test", "path": "/0/bookmarks/0/guideId", "value": str(A)},
             {"op": "move", "from": "/0/bookmarks/0", "path": "/1/bookmarks/0"},
@@ -155,6 +165,49 @@ class TestBookmarking:
         assert first.bookmarks == ()
         assert [bookmark.section_id for bookmark in second.bookmarks] == [ONE, TWO]
         assert (first.key, second.key) == (KEY, OTHER_KEY)
+
+    async def test_a_guide_named_only_by_a_changed_member_is_read_for_its_sections(
+        self,
+    ):
+        read = _stored(_case("W1234567", _bookmark(A, ONE)))
+
+        [case] = await _patched(
+            read,
+            {"op": "remove", "path": "/0/bookmarks/0/sectionId"},
+            {"op": "add", "path": "/0/bookmarks/0/guideId", "value": str(B)},
+            {"op": "add", "path": "/0/bookmarks/0/section", "value": "1-other"},
+        )
+
+        assert [(b.document_id, b.section_id) for b in case.bookmarks] == [(B, OTHER)]
+
+    async def test_a_guide_named_as_guide_id_is_read_for_its_sections(self):
+        [case] = await _patched(
+            [],
+            {
+                "op": "add",
+                "path": "/-",
+                "value": {
+                    "type": "case",
+                    "ref": "W1234567",
+                    "bookmarks": [{"guide_id": str(B), "section": "1-other"}],
+                },
+            },
+        )
+
+        assert [(b.document_id, b.section_id) for b in case.bookmarks] == [(B, OTHER)]
+
+    async def test_a_bookmark_kept_stays_when_its_guide_no_longer_exists(self):
+        gone = uuid.uuid7()
+        read = _stored(
+            _case("W1234567", _bookmark(gone, ONE)),
+            _case("W7654321", key=OTHER_KEY),
+        )
+
+        _, case = await _patched(
+            read, {"op": "move", "from": "/0/bookmarks/0", "path": "/1/bookmarks/0"}
+        )
+
+        assert case.bookmarks == (_bookmark(gone, ONE),)
 
 
 class TestRefusing:
@@ -175,19 +228,19 @@ class TestRefusing:
             ("crn", "W1234567"),
         ],
     )
-    def test_a_reference_that_is_not_one_is_refused(self, case_type, ref):
+    async def test_a_reference_that_is_not_one_is_refused(self, case_type, ref):
         operation = _new_case(ref, case_type=case_type)
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], operation)
+            await _patched([], operation)
 
-    def test_a_new_sbi_is_refused_while_sbis_are_switched_off(self):
+    async def test_a_new_sbi_is_refused_while_sbis_are_switched_off(self):
         operation = _new_case("123456789", case_type="sbi")
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], operation, sbis=False)
+            await _patched([], operation, sbis=False)
 
-    def test_a_case_made_an_sbi_is_refused_while_sbis_are_switched_off(self):
+    async def test_a_case_made_an_sbi_is_refused_while_sbis_are_switched_off(self):
         read = _stored(_case("W1234567", _bookmark()))
         made_an_sbi = [
             {"op": "add", "path": "/0/type", "value": "sbi"},
@@ -195,23 +248,25 @@ class TestRefusing:
         ]
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(read, *made_an_sbi, sbis=False)
+            await _patched(read, *made_an_sbi, sbis=False)
 
-    def test_a_kept_sbi_given_another_reference_is_refused_while_sbis_are_off(self):
+    async def test_a_kept_sbi_given_another_reference_is_refused_while_sbis_are_off(
+        self,
+    ):
         read = _stored(_case("123456789", _bookmark(), case_type="sbi"))
         operation = {"op": "add", "path": "/0/ref", "value": "987654321"}
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(read, operation, sbis=False)
+            await _patched(read, operation, sbis=False)
 
-    def test_a_case_twice_is_refused(self):
+    async def test_a_case_twice_is_refused(self):
         read = _stored(_case("W1234567", _bookmark()))
         operation = _new_case("w1234567")
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(read, operation)
+            await _patched(read, operation)
 
-    def test_two_cases_with_one_key_are_refused(self):
+    async def test_two_cases_with_one_key_are_refused(self):
         read = _stored(_case("W1234567", _bookmark()))
         same_key = {
             "op": "add",
@@ -225,9 +280,9 @@ class TestRefusing:
         }
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(read, same_key)
+            await _patched(read, same_key)
 
-    def test_the_same_section_of_a_guide_twice_in_a_case_is_refused(self):
+    async def test_the_same_section_of_a_guide_twice_in_a_case_is_refused(self):
         read = _stored(_case("W1234567", _bookmark(A, ONE)))
         again = {
             "op": "add",
@@ -236,16 +291,16 @@ class TestRefusing:
         }
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(read, again)
+            await _patched(read, again)
 
     @pytest.mark.parametrize("anchor", ["1-other", "9-never"])
-    def test_a_section_the_guide_has_not_at_that_anchor_is_refused(self, anchor):
+    async def test_a_section_the_guide_has_not_at_that_anchor_is_refused(self, anchor):
         operation = _new_case("W1234567", section=anchor)
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], operation)
+            await _patched([], operation)
 
-    def test_a_bookmark_of_no_section_is_refused(self):
+    async def test_a_bookmark_of_no_section_is_refused(self):
         whole_guide = {
             "op": "add",
             "path": "/-",
@@ -257,16 +312,31 @@ class TestRefusing:
         }
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], whole_guide)
+            await _patched([], whole_guide)
 
-    def test_anything_the_structure_does_not_hold_is_refused(self):
+    async def test_anything_the_structure_does_not_hold_is_refused(self):
         read = _stored(_case("W1234567", _bookmark()))
         operation = {"op": "add", "path": "/0/colour", "value": "red"}
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(read, operation)
+            await _patched(read, operation)
 
-    def test_a_failed_test_applies_nothing(self):
+    @pytest.mark.parametrize("guide", [uuid.uuid7(), "not-a-guide-id"])
+    async def test_a_bookmark_moved_to_a_guide_there_is_not_is_refused(self, guide):
+        read = _stored(_case("W1234567", _bookmark(A, ONE)))
+        operation = {"op": "add", "path": "/0/bookmarks/0/guideId", "value": str(guide)}
+
+        with pytest.raises(cases.InvalidCasesError):
+            await _patched(read, operation)
+
+    async def test_a_new_bookmark_of_a_guide_there_is_not_is_refused(self):
+        operation = _new_case("W1234567", section=None, sectionId=str(ONE))
+        operation["value"]["bookmarks"][0]["guideId"] = str(uuid.uuid7())
+
+        with pytest.raises(cases.InvalidCasesError):
+            await _patched([], operation)
+
+    async def test_a_failed_test_applies_nothing(self):
         read = _stored(_case("W1234567", _bookmark()))
         stale = PATCH.validate_python(
             [
@@ -276,43 +346,4 @@ class TestRefusing:
         )
 
         with pytest.raises(json_patch.PatchTestFailedError):
-            cases.applied(read, stale, NOW, SECTIONS, sbis_allowed=True)
-
-
-class TestGuides:
-    def test_added_are_the_guides_any_add_puts_in_at_any_depth(self):
-        operations = PATCH.validate_python(
-            [
-                _new_case("W1234567"),
-                {
-                    "op": "add",
-                    "path": "/1/bookmarks/0",
-                    "value": {"guideId": str(B), "section": "1-other"},
-                },
-                {"op": "test", "path": "/0/bookmarks/0/guideId", "value": str(B)},
-            ]
-        )
-
-        assert cases.guides_added(operations) == {A, B}
-
-    def test_added_refuses_a_guide_id_that_is_not_one(self):
-        operations = PATCH.validate_python(
-            [
-                {
-                    "op": "add",
-                    "path": "/0/bookmarks/0",
-                    "value": {"guideId": "not-a-uuid"},
-                }
-            ]
-        )
-
-        with pytest.raises(cases.InvalidCasesError):
-            cases.guides_added(operations)
-
-    def test_in_the_stored_cases_are_every_guide_bookmarked_to_any_case(self):
-        read = _stored(
-            _case("W1234567", _bookmark(A)),
-            _case("W7654321", _bookmark(B, OTHER), key=OTHER_KEY),
-        )
-
-        assert cases.guides_in(read) == {A, B}
+            await cases.applied(read, stale, NOW, _sections_of, sbis_allowed=True)

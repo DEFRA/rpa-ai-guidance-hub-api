@@ -474,6 +474,27 @@ class TestCaseBookmarks:
         assert response.status_code == 422
         assert await _cases(client, user_id) == []
 
+    async def test_a_bookmark_moved_to_a_guide_there_is_not_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide))
+        [before] = await _cases(client, user_id)
+
+        response = await _patch_cases(
+            client,
+            user_id,
+            {
+                "op": "add",
+                "path": "/0/bookmarks/0/guideId",
+                "value": str(uuid.uuid7()),
+            },
+        )
+
+        assert response.status_code == 422
+        assert await _cases(client, user_id) == [before]
+
     async def test_a_guide_there_is_not_is_refused(self, client):
         user_id = await _user(client)
 
