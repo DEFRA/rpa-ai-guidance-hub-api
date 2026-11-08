@@ -176,18 +176,26 @@ class TestRefusing:
         ],
     )
     def test_a_reference_that_is_not_one_is_refused(self, case_type, ref):
+        operation = _new_case(ref, case_type=case_type)
+
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], _new_case(ref, case_type=case_type))
+            _patched([], operation)
 
     def test_a_new_sbi_is_refused_while_sbis_are_switched_off(self):
+        operation = _new_case("123456789", case_type="sbi")
+
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], _new_case("123456789", case_type="sbi"), sbis=False)
+            _patched([], operation, sbis=False)
 
     def test_a_case_twice_is_refused(self):
+        read = _stored(_case("W1234567", _bookmark()))
+        operation = _new_case("w1234567")
+
         with pytest.raises(cases.InvalidCasesError):
-            _patched(_stored(_case("W1234567", _bookmark())), _new_case("w1234567"))
+            _patched(read, operation)
 
     def test_two_cases_with_one_key_are_refused(self):
+        read = _stored(_case("W1234567", _bookmark()))
         same_key = {
             "op": "add",
             "path": "/-",
@@ -200,7 +208,7 @@ class TestRefusing:
         }
 
         with pytest.raises(cases.InvalidCasesError):
-            _patched(_stored(_case("W1234567", _bookmark())), same_key)
+            _patched(read, same_key)
 
     def test_the_same_section_of_a_guide_twice_in_a_case_is_refused(self):
         read = _stored(_case("W1234567", _bookmark(A, ONE)))
@@ -215,8 +223,10 @@ class TestRefusing:
 
     @pytest.mark.parametrize("anchor", ["1-other", "9-never"])
     def test_a_section_the_guide_has_not_at_that_anchor_is_refused(self, anchor):
+        operation = _new_case("W1234567", section=anchor)
+
         with pytest.raises(cases.InvalidCasesError):
-            _patched([], _new_case("W1234567", section=anchor))
+            _patched([], operation)
 
     def test_a_bookmark_of_no_section_is_refused(self):
         whole_guide = {
@@ -233,11 +243,11 @@ class TestRefusing:
             _patched([], whole_guide)
 
     def test_anything_the_structure_does_not_hold_is_refused(self):
+        read = _stored(_case("W1234567", _bookmark()))
+        operation = {"op": "add", "path": "/0/colour", "value": "red"}
+
         with pytest.raises(cases.InvalidCasesError):
-            _patched(
-                _stored(_case("W1234567", _bookmark())),
-                {"op": "add", "path": "/0/colour", "value": "red"},
-            )
+            _patched(read, operation)
 
     def test_a_failed_test_applies_nothing(self):
         read = _stored(_case("W1234567", _bookmark()))
