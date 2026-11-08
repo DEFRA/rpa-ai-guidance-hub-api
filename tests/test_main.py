@@ -30,11 +30,16 @@ def test_lifespan(mocker):
     ensure_user_indexes = mocker.patch(
         "app.users.records.ensure_indexes", mocker.AsyncMock()
     )
+    # And pins kept as guide ids become pins, before a request reads one.
+    convert_pins = mocker.patch(
+        "app.users.records.convert_pins_kept_as_ids", mocker.AsyncMock()
+    )
 
     with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
         mock_get_mongo.assert_called_once()
         ensure_indexes.assert_awaited_once()
         ensure_user_indexes.assert_awaited_once()
+        convert_pins.assert_awaited_once()
 
     mock_mongo_client.close.assert_awaited_once()
 

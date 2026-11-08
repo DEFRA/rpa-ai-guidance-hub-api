@@ -46,6 +46,7 @@ def client(
     )
     mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
     mocker.patch("app.users.records.ensure_indexes", mocker.AsyncMock())
+    mocker.patch("app.users.records.convert_pins_kept_as_ids", mocker.AsyncMock())
 
     fastapi_app = app.entrypoints.fastapi.app
     fastapi_app.dependency_overrides[router.get_staging_service] = lambda: mock_service

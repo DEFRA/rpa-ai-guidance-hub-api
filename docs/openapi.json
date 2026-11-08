@@ -411,6 +411,70 @@
         "title": "Person",
         "type": "object"
       },
+      "PinInBrief": {
+        "description": "A guide the user has pinned, or a section of one, as the side navigation shows\nit: the guide's id and title, and for a section, its id, its anchor and its\nheading as it read when it was pinned.",
+        "properties": {
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "sectionId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sectionid"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "sectionId",
+          "section",
+          "heading"
+        ],
+        "title": "PinInBrief",
+        "type": "object"
+      },
       "Pinned": {
         "description": "The guides the user has pinned, in their order, as `GET /guides` lists them,\nand each filter's values among them with their counts.",
         "properties": {
@@ -437,33 +501,6 @@
           "counts"
         ],
         "title": "Pinned",
-        "type": "object"
-      },
-      "PinnedGuide": {
-        "description": "A guide the user has pinned, as the side navigation names it.",
-        "properties": {
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          }
-        },
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "PinnedGuide",
         "type": "object"
       },
       "PinnedSummary": {
@@ -925,7 +962,7 @@
         "type": "object"
       },
       "User": {
-        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin. With them, what the side navigation shows of their own lists, so a page asks\nonce: the guides they have pinned, in their order, and their cases.",
+        "description": "A user as answered: the hub's own id for them, who they are to the identity\nprovider, their name as of their latest sign-in, and when they first signed\nin. With them, what the side navigation shows of their own lists, so a page asks\nonce: the guides and sections they have pinned, in their order, and their cases.",
         "properties": {
           "cases": {
             "items": {
@@ -960,7 +997,7 @@
           },
           "pinned": {
             "items": {
-              "$ref": "#/components/schemas/PinnedGuide"
+              "$ref": "#/components/schemas/PinInBrief"
             },
             "title": "Pinned",
             "type": "array"
@@ -1752,7 +1789,7 @@
     },
     "/users/{user_id}": {
       "get": {
-        "description": "One user, by the hub's id for them, with the guides they have pinned and the\nguides bookmarked to their cases.",
+        "description": "One user, by the hub's id for them, with the guides and sections they have\npinned and the guides bookmarked to their cases.",
         "operationId": "read_user_users__user_id__get",
         "parameters": [
           {
@@ -1879,7 +1916,7 @@
     },
     "/users/{user_id}/pins": {
       "get": {
-        "description": "The guides the user has pinned, in their order, as `GET /guides` lists them,\nwith the same filters and counts. A guide that no longer exists is left out.",
+        "description": "The whole guides the user has pinned, in their order, as `GET /guides` lists\nthem, with the same filters and counts, each with its position among all the\nuser's pins. A guide that no longer exists is left out.",
         "operationId": "read_pins_users__user_id__pins_get",
         "parameters": [
           {
@@ -1995,7 +2032,7 @@
         ]
       },
       "patch": {
-        "description": "Change the guides the user has pinned by a JSON Patch (sent as\n`application/json-patch+json`) on their ordered ids:\n`add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level\npositions only. The patch applies whole or not at all.\n\nPositions are as the user's pins are answered, without the guides that no\nlonger exist, which the patch leaves out of the pins it writes.\n\n409 when a `test` fails, as for a page showing pins that have changed since;\n422 for anything else, a guide pinned twice, or a guide there is not.",
+        "description": "Change the guides, and sections of guides, the user has pinned by a JSON\nPatch (sent as `application/json-patch+json`) on the ordered list of them, each\n`{guideId, sectionId, section, heading}` with its section at its anchor, a whole\nguide with no section: `add` (at `/0` to pin at the top), `remove` and `move` on\ntop-level positions only, and `test` on those or a pin's own fields. A section is\nkept by its id; one added by its anchor alone (`section`) is the section the\nguide's latest version has there. The patch applies whole or not at all.\n\nPositions are as the user's pins are answered, without those of guides that no\nlonger exist, which the patch leaves out of the pins it writes.\n\n409 when a `test` fails, as for a page showing pins that have changed since;\n422 for anything else: a guide or a section pinned twice, a guide there is not,\nor a section it has not.",
         "operationId": "patch_pins_users__user_id__pins_patch",
         "parameters": [
           {

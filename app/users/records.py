@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pymongo
 import pymongo.errors
@@ -39,6 +39,41 @@ async def ensure_indexes(
     that the first two sign-ins race an index that already exists."""
     await database[USERS].create_index(
         [(models.TENANT_ID, 1), (models.OBJECT_ID, 1)], unique=True
+    )
+
+
+async def convert_pins_kept_as_ids(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> None:
+    """Turn each pin kept as a bare guide id, as every pin was before a section could
+    be pinned, into a pin of that whole guide, where it was. Idempotent, and called
+    at startup, before a request reads a pin; not needed once every environment has
+    run it."""
+    # A whole guide's pin as stored, with the guide id `$map` gives it.
+    of_guide_id = models.Pin(
+        document_id=cast("guidance_ids.DocumentId", "$$pin")
+    ).to_document()
+    await database[USERS].update_many(
+        {models.PINS: {"$type": "binData"}},
+        [
+            {
+                "$set": {
+                    models.PINS: {
+                        "$map": {
+                            "input": f"${models.PINS}",
+                            "as": "pin",
+                            "in": {
+                                "$cond": [
+                                    {"$eq": [{"$type": "$$pin"}, "binData"]},
+                                    of_guide_id,
+                                    "$$pin",
+                                ]
+                            },
+                        }
+                    }
+                }
+            }
+        ],
     )
 
 
@@ -141,15 +176,15 @@ class ListChangingError(RuntimeError):
 async def patch_pins(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
-    patched: Callable[[list[guidance_ids.DocumentId]], list[guidance_ids.DocumentId]],
+    patched: Callable[[list[models.Pin]], Awaitable[list[models.Pin]]],
 ) -> bool:
     """Change the user's pins to what `patched` makes of them, whole or not at all
-    (`_patch_list`)."""
+    (`_patch_list`). `patched` may read the database, for the sections the pins
+    name."""
 
-    async def made(
-        read: list[guidance_ids.DocumentId],
-    ) -> list[guidance_ids.DocumentId]:
-        return patched(read)
+    async def made(read: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        pins = await patched([models.Pin.from_document(pin) for pin in read])
+        return [pin.to_document() for pin in pins]
 
     return await _patch_list(database, user_id, models.PINS, made)
 

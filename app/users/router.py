@@ -89,8 +89,8 @@ async def sign_in(
 async def read_user(
     user_id: ids.UserId, database: Database, s3_client: S3Client
 ) -> schemas.User:
-    """One user, by the hub's id for them, with the guides they have pinned and the
-    guides bookmarked to their cases."""
+    """One user, by the hub's id for them, with the guides and sections they have
+    pinned and the guides bookmarked to their cases."""
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
@@ -102,17 +102,22 @@ async def patch_pins(
     user_id: ids.UserId,
     operations: Annotated[list[schemas.PatchOperation], fastapi.Body()],
     database: Database,
+    s3_client: S3Client,
 ) -> None:
-    """Change the guides the user has pinned by a JSON Patch (sent as
-    `application/json-patch+json`) on their ordered ids:
-    `add` (at `/0` to pin at the top), `remove`, `move` and `test`, on top-level
-    positions only. The patch applies whole or not at all.
+    """Change the guides, and sections of guides, the user has pinned by a JSON
+    Patch (sent as `application/json-patch+json`) on the ordered list of them, each
+    `{guideId, sectionId, section, heading}` with its section at its anchor, a whole
+    guide with no section: `add` (at `/0` to pin at the top), `remove` and `move` on
+    top-level positions only, and `test` on those or a pin's own fields. A section is
+    kept by its id; one added by its anchor alone (`section`) is the section the
+    guide's latest version has there. The patch applies whole or not at all.
 
-    Positions are as the user's pins are answered, without the guides that no
+    Positions are as the user's pins are answered, without those of guides that no
     longer exist, which the patch leaves out of the pins it writes.
 
     409 when a `test` fails, as for a page showing pins that have changed since;
-    422 for anything else, a guide pinned twice, or a guide there is not.
+    422 for anything else: a guide or a section pinned twice, a guide there is not,
+    or a section it has not.
     """
     try:
         added = pins.guides_added(operations)
@@ -121,27 +126,28 @@ async def patch_pins(
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
-    existing_guides = await guidance_records.existing(database, [*user.pins, *added])
+    named = {pin.document_id for pin in user.pins}
+    existing_guides = await guidance_records.existing(database, [*named, *added])
     if not added <= existing_guides:
         missing = "A guide to pin does not exist"
         raise _unprocessable(missing)
-    gone = set(user.pins) - existing_guides
+    gone = named - existing_guides
+
+    async def patched(read: list[models.Pin]) -> list[models.Pin]:
+        live = [pin for pin in read if pin.document_id not in gone]
+        needed = pins.guides_with_sections(live, operations)
+        sections = await service.guide_sections(database, needed, s3_client)
+        return pins.applied(live, operations, sections)
 
     try:
-        patched = await records.patch_pins(
-            database,
-            user_id,
-            lambda read: pins.applied(
-                [pin for pin in read if pin not in gone], operations
-            ),
-        )
+        found = await records.patch_pins(database, user_id, patched)
     except (json_patch.PatchRefusedError, pins.InvalidPinsError) as refused:
         raise _unprocessable(refused) from refused
     except (json_patch.PatchTestFailedError, records.ListChangingError) as stale:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_409_CONFLICT, detail=str(stale)
         ) from stale
-    if not patched:
+    if not found:
         raise _no_user(user_id)
 
 
@@ -217,8 +223,9 @@ async def record_opened(
 async def read_pins(
     user_id: ids.UserId, database: Database, filters: HubFilters
 ) -> schemas.Pinned:
-    """The guides the user has pinned, in their order, as `GET /guides` lists them,
-    with the same filters and counts. A guide that no longer exists is left out."""
+    """The whole guides the user has pinned, in their order, as `GET /guides` lists
+    them, with the same filters and counts, each with its position among all the
+    user's pins. A guide that no longer exists is left out."""
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
@@ -263,9 +270,8 @@ async def _answered(
     user: models.User,
     s3_client: Any,
 ) -> schemas.User:
-    pinned = await service.pinned_titles(database, user)
-    guides = await service.case_guides(database, user, s3_client)
-    return schemas.User.from_model(user, pinned, guides)
+    guides = await service.guides_in_brief(database, user, s3_client)
+    return schemas.User.from_model(user, guides)
 
 
 def _unprocessable(reason: object) -> fastapi.HTTPException:

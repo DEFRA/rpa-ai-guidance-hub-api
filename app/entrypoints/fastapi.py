@@ -41,6 +41,7 @@ async def lifespan(application: fastapi.FastAPI) -> AsyncGenerator[None]:
     database = await mongo.get_db(client)
     await records.ensure_indexes(database)
     await user_records.ensure_indexes(database)
+    await user_records.convert_pins_kept_as_ids(database)
 
     working = _working_the_queue(application, database)
     yield

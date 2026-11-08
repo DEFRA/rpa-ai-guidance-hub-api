@@ -41,11 +41,28 @@ class OpenedGuide(pydantic.BaseModel):
     guide_id: guidance_ids.DocumentId = pydantic.Field(alias="guideId")
 
 
-class PinnedGuide(pydantic.BaseModel):
-    """A guide the user has pinned, as the side navigation names it."""
+class PinInBrief(pydantic.BaseModel):
+    """A guide the user has pinned, or a section of one, as the side navigation shows
+    it: the guide's id and title, and for a section, its id, its anchor and its
+    heading as it read when it was pinned."""
 
     id: guidance_ids.DocumentId
     title: str | None
+    section_id: guidance_ids.SectionId | None = pydantic.Field(alias="sectionId")
+    section: str | None
+    heading: str | None
+
+    @classmethod
+    def from_model(cls, pin: models.Pin, guide: models.GuideInBrief) -> PinInBrief:
+        return cls(
+            id=pin.document_id,
+            title=guide.title,
+            sectionId=pin.section_id,
+            section=None
+            if pin.section_id is None
+            else guide.sections.anchor_of(pin.section_id),
+            heading=pin.heading,
+        )
 
 
 class PlacedBookmark(pydantic.BaseModel):
@@ -126,30 +143,34 @@ class User(pydantic.BaseModel):
     """A user as answered: the hub's own id for them, who they are to the identity
     provider, their name as of their latest sign-in, and when they first signed
     in. With them, what the side navigation shows of their own lists, so a page asks
-    once: the guides they have pinned, in their order, and their cases."""
+    once: the guides and sections they have pinned, in their order, and their cases."""
 
     id: ids.UserId
     identity: Identity
     display_name: str | None = pydantic.Field(alias="displayName")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
-    pinned: list[PinnedGuide]
+    pinned: list[PinInBrief]
     cases: list[CaseInBrief]
 
     @classmethod
     def from_model(
         cls,
         user: models.User,
-        pinned: list[tuple[guidance_ids.DocumentId, str | None]],
         guides: Mapping[guidance_ids.DocumentId, models.GuideInBrief],
     ) -> User:
-        """The user, with their pins with titles, and their cases with the guides
-        bookmarked to them (`guides`)."""
+        """The user, with their pins and their cases, each with the guides it names
+        as `guides` has them; a guide not there is one that no longer exists, and is
+        left out."""
         return cls(
             id=user.id,
             identity=Identity(tenantId=user.tenant_id, objectId=user.object_id),
             displayName=user.display_name,
             createdAt=user.created_at,
-            pinned=[PinnedGuide(id=pin, title=title) for pin, title in pinned],
+            pinned=[
+                PinInBrief.from_model(pin, guides[pin.document_id])
+                for pin in user.pins
+                if pin.document_id in guides
+            ],
             cases=[CaseInBrief.from_model(case, guides) for case in user.cases],
         )
 
@@ -243,7 +264,80 @@ PatchOperation = Annotated[
 
 
 class UnknownSectionError(ValueError):
-    """Raised for a bookmark of a section the guide does not have."""
+    """Raised for a pin or a bookmark of a section the guide does not have."""
+
+
+def _section_named(
+    guide_id: guidance_ids.DocumentId,
+    section_id: guidance_ids.SectionId | None,
+    anchor: str | None,
+    sections: models.GuideSections | None,
+) -> guidance_ids.SectionId | None:
+    """The section a pin or a bookmark names: by its id, as it is; else by its
+    anchor, the section the guide's latest version has there (`sections`). None if
+    it names neither.
+
+    Raises:
+        UnknownSectionError: for an anchor the guide does not have.
+    """
+    if section_id is not None or anchor is None:
+        return section_id
+    found = None if sections is None else sections.id_at(anchor)
+    if found is None:
+        message = f"Guide {guide_id} has no section {anchor!r}"
+        raise UnknownSectionError(message)
+    return found
+
+
+class Pin(pydantic.BaseModel):
+    """A guide the user has pinned, or a section of one, as the user's pins are
+    patched whole: a whole guide has no section. A section is kept by its id, and
+    answered with its anchor too (`section`); one added by its anchor alone is the
+    section the guide has there. `heading` is the section's heading as it read when
+    it was pinned."""
+
+    guide_id: guidance_ids.DocumentId = pydantic.Field(alias="guideId")
+    section_id: guidance_ids.SectionId | None = pydantic.Field(
+        default=None, alias="sectionId"
+    )
+    section: str | None = pydantic.Field(default=None, min_length=1)
+    heading: str | None = None
+
+    model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
+
+    @pydantic.model_validator(mode="after")
+    def _heading_of_a_section(self) -> Pin:
+        if (
+            self.heading is not None
+            and self.section_id is None
+            and self.section is None
+        ):
+            message = "Only a pinned section has a heading"
+            raise ValueError(message)
+        return self
+
+    @classmethod
+    def from_model(cls, pin: models.Pin, sections: models.GuideSections | None) -> Pin:
+        return cls(
+            guideId=pin.document_id,
+            sectionId=pin.section_id,
+            section=None
+            if pin.section_id is None or sections is None
+            else sections.anchor_of(pin.section_id),
+            heading=pin.heading,
+        )
+
+    def to_model(self, sections: models.GuideSections | None) -> models.Pin:
+        """Raises:
+        UnknownSectionError: as `_section_named`.
+        """
+        return models.Pin(
+            document_id=self.guide_id,
+            section_id=_section_named(
+                self.guide_id, self.section_id, self.section, sections
+            ),
+            heading=self.heading,
+        )
 
 
 class CaseBookmark(pydantic.BaseModel):
@@ -284,11 +378,11 @@ class CaseBookmark(pydantic.BaseModel):
         UnknownSectionError: if the bookmark names no section, or names one by an
             anchor the guide does not have.
         """
-        section_id = self.section_id
-        if section_id is None and self.section is not None and sections is not None:
-            section_id = sections.id_at(self.section)
+        section_id = _section_named(
+            self.guide_id, self.section_id, self.section, sections
+        )
         if section_id is None:
-            message = f"Guide {self.guide_id} has no section {self.section!r}"
+            message = f"A bookmark of guide {self.guide_id} names no section"
             raise UnknownSectionError(message)
         return models.Bookmark(
             document_id=self.guide_id,
