@@ -9,15 +9,16 @@ id. The API trusts the UI for who the user is, as it does for everything else.
 from __future__ import annotations
 
 import datetime as dt
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import fastapi
 
-from app.common import mongo
+from app import config
+from app.common import mongo, s3
 from app.guidance import records as guidance_records
 from app.guidance import schemas as guidance_schemas
 from app.guidance import service as guidance_service
-from app.users import ids, json_patch, models, pins, records, schemas, service
+from app.users import cases, ids, json_patch, models, pins, records, schemas, service
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
@@ -46,10 +47,24 @@ def _hub_filters(
 
 HubFilters = Annotated[dict[str, list[str | None]], fastapi.Depends(_hub_filters)]
 
+S3Client = Annotated[Any, fastapi.Depends(s3.get_s3_client)]
+
+
+def sbi_bookmarks() -> bool:
+    """Whether a guide can be bookmarked to an SBI here, as well as to a Case ID:
+    not unless the environment's setting says so."""
+    return config.get_config().feature_sbi_bookmarks
+
+
+SbiBookmarks = Annotated[bool, fastapi.Depends(sbi_bookmarks)]
+
 
 @router.post("", status_code=fastapi.status.HTTP_201_CREATED)
 async def sign_in(
-    signed_in: schemas.SignedIn, database: Database, response: fastapi.Response
+    signed_in: schemas.SignedIn,
+    database: Database,
+    s3_client: S3Client,
+    response: fastapi.Response,
 ) -> schemas.User:
     """Find the user who has signed in, or make them on their first sign-in.
 
@@ -65,16 +80,19 @@ async def sign_in(
     )
     if not created:
         response.status_code = fastapi.status.HTTP_200_OK
-    return await _answered(database, user)
+    return await _answered(database, user, s3_client)
 
 
 @router.get("/{user_id}")
-async def read_user(user_id: ids.UserId, database: Database) -> schemas.User:
-    """One user, by the hub's id for them, with the guides they have pinned."""
+async def read_user(
+    user_id: ids.UserId, database: Database, s3_client: S3Client
+) -> schemas.User:
+    """One user, by the hub's id for them, with the guides they have pinned and the
+    guides bookmarked to their cases."""
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
-    return await _answered(database, user)
+    return await _answered(database, user, s3_client)
 
 
 @router.patch("/{user_id}/pins", status_code=fastapi.status.HTTP_204_NO_CONTENT)
@@ -122,6 +140,56 @@ async def patch_pins(
             status_code=fastapi.status.HTTP_409_CONFLICT, detail=str(stale)
         ) from stale
     if not patched:
+        raise _no_user(user_id)
+
+
+@router.patch("/{user_id}/cases", status_code=fastapi.status.HTTP_204_NO_CONTENT)
+async def patch_cases(
+    user_id: ids.UserId,
+    operations: Annotated[list[schemas.PatchOperation], fastapi.Body()],
+    database: Database,
+    s3_client: S3Client,
+    sbis_allowed: SbiBookmarks,
+) -> None:
+    """Change the user's cases and the sections of guides bookmarked to them by a
+    JSON Patch (sent as `application/json-patch+json`) over the whole list of cases,
+    each `{key, type, ref, bookmarks}`, each bookmark `{guideId, sectionId, section,
+    heading, createdAt}` with its section at its anchor: `add`, `remove`, `move` and
+    `test`, at any depth. A section is kept by its id; one added by its anchor alone
+    (`section`) is the section the guide's latest version has there. A new case is
+    given its key. The patch applies whole or not at all; a case left with no
+    bookmarks stays.
+
+    409 when a `test` fails, as for a page showing cases that have changed since;
+    422 for anything else: an operation that cannot apply, a reference that is not
+    one (a Case ID is a letter then seven digits, an SBI nine digits from 105000000),
+    an SBI where SBIs are switched off, a case or a key twice, a section bookmarked
+    twice to one case, a guide there is not, or a section it has not.
+    """
+    try:
+        added = cases.guides_added(operations)
+    except cases.InvalidCasesError as invalid:
+        raise _unprocessable(invalid) from invalid
+    if not added <= await guidance_records.existing(database, list(added)):
+        missing = "A guide to bookmark does not exist"
+        raise _unprocessable(missing)
+
+    now = dt.datetime.now(tz=dt.UTC)
+
+    async def patched(read: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        named = cases.guides_in(read) | added
+        sections = await service.guide_sections(database, named, s3_client)
+        return cases.applied(read, operations, now, sections, sbis_allowed=sbis_allowed)
+
+    try:
+        found = await records.patch_cases(database, user_id, patched)
+    except (json_patch.PatchRefusedError, cases.InvalidCasesError) as refused:
+        raise _unprocessable(refused) from refused
+    except (json_patch.PatchTestFailedError, records.ListChangingError) as stale:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT, detail=str(stale)
+        ) from stale
+    if not found:
         raise _no_user(user_id)
 
 
@@ -192,10 +260,13 @@ async def read_recently_opened(
 
 
 async def _answered(
-    database: pymongo.asynchronous.database.AsyncDatabase, user: models.User
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    user: models.User,
+    s3_client: Any,
 ) -> schemas.User:
     pinned = await service.pinned_titles(database, user)
-    return schemas.User.from_model(user, pinned)
+    guides = await service.case_guides(database, user, s3_client)
+    return schemas.User.from_model(user, pinned, guides)
 
 
 def _unprocessable(reason: object) -> fastapi.HTTPException:

@@ -7,6 +7,7 @@ once and read back the same however often, or however many at once, ask.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 import pytest
 
@@ -107,3 +108,61 @@ class _OvertakenCollection:
     async def update_one(self, *args, **kwargs):
         await self._other_request()
         return await self._collection.update_one(*args, **kwargs)
+
+
+# A version's content, as stored: its sections are "1 One" and "2 Two".
+CONTENT = "# Claims\n\n## 1 One\n\nText one.\n\n## 2 Two\n\nText two.\n"
+
+
+@pytest.fixture
+async def stored(mongo_database, tmp_path) -> tuple[models.Version, Any]:
+    """A guide's one version, with its content stored, and where the content is."""
+    content = tmp_path / "content.md"
+    content.write_text(CONTENT)
+    version = models.Version(
+        id=ids.new_version_id(),
+        document_id=ids.new_document_id(),
+        content_url=content.as_uri(),
+        created_at=dt.datetime.now(tz=dt.UTC),
+    )
+    await records.create_version(mongo_database, version)
+    return version, content
+
+
+class TestSectionIdsOfLatestVersions:
+    async def test_are_given_from_the_version_s_content_in_its_order(
+        self, mongo_database, stored
+    ):
+        version, _ = stored
+
+        given = await section_ids.of_latest(
+            mongo_database, {version.document_id: version}, s3_client=None
+        )
+
+        assert list(given[version.document_id]) == ["1-one", "2-two"]
+
+    async def test_are_not_read_from_the_content_again_once_kept(
+        self, mongo_database, stored
+    ):
+        version, content = stored
+        latest = {version.document_id: version}
+        first = await section_ids.of_latest(mongo_database, latest, s3_client=None)
+        content.unlink()
+
+        again = await section_ids.of_latest(mongo_database, latest, s3_client=None)
+
+        assert again == first
+
+    async def test_are_none_and_none_are_kept_while_the_content_is_not_there(
+        self, mongo_database, stored
+    ):
+        version, content = stored
+        content.unlink()
+
+        given = await section_ids.of_latest(
+            mongo_database, {version.document_id: version}, s3_client=None
+        )
+
+        kept = await mongo_database[records.VERSIONS].find_one({"_id": version.id})
+        assert given == {version.document_id: {}}
+        assert "sectionIds" not in kept

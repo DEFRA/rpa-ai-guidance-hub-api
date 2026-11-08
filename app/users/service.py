@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.guidance import ids as guidance_ids
 from app.guidance import models as guidance_models
 from app.guidance import records as guidance_records
+from app.guidance import section_ids
 from app.guidance import service as guidance_service
+from app.users import models
 
 if TYPE_CHECKING:
     import datetime as dt
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     import pymongo.asynchronous.database
-
-    from app.users import models
 
 
 async def pinned(
@@ -125,11 +125,53 @@ async def pinned_titles(
     that no longer exists is left out."""
     documents = await guidance_records.find_many(database, list(user.pins))
     latest = await guidance_records.latest_versions_of(database, list(documents))
+    return [
+        (pin, _title(documents[pin], latest.get(pin)))
+        for pin in user.pins
+        if pin in documents
+    ]
 
-    def title(pin: guidance_ids.DocumentId) -> str | None:
-        newest = latest.get(pin)
-        if newest is not None and newest.title:
-            return newest.title
-        return documents[pin].metadata.get("guideTitle")
 
-    return [(pin, title(pin)) for pin in user.pins if pin in documents]
+async def case_guides(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    user: models.User,
+    s3_client: Any,
+) -> dict[guidance_ids.DocumentId, models.GuideInBrief]:
+    """The guides bookmarked to the user's cases, for the side navigation, each with
+    its title, as a pinned guide's, and its sections. A guide that no longer exists
+    is left out."""
+    named = {b.document_id for case in user.cases for b in case.bookmarks}
+    documents = await guidance_records.find_many(database, list(named))
+    latest = await guidance_records.latest_versions_of(database, list(documents))
+    given = await section_ids.of_latest(database, latest, s3_client)
+    return {
+        guide: models.GuideInBrief(
+            title=_title(document, latest.get(guide)),
+            sections=models.GuideSections(given.get(guide, {})),
+        )
+        for guide, document in documents.items()
+    }
+
+
+async def guide_sections(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    guides: Iterable[guidance_ids.DocumentId],
+    s3_client: Any,
+) -> dict[guidance_ids.DocumentId, models.GuideSections]:
+    """Each guide's sections as its latest version has them, given their ids if they
+    have none yet; a guide with no version is left out."""
+    latest = await guidance_records.latest_versions_of(database, list(guides))
+    given = await section_ids.of_latest(database, latest, s3_client)
+    return {
+        guide: models.GuideSections(by_anchor) for guide, by_anchor in given.items()
+    }
+
+
+def _title(
+    document: guidance_models.Document, newest: guidance_models.Version | None
+) -> str | None:
+    """A guide's title, for the side navigation: its newest version's, else what its
+    author called it."""
+    if newest is not None and newest.title:
+        return newest.title
+    return document.metadata.get("guideTitle")
