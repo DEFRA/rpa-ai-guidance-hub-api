@@ -13,8 +13,9 @@ refreshed each time; the id and `createdAt` are set only when the record is made
 from __future__ import annotations
 
 import datetime as dt
+import typing
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pymongo
 import pymongo.errors
@@ -51,7 +52,7 @@ async def convert_pins_kept_as_ids(
     run it."""
     # A whole guide's pin as stored, with the guide id `$map` gives it.
     of_guide_id = models.Pin(
-        document_id=cast("guidance_ids.DocumentId", "$$pin")
+        document_id=typing.cast("guidance_ids.DocumentId", "$$pin")
     ).to_document()
     await database[USERS].update_many(
         {models.PINS: {"$type": "binData"}},
