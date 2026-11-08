@@ -187,6 +187,23 @@ class TestRefusing:
         with pytest.raises(cases.InvalidCasesError):
             _patched([], operation, sbis=False)
 
+    def test_a_case_made_an_sbi_is_refused_while_sbis_are_switched_off(self):
+        read = _stored(_case("W1234567", _bookmark()))
+        made_an_sbi = [
+            {"op": "add", "path": "/0/type", "value": "sbi"},
+            {"op": "add", "path": "/0/ref", "value": "123456789"},
+        ]
+
+        with pytest.raises(cases.InvalidCasesError):
+            _patched(read, *made_an_sbi, sbis=False)
+
+    def test_a_kept_sbi_given_another_reference_is_refused_while_sbis_are_off(self):
+        read = _stored(_case("123456789", _bookmark(), case_type="sbi"))
+        operation = {"op": "add", "path": "/0/ref", "value": "987654321"}
+
+        with pytest.raises(cases.InvalidCasesError):
+            _patched(read, operation, sbis=False)
+
     def test_a_case_twice_is_refused(self):
         read = _stored(_case("W1234567", _bookmark()))
         operation = _new_case("w1234567")

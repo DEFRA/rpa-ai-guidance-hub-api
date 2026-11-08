@@ -47,8 +47,8 @@ def applied(
 ) -> list[dict[str, Any]]:
     """The cases, as stored, once the patch is applied to them as answered. A
     bookmark added without when is added `now`. `sections` has, for every guide the
-    cases and the patch name, its sections by anchor. A new case of SBI is refused
-    unless `sbis_allowed`; one already kept stays.
+    cases and the patch name, its sections by anchor. A new case of SBI, or a new
+    reference for one, is refused unless `sbis_allowed`; one already kept stays.
 
     Raises:
         InvalidCasesError: if the cases the patch makes are not valid ones.
@@ -70,7 +70,7 @@ def applied(
 
     _refuse_repeats(cases)
     if not sbis_allowed:
-        _refuse_new_sbis(cases, {case.key for case in before})
+        _refuse_new_sbis(cases, before)
     return [case.to_document() for case in cases]
 
 
@@ -143,8 +143,10 @@ def _refuse_repeats(cases: list[models.Case]) -> None:
             raise InvalidCasesError(message)
 
 
-def _refuse_new_sbis(cases: list[models.Case], kept: set[Any]) -> None:
-    """Refuse a case of SBI that was not kept before the patch."""
-    if any(case.type == "sbi" and case.key not in kept for case in cases):
+def _refuse_new_sbis(cases: list[models.Case], before: list[models.Case]) -> None:
+    """Refuse a case of SBI that was not that SBI, under the same key, before the
+    patch: a new one, a case made an SBI, or an SBI given another reference."""
+    kept = {(case.key, case.ref) for case in before if case.type == "sbi"}
+    if any(case.type == "sbi" and (case.key, case.ref) not in kept for case in cases):
         message = "SBIs cannot be bookmarked to"
         raise InvalidCasesError(message)
