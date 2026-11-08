@@ -22,6 +22,7 @@ from typing import NewType
 
 DocumentId = NewType("DocumentId", uuid.UUID)
 VersionId = NewType("VersionId", uuid.UUID)
+SectionId = NewType("SectionId", uuid.UUID)
 
 UploadId = NewType("UploadId", str)
 FileId = NewType("FileId", str)
@@ -33,3 +34,7 @@ def new_document_id() -> DocumentId:
 
 def new_version_id() -> VersionId:
     return VersionId(uuid.uuid7())
+
+
+def new_section_id() -> SectionId:
+    return SectionId(uuid.uuid7())
