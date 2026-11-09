@@ -522,6 +522,45 @@ class TestCaseBookmarks:
 
         assert response.status_code == 422
 
+    async def test_a_version_whose_guide_was_never_saved_is_refused(
+        self, client, database, content_url
+    ):
+        """Saving a guide writes its version before the guide, so a failure between
+        the two leaves a version that nothing lists, and a bookmark of it would never
+        be seen."""
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": guide})
+
+        response = await _patch_cases(client, user_id, _new_case(guide))
+
+        assert response.status_code == 422
+        assert await _cases(client, user_id) == []
+
+    async def test_a_bookmark_whose_guide_has_gone_stays_when_its_case_changes(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        gone = await _guide(database, "Claims", content_url=content_url)
+        other = await _guide(database, "Payments", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(gone))
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
+
+        response = await _patch_cases(
+            client,
+            user_id,
+            {
+                "op": "add",
+                "path": "/0/bookmarks/-",
+                "value": {"guideId": str(other), "section": "1-one"},
+            },
+        )
+
+        assert response.status_code == 204
+        stored = await database[records.USERS].find_one({"_id": uuid.UUID(user_id)})
+        [case] = stored["cases"]
+        assert [b["documentId"] for b in case["bookmarks"]] == [gone, other]
+
     async def test_a_reference_that_is_not_one_is_refused(
         self, client, database, content_url
     ):

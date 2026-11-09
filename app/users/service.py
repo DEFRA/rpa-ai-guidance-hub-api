@@ -159,8 +159,11 @@ async def guide_sections(
     s3_client: Any,
 ) -> dict[guidance_ids.DocumentId, models.GuideSections]:
     """Each guide's sections as its latest version has them, given their ids if they
-    have none yet; a guide with no version is left out."""
-    latest = await guidance_records.latest_versions_of(database, list(guides))
+    have none yet. A guide with no version is left out, and so is a version with no
+    guide: saving writes the guide last, so one that failed between leaves a version
+    nothing lists."""
+    existing = await guidance_records.existing(database, list(guides))
+    latest = await guidance_records.latest_versions_of(database, list(existing))
     given = await section_ids.of_latest(database, latest, s3_client)
     return {
         guide: models.GuideSections(by_anchor) for guide, by_anchor in given.items()
