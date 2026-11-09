@@ -15,7 +15,13 @@ env:
   AWS_ACCOUNT_ID: "094954420758"
 
 jobs:
+  security-scan:
+    name: Security Scanning
+    uses: ./.github/workflows/scan.yml
+    secrets: inherit
+
   build:
+    needs: security-scan
     if: github.run_number != 1
     name: CDP-build-workflow
     runs-on: ubuntu-latest
@@ -24,23 +30,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version-file: .python-version
-
-      - name: Run tests
-        run: |
-          pipx install uv==0.13.5
-          uv sync --frozen
-          uv run task test
-
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # 8.4.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Build and Publish
         uses: DEFRA/cdp-build-action/build@b1eaad635bf3305b0dd4b3a0f910424a12e77cee
