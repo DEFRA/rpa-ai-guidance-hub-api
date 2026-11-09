@@ -15,3 +15,5 @@ rpa-ai-guidance hub backend.
   (`uv run task openapi-check`, run by the pull-request workflow).
 - `check_raises.py` - fail if a `pytest.raises` block makes more than one call,
   so that only the call under test can raise (run by `uv run task lint`).
+- `check_imports.py` - fail if Python code imports a name rather than a module,
+  or imports relatively (run by `uv run task lint`).
