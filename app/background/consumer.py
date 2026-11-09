@@ -1,35 +1,20 @@
-"""Working messages off a queue, in the API's own process beside its requests.
+"""Working messages off a queue, in the API's own process, as
+[bbc/sqs-consumer](https://github.com/bbc/sqs-consumer) does. What a message holds,
+and what a failure means, are for the handler to know.
 
-The pattern is [bbc/sqs-consumer](https://github.com/bbc/sqs-consumer)'s, in Python.
-A loop long-polls the queue for a message and gives it to a handler:
+When the handler returns, the message is deleted. When it raises, the message is left
+for SQS to deliver again. The handler must be safe to repeat, as SQS may deliver a
+message more than once anyway. While it works, the message is kept invisible, so no
+other consumer takes it.
 
-- **the handler returns**: the message is finished with, and is deleted;
-- **the handler raises**: the message is left, so SQS delivers it again after its
-  visibility timeout, until the queue's redrive policy moves it to the dead-letter
-  queue.
+The handler is told when a delivery is the last: `last_delivery` is true once the
+message's receive count reaches the queue's `maxReceiveCount`. If the handler raises
+then, SQS moves the message to the dead-letter queue, so this is its last chance to
+record the failure.
 
-So what a failure means is for the handler to decide: it returns from one that
-retrying cannot fix, and it is told when a delivery is the last, to record a failure
-it would otherwise leave nobody knowing about. SQS may deliver a message more than
-once anyway, so a handler must be safe to repeat.
-
-While the handler works, the message is kept invisible: its visibility is extended
-every third of its timeout, so a long piece of work is not given to another consumer
-too, and a failed extension can be tried again before the visibility runs out.
-
-Where bbc/sqs-consumer reads a batch and waits for all of it before polling again,
-this runs `concurrency` loops that take one message each. A long poll can answer with
-any number of messages up to the batch, so one large guide in a batch could hold up
-the instance's others until it is done.
-
-A queue that cannot be worked (out of reach, say, or with no dead-letter queue) does
-not stop the API, which has plenty to do without it. Each loop keeps trying, `healthy`
-says so meanwhile, and the work carries on once the queue is put right. The queue's
-settings are read at every poll, so that a queue put right differently is worked as it
-now is, and a message is never received from a queue that could not dead-letter it.
-
-Stopping lets the work in progress finish, as far as the platform waits for it. If
-it is killed first, its message is delivered again once its visibility runs out.
+`concurrency` loops each take one message, not a batch, so a slow message holds up no
+others. A queue that cannot be worked does not stop the API: the loops keep trying,
+and `healthy` says so meanwhile.
 """
 
 from __future__ import annotations
