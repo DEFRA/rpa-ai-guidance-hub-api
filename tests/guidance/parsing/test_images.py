@@ -13,10 +13,10 @@ import io
 from collections.abc import Callable
 from typing import Any
 
-import docx.document
-import docx.oxml.ns
-import docx.oxml.shared
-import docx.text.paragraph
+from docx import document as docx_document
+from docx.oxml import ns
+from docx.oxml import shared as oxml_shared
+from docx.text import paragraph as docx_paragraph
 
 from app.guidance.parsing import parser
 
@@ -50,7 +50,7 @@ def named(data: bytes, extension: str = "png") -> str:
 # The `docx_bytes` fixture's contract, restated as it is in test_inline.py. It cannot
 # be shared through conftest.py: pytest runs with --import-mode=importlib, so the test
 # directory is never put on sys.path and `from conftest import ...` fails at collection.
-Build = Callable[[docx.document.Document], None]
+Build = Callable[[docx_document.Document], None]
 DocxBytes = Callable[[Build], bytes]
 
 
@@ -63,27 +63,27 @@ def _image_content(docx_bytes: DocxBytes, build: Build, index: int = 0) -> str:
     that same-named helpers are different functions.
     """
 
-    def with_heading(document: docx.document.Document) -> None:
+    def with_heading(document: docx_document.Document) -> None:
         document.add_heading(HEADING, level=1)
         build(document)
 
     return parser.parse_docx(docx_bytes(with_heading)).sections[index].content
 
 
-def _picture(paragraph: docx.text.paragraph.Paragraph, data: bytes = PNG) -> Any:
+def _picture(paragraph: docx_paragraph.Paragraph, data: bytes = PNG) -> Any:
     """Draw a picture in a run of its own, the way Word writes one."""
     return paragraph.add_run().add_picture(io.BytesIO(data))
 
 
-def _empty_drawing(paragraph: docx.text.paragraph.Paragraph) -> None:
+def _empty_drawing(paragraph: docx_paragraph.Paragraph) -> None:
     """A drawing holding no picture, as a shape or a chart would be."""
-    paragraph.add_run()._r.append(docx.oxml.shared.OxmlElement("w:drawing"))
+    paragraph.add_run()._r.append(oxml_shared.OxmlElement("w:drawing"))
 
 
-def _unembed(paragraph: docx.text.paragraph.Paragraph) -> None:
+def _unembed(paragraph: docx_paragraph.Paragraph) -> None:
     """Turn an embedded picture into a linked one, which carries no r:embed."""
-    for blip in paragraph._p.iter(docx.oxml.ns.qn("a:blip")):
-        del blip.attrib[docx.oxml.ns.qn("r:embed")]
+    for blip in paragraph._p.iter(ns.qn("a:blip")):
+        del blip.attrib[ns.qn("r:embed")]
 
 
 class TestWhereAPictureGoes:

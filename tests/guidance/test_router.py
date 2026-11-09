@@ -20,9 +20,9 @@ import datetime as dt
 import uuid
 from typing import Any
 
-import fastapi.testclient
 import pymongo.errors
 import pytest
+from fastapi import testclient
 
 from app.common import mongo
 from app.entrypoints import fastapi as entrypoint
@@ -297,7 +297,7 @@ def client(collections, converts, staging, submitter):  # noqa: ARG001 - for the
     connects to MongoDB, and these cases are about the endpoint rather than about
     the service coming up.
     """
-    return fastapi.testclient.TestClient(entrypoint.app)
+    return testclient.TestClient(entrypoint.app)
 
 
 class TestCreatingADocument:

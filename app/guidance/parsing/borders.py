@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import docx.oxml.ns
+from docx.oxml import ns
 
 from app.guidance.parsing import ooxml, tables
 
@@ -48,14 +48,14 @@ _ABSENT = frozenset({"none", "nil"})
 
 def is_boxed(element: Any) -> bool:
     """Whether this body element is a paragraph Word drew a box around."""
-    if element.tag != docx.oxml.ns.qn("w:p"):
+    if element.tag != ns.qn("w:p"):
         return False
 
-    properties = element.find(docx.oxml.ns.qn(ooxml.W_PPR))
+    properties = element.find(ns.qn(ooxml.W_PPR))
     if properties is None:
         return False
 
-    border = properties.find(docx.oxml.ns.qn("w:pBdr"))
+    border = properties.find(ns.qn("w:pBdr"))
     return border is not None and all(_drawn(border, side) for side in _SIDES)
 
 
@@ -75,18 +75,18 @@ def signature(element: Any) -> tuple[Any, ...]:
     are already in one frame, so a run carrying it on some of its paragraphs and not
     others would be split here on the strength of the very thing saying it is one box.
     """
-    properties = element.find(docx.oxml.ns.qn(ooxml.W_PPR))
+    properties = element.find(ns.qn(ooxml.W_PPR))
     if properties is None:
         return ()
 
-    border = properties.find(docx.oxml.ns.qn("w:pBdr"))
+    border = properties.find(ns.qn("w:pBdr"))
     if border is None:
         return ()
 
     return tuple(
         (side, tuple(sorted(edge.attrib.items())))
         for side in _SIDES
-        if (edge := border.find(docx.oxml.ns.qn(side))) is not None
+        if (edge := border.find(ns.qn(side))) is not None
     )
 
 
@@ -101,5 +101,5 @@ def markdown(paragraphs: Iterable[Any], parent: Any) -> str:
 
 def _drawn(border: Any, side: str) -> bool:
     """Whether one side of a border is a line rather than a declared absence."""
-    edge = border.find(docx.oxml.ns.qn(side))
-    return edge is not None and edge.get(docx.oxml.ns.qn("w:val")) not in _ABSENT
+    edge = border.find(ns.qn(side))
+    return edge is not None and edge.get(ns.qn("w:val")) not in _ABSENT

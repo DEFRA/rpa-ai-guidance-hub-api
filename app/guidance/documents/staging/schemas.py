@@ -5,7 +5,7 @@ import logging
 from typing import Annotated, Any
 
 import pydantic
-import pydantic.alias_generators
+from pydantic import alias_generators
 
 from app.guidance import ids
 from app.guidance.documents.staging import models
@@ -95,7 +95,7 @@ class UploadCallbackPayload(pydantic.BaseModel):
 
 class StagedDocumentResponse(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(
-        alias_generator=pydantic.alias_generators.to_camel, populate_by_name=True
+        alias_generator=alias_generators.to_camel, populate_by_name=True
     )
 
     file_id: ids.FileId

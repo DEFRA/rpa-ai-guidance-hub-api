@@ -13,21 +13,21 @@ from typing import Any
 
 import audit_docx
 import docx
-import docx.enum.style
-import docx.oxml.ns
-import docx.oxml.shared
-import docx.text.paragraph
+from docx.enum import style as enum_style
+from docx.oxml import ns
+from docx.oxml import shared as oxml_shared
+from docx.text import paragraph as docx_paragraph
 
 
 def _text_box(*runs: tuple[str, str]) -> Any:
     """A w:txbxContent holding one paragraph of runs, each with a colour or "" ."""
-    box = docx.oxml.shared.OxmlElement("w:txbxContent")
-    paragraph = docx.oxml.shared.OxmlElement("w:p")
+    box = oxml_shared.OxmlElement("w:txbxContent")
+    paragraph = oxml_shared.OxmlElement("w:p")
     for text, colour in runs:
-        run = docx.oxml.shared.OxmlElement("w:r")
+        run = oxml_shared.OxmlElement("w:r")
         if colour:
             run.append(_colour(colour))
-        element = docx.oxml.shared.OxmlElement("w:t")
+        element = oxml_shared.OxmlElement("w:t")
         element.text = text
         run.append(element)
         paragraph.append(run)
@@ -37,9 +37,9 @@ def _text_box(*runs: tuple[str, str]) -> Any:
 
 def _colour(value: str) -> Any:
     """The run properties that paint a run one colour."""
-    properties = docx.oxml.shared.OxmlElement("w:rPr")
-    element = docx.oxml.shared.OxmlElement("w:color")
-    element.set(docx.oxml.ns.qn("w:val"), value)
+    properties = oxml_shared.OxmlElement("w:rPr")
+    element = oxml_shared.OxmlElement("w:color")
+    element.set(ns.qn("w:val"), value)
     properties.append(element)
     return properties
 
@@ -52,25 +52,25 @@ def _in_style(document: Any, text: str, style_name: str) -> None:
     exactly the ones it does not have.
     """
     if all(style.name != style_name for style in document.styles):
-        document.styles.add_style(style_name, docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
+        document.styles.add_style(style_name, enum_style.WD_STYLE_TYPE.PARAGRAPH)
     document.add_paragraph(text, style=style_name)
 
 
 def _border(
-    paragraph: docx.text.paragraph.Paragraph, *sides: str, value: str = "single"
-) -> docx.text.paragraph.Paragraph:
+    paragraph: docx_paragraph.Paragraph, *sides: str, value: str = "single"
+) -> docx_paragraph.Paragraph:
     """Draw a border on the sides named, or on all four when none are."""
-    border = docx.oxml.shared.OxmlElement("w:pBdr")
+    border = oxml_shared.OxmlElement("w:pBdr")
     for side in sides or ("w:top", "w:left", "w:bottom", "w:right"):
-        edge = docx.oxml.shared.OxmlElement(side)
-        edge.set(docx.oxml.ns.qn("w:val"), value)
+        edge = oxml_shared.OxmlElement(side)
+        edge.set(ns.qn("w:val"), value)
         border.append(edge)
 
     paragraph._p.get_or_add_pPr().append(border)
     return paragraph
 
 
-def _bulleted(paragraph: docx.text.paragraph.Paragraph) -> None:
+def _bulleted(paragraph: docx_paragraph.Paragraph) -> None:
     """Put numbering on a paragraph, which is the whole of what makes it an item.
 
     The list itself is left undeclared: with no numbering part to read a format
@@ -78,13 +78,13 @@ def _bulleted(paragraph: docx.text.paragraph.Paragraph) -> None:
     nothing else to draw.
     """
     numbering = paragraph._p.get_or_add_pPr().get_or_add_numPr()
-    numbering.get_or_add_numId().set(docx.oxml.ns.qn("w:val"), "1")
+    numbering.get_or_add_numId().set(ns.qn("w:val"), "1")
 
 
-def _at_column(paragraph: docx.text.paragraph.Paragraph, left: int) -> None:
+def _at_column(paragraph: docx_paragraph.Paragraph, left: int) -> None:
     """Draw a paragraph at a given indent, the way dragging one in Word does."""
     indent = paragraph._p.get_or_add_pPr().get_or_add_ind()
-    indent.set(docx.oxml.ns.qn("w:left"), str(left))
+    indent.set(ns.qn("w:left"), str(left))
 
 
 def _item(document: Any, text: str, left: int) -> None:
@@ -94,9 +94,7 @@ def _item(document: Any, text: str, left: int) -> None:
     _at_column(paragraph, left)
 
 
-def _anchor(
-    paragraph: docx.text.paragraph.Paragraph, box: Any, colour: str = ""
-) -> None:
+def _anchor(paragraph: docx_paragraph.Paragraph, box: Any, colour: str = "") -> None:
     """Hang a text box off a run of the paragraph, the way a drawing does.
 
     Only the nesting matters to the walk, not the shape around it, so the w:drawing
@@ -105,7 +103,7 @@ def _anchor(
     run = paragraph.add_run()
     if colour:
         run._r.append(_colour(colour))
-    drawing = docx.oxml.shared.OxmlElement("w:drawing")
+    drawing = oxml_shared.OxmlElement("w:drawing")
     drawing.append(box)
     run._r.append(drawing)
 

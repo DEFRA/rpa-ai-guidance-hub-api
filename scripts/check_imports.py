@@ -15,11 +15,11 @@ running ``x`` itself.
 
 import argparse
 import ast
-import importlib.machinery
-import importlib.util
 import pathlib
 import sys
 from collections.abc import Iterable, Iterator
+from importlib import machinery
+from importlib import util as importlib_util
 
 NAMES_ALLOWED_FROM = {"__future__", "collections.abc", "typing"}
 
@@ -27,15 +27,13 @@ NAMES_ALLOWED_FROM = {"__future__", "collections.abc", "typing"}
 def _is_module(package: str, name: str) -> bool:
     """Whether ``name`` is a module in ``package``. Raises ``ModuleNotFoundError``
     if ``package`` cannot be found."""
-    spec = importlib.util.find_spec(package)
+    spec = importlib_util.find_spec(package)
     if spec is None:
         raise ModuleNotFoundError(package)
     locations = spec.submodule_search_locations
     return (
         locations is not None
-        and importlib.machinery.PathFinder.find_spec(
-            f"{package}.{name}", list(locations)
-        )
+        and machinery.PathFinder.find_spec(f"{package}.{name}", list(locations))
         is not None
     )
 

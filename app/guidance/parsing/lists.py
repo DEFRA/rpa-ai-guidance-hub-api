@@ -39,15 +39,15 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, Any
 
-import docx.opc.constants
-import docx.oxml.ns
+from docx.opc import constants as opc_constants
+from docx.oxml import ns
 
 from app.guidance.parsing import ooxml
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import docx.text.paragraph
+    from docx.text import paragraph as docx_paragraph
 
 # A numId of zero does not name a list: it says this paragraph has had numbering
 # removed, which is why it has to beat the numId the paragraph's style declares.
@@ -102,7 +102,7 @@ class ListItem:
     rank: int | None = None
 
 
-def list_item(paragraph: docx.text.paragraph.Paragraph) -> ListItem | None:
+def list_item(paragraph: docx_paragraph.Paragraph) -> ListItem | None:
     """The list item this paragraph is, or None where numbering does not apply."""
     num_id = _numbering_value(paragraph, "w:numId")
     if num_id is None or num_id == _NUMBERING_REMOVED:
@@ -119,7 +119,7 @@ def list_item(paragraph: docx.text.paragraph.Paragraph) -> ListItem | None:
 
 
 def _marker(
-    paragraph: docx.text.paragraph.Paragraph, num_id: str, level: int
+    paragraph: docx_paragraph.Paragraph, num_id: str, level: int
 ) -> tuple[str, int | None]:
     """What Word draws to mark an item here, and where that sits in its sequence.
 
@@ -144,14 +144,10 @@ def _marker(
 
 def _marker_font(declared: Any) -> str:
     """The font a level draws its bullet in, or "" where it names none."""
-    fonts = declared.find(f"{docx.oxml.ns.qn('w:rPr')}/{docx.oxml.ns.qn('w:rFonts')}")
+    fonts = declared.find(f"{ns.qn('w:rPr')}/{ns.qn('w:rFonts')}")
     if fonts is None:
         return ""
-    return str(
-        fonts.get(docx.oxml.ns.qn("w:ascii"))
-        or fonts.get(docx.oxml.ns.qn("w:hAnsi"))
-        or ""
-    )
+    return str(fonts.get(ns.qn("w:ascii")) or fonts.get(ns.qn("w:hAnsi")) or "")
 
 
 def is_deeper(item: ListItem, previous: ListItem) -> bool:
@@ -375,7 +371,7 @@ def _hanging(markdown: str, content_column: str) -> str:
     return markdown.replace("\n", f"\n{content_column}")
 
 
-def _numbering_value(paragraph: docx.text.paragraph.Paragraph, name: str) -> str | None:
+def _numbering_value(paragraph: docx_paragraph.Paragraph, name: str) -> str | None:
     """One numbering property in effect on a paragraph: its own, else its style's.
 
     Direct formatting overrides a style property by property rather than wholesale,
@@ -383,14 +379,14 @@ def _numbering_value(paragraph: docx.text.paragraph.Paragraph, name: str) -> str
     style it is in.
     """
     sources = (
-        paragraph._p.find(docx.oxml.ns.qn(ooxml.W_PPR)),
+        paragraph._p.find(ns.qn(ooxml.W_PPR)),
         _style_properties(paragraph),
     )
     values = (_numbering_property(source, name) for source in sources)
     return next((value for value in values if value is not None), None)
 
 
-def _style_properties(paragraph: docx.text.paragraph.Paragraph) -> Any:
+def _style_properties(paragraph: docx_paragraph.Paragraph) -> Any:
     """The paragraph properties the paragraph's style declares.
 
     Written as an expression for the same reason parser.py's _style_name is:
@@ -398,9 +394,7 @@ def _style_properties(paragraph: docx.text.paragraph.Paragraph) -> Any:
     style id to the document's default, so the None it allows for never arrives.
     """
     style = paragraph.style
-    return (
-        style.element.find(docx.oxml.ns.qn(ooxml.W_PPR)) if style is not None else None
-    )
+    return style.element.find(ns.qn(ooxml.W_PPR)) if style is not None else None
 
 
 def _numbering_property(properties: Any, name: str) -> str | None:
@@ -408,11 +402,11 @@ def _numbering_property(properties: Any, name: str) -> str | None:
     if properties is None:
         return None
 
-    element = properties.find(f"{docx.oxml.ns.qn('w:numPr')}/{docx.oxml.ns.qn(name)}")
-    return element.get(docx.oxml.ns.qn(ooxml.W_VAL)) if element is not None else None
+    element = properties.find(f"{ns.qn('w:numPr')}/{ns.qn(name)}")
+    return element.get(ns.qn(ooxml.W_VAL)) if element is not None else None
 
 
-def _indent(paragraph: docx.text.paragraph.Paragraph, num_id: str, level: int) -> int:
+def _indent(paragraph: docx_paragraph.Paragraph, num_id: str, level: int) -> int:
     """How far from the margin Word draws this item, in twips.
 
     The paragraph's own indent first and the list's definition of the level second,
@@ -422,7 +416,7 @@ def _indent(paragraph: docx.text.paragraph.Paragraph, num_id: str, level: int) -
     to ask - the style an item is in never reaches this, because a style carrying an
     indent but no numbering makes no list item to begin with.
     """
-    own = _left_indent(paragraph._p.find(docx.oxml.ns.qn(ooxml.W_PPR)))
+    own = _left_indent(paragraph._p.find(ns.qn(ooxml.W_PPR)))
     if own is not None:
         return own
 
@@ -430,7 +424,7 @@ def _indent(paragraph: docx.text.paragraph.Paragraph, num_id: str, level: int) -
     if declared is None:
         return _NO_INDENT
 
-    return _left_indent(declared.find(docx.oxml.ns.qn(ooxml.W_PPR))) or _NO_INDENT
+    return _left_indent(declared.find(ns.qn(ooxml.W_PPR))) or _NO_INDENT
 
 
 def _left_indent(properties: Any) -> int | None:
@@ -438,17 +432,15 @@ def _left_indent(properties: Any) -> int | None:
     if properties is None:
         return None
 
-    element = properties.find(docx.oxml.ns.qn("w:ind"))
+    element = properties.find(ns.qn("w:ind"))
     if element is None:
         return None
 
-    value = element.get(docx.oxml.ns.qn("w:left"))
+    value = element.get(ns.qn("w:left"))
     return None if value is None else int(value)
 
 
-def _is_ordered(
-    paragraph: docx.text.paragraph.Paragraph, num_id: str, level: int
-) -> bool:
+def _is_ordered(paragraph: docx_paragraph.Paragraph, num_id: str, level: int) -> bool:
     """Whether this list numbers its items at this level rather than bulleting them.
 
     Where the list declares nothing at this level its first level decides, that
@@ -466,7 +458,7 @@ def _is_ordered(
 
 
 def _declared_levels(
-    paragraph: docx.text.paragraph.Paragraph, num_id: str
+    paragraph: docx_paragraph.Paragraph, num_id: str
 ) -> dict[int, Any]:
     """What a list declares at each of its levels, as ilvl -> w:lvl.
 
@@ -481,17 +473,17 @@ def _declared_levels(
         int(ilvl): level
         for part in _numbering_parts(paragraph)
         for definition in _definitions_of(part.element, num_id)
-        for level in definition.findall(docx.oxml.ns.qn("w:lvl"))
-        if (ilvl := level.get(docx.oxml.ns.qn("w:ilvl"))) is not None
+        for level in definition.findall(ns.qn("w:lvl"))
+        if (ilvl := level.get(ns.qn("w:ilvl"))) is not None
     }
 
 
-def _numbering_parts(paragraph: docx.text.paragraph.Paragraph) -> list[Any]:
+def _numbering_parts(paragraph: docx_paragraph.Paragraph) -> list[Any]:
     """The document's numbering definitions: the one part holding them, or none."""
     return [
         relationship.target_part
         for relationship in paragraph.part.rels.values()
-        if relationship.reltype == docx.opc.constants.RELATIONSHIP_TYPE.NUMBERING
+        if relationship.reltype == opc_constants.RELATIONSHIP_TYPE.NUMBERING
     ]
 
 
@@ -503,14 +495,14 @@ def _definitions_of(numbering: Any, num_id: str) -> list[Any]:
     """
     abstract_ids = [
         value
-        for num in numbering.findall(docx.oxml.ns.qn("w:num"))
-        if num.get(docx.oxml.ns.qn("w:numId")) == num_id
+        for num in numbering.findall(ns.qn("w:num"))
+        if num.get(ns.qn("w:numId")) == num_id
         for value in _values(num, "w:abstractNumId")
     ]
     return [
         definition
-        for definition in numbering.findall(docx.oxml.ns.qn("w:abstractNum"))
-        if definition.get(docx.oxml.ns.qn("w:abstractNumId")) in abstract_ids
+        for definition in numbering.findall(ns.qn("w:abstractNum"))
+        if definition.get(ns.qn("w:abstractNumId")) in abstract_ids
     ]
 
 
@@ -518,6 +510,6 @@ def _values(parent: Any, name: str) -> list[str]:
     """The w:val of each named child, leaving out any child that carries none."""
     return [
         value
-        for child in parent.findall(docx.oxml.ns.qn(name))
-        if (value := child.get(docx.oxml.ns.qn(ooxml.W_VAL))) is not None
+        for child in parent.findall(ns.qn(name))
+        if (value := child.get(ns.qn(ooxml.W_VAL))) is not None
     ]

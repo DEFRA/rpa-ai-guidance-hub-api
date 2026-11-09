@@ -11,17 +11,17 @@ All fixture text is invented, as everywhere in this package.
 from collections.abc import Callable
 from typing import Any
 
-import docx.document
-import docx.oxml.ns
-import docx.oxml.shared
-import docx.text.paragraph
+from docx import document as docx_document
+from docx.oxml import ns
+from docx.oxml import shared as oxml_shared
+from docx.text import paragraph as docx_paragraph
 
 from app.guidance.parsing import parser
 
 HEADING = "Applying"
 
 # The `docx_bytes` fixture's contract, restated here as it is in test_textboxes.py.
-Build = Callable[[docx.document.Document], None]
+Build = Callable[[docx_document.Document], None]
 DocxBytes = Callable[[Build], bytes]
 
 _SIDES = ("w:top", "w:left", "w:bottom", "w:right")
@@ -30,7 +30,7 @@ _SIDES = ("w:top", "w:left", "w:bottom", "w:right")
 def _bordered_content(docx_bytes: DocxBytes, build: Build) -> str:
     """The Markdown of the section `build` writes its paragraphs into."""
 
-    def with_heading(document: docx.document.Document) -> None:
+    def with_heading(document: docx_document.Document) -> None:
         document.add_heading(HEADING, level=1)
         build(document)
 
@@ -38,34 +38,34 @@ def _bordered_content(docx_bytes: DocxBytes, build: Build) -> str:
 
 
 def _border(
-    paragraph: docx.text.paragraph.Paragraph,
+    paragraph: docx_paragraph.Paragraph,
     *sides: str,
     value: str = "single",
     colour: str | None = None,
-) -> docx.text.paragraph.Paragraph:
+) -> docx_paragraph.Paragraph:
     """Draw a border on the sides named, or on all four when none are."""
-    border = docx.oxml.shared.OxmlElement("w:pBdr")
+    border = oxml_shared.OxmlElement("w:pBdr")
     for side in sides or _SIDES:
-        edge = docx.oxml.shared.OxmlElement(side)
-        edge.set(docx.oxml.ns.qn("w:val"), value)
+        edge = oxml_shared.OxmlElement(side)
+        edge.set(ns.qn("w:val"), value)
         if colour is not None:
-            edge.set(docx.oxml.ns.qn("w:color"), colour)
+            edge.set(ns.qn("w:color"), colour)
         border.append(edge)
 
     paragraph._p.get_or_add_pPr().append(border)
     return paragraph
 
 
-def _between(paragraph: docx.text.paragraph.Paragraph) -> docx.text.paragraph.Paragraph:
+def _between(paragraph: docx_paragraph.Paragraph) -> docx_paragraph.Paragraph:
     """Add the line Word draws between two paragraphs already inside one frame."""
-    edge = docx.oxml.shared.OxmlElement("w:between")
-    edge.set(docx.oxml.ns.qn("w:val"), "single")
-    paragraph._p.pPr.find(docx.oxml.ns.qn("w:pBdr")).append(edge)
+    edge = oxml_shared.OxmlElement("w:between")
+    edge.set(ns.qn("w:val"), "single")
+    paragraph._p.pPr.find(ns.qn("w:pBdr")).append(edge)
     return paragraph
 
 
 def _boxed(
-    document: docx.document.Document, *texts: str, style: str | None = None
+    document: docx_document.Document, *texts: str, style: str | None = None
 ) -> None:
     """Add one bordered paragraph per text given, which is one box between them."""
     for text in texts:

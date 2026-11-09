@@ -9,18 +9,18 @@ Levels are read as relative, so most of the interesting cases are documents whos
 headings do not descend one tidy level at a time.
 """
 
-import docx.oxml.ns
-import docx.oxml.shared
 import pytest
+from docx.oxml import ns
+from docx.oxml import shared as oxml_shared
 
 from app.guidance.parsing import parser
 
 
 def _bookmark_start(name: str):
     """A w:bookmarkStart element, as Word opens a bookmark."""
-    element = docx.oxml.shared.OxmlElement("w:bookmarkStart")
-    element.set(docx.oxml.ns.qn("w:id"), "1")
-    element.set(docx.oxml.ns.qn("w:name"), name)
+    element = oxml_shared.OxmlElement("w:bookmarkStart")
+    element.set(ns.qn("w:id"), "1")
+    element.set(ns.qn("w:name"), name)
     return element
 
 
@@ -37,8 +37,8 @@ def _bookmark_before(paragraph, name: str) -> None:
 
 def _anchor_link(paragraph, text: str, anchor: str) -> None:
     """Append a link to a bookmark inside the document."""
-    link = docx.oxml.shared.OxmlElement("w:hyperlink")
-    link.set(docx.oxml.ns.qn("w:anchor"), anchor)
+    link = oxml_shared.OxmlElement("w:hyperlink")
+    link.set(ns.qn("w:anchor"), anchor)
     link.append(paragraph.add_run(text)._r)
     paragraph._p.append(link)
 

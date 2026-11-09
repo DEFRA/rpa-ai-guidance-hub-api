@@ -38,7 +38,7 @@ import hashlib
 import re
 from typing import Any
 
-import docx.oxml.ns
+from docx.oxml import ns
 
 from app.guidance.parsing import models
 
@@ -62,9 +62,9 @@ def embedded_in(run: Any) -> str:
     mc:AlternateContent, so it is a grandchild and `textboxes` deals with it. A
     drawing holding a shape rather than a picture has no a:blip and is no image here.
     """
-    for drawing in run.findall(docx.oxml.ns.qn("w:drawing")):
-        for blip in drawing.iter(docx.oxml.ns.qn("a:blip")):
-            embed = blip.get(docx.oxml.ns.qn("r:embed"))
+    for drawing in run.findall(ns.qn("w:drawing")):
+        for blip in drawing.iter(ns.qn("a:blip")):
+            embed = blip.get(ns.qn("r:embed"))
             if embed:
                 return str(embed)
     return ""

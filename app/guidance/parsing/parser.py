@@ -9,10 +9,10 @@ import zipfile
 from typing import TYPE_CHECKING, Any
 
 import docx
-import docx.opc.exceptions
-import docx.oxml.ns
-import docx.text.paragraph
 import lxml.etree
+from docx.opc import exceptions as opc_exceptions
+from docx.oxml import ns
+from docx.text import paragraph as docx_paragraph
 
 from app.guidance.parsing import (
     borders,
@@ -50,7 +50,7 @@ _HEADING_STYLE = re.compile(r"heading\s*([1-9]\d*)$")
 
 # The blocks of a document body. Anything else there - a bookmark, a section break,
 # a proofing mark - says nothing the output carries.
-_BODY_BLOCKS = (docx.oxml.ns.qn("w:p"), docx.oxml.ns.qn("w:tbl"))
+_BODY_BLOCKS = (ns.qn("w:p"), ns.qn("w:tbl"))
 
 _TITLE_STYLE = "title"
 
@@ -119,7 +119,7 @@ def _open(source: bytes) -> docx.document.Document:
     except KeyError as exc:
         msg = "Source is not a .docx file: the zip archive is not an Office package."
         raise errors.DocumentParseError(msg) from exc
-    except (ValueError, docx.opc.exceptions.PackageNotFoundError) as exc:
+    except (ValueError, opc_exceptions.PackageNotFoundError) as exc:
         msg = "Source is not a Word document."
         raise errors.DocumentParseError(msg) from exc
     except lxml.etree.XMLSyntaxError as exc:
@@ -166,7 +166,7 @@ def _cover_title(document: docx.document.Document) -> str:
 
 def _cover_groups(
     document: docx.document.Document,
-) -> list[list[docx.text.paragraph.Paragraph]]:
+) -> list[list[docx_paragraph.Paragraph]]:
     """Return the cover page's paragraphs, grouped as the author laid them out.
 
     A blank paragraph separates one part of the title from the next; consecutive
@@ -179,8 +179,8 @@ def _cover_groups(
     two spellings of a page break stop it at different points, because they mean
     opposite things about the paragraph carrying them.
     """
-    groups: list[list[docx.text.paragraph.Paragraph]] = []
-    part: list[docx.text.paragraph.Paragraph] = []
+    groups: list[list[docx_paragraph.Paragraph]] = []
+    part: list[docx_paragraph.Paragraph] = []
 
     for paragraph in document.paragraphs:
         # This paragraph is already on the page after the cover, so its text is not
@@ -205,7 +205,7 @@ def _cover_groups(
     return groups
 
 
-def _opens_body(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def _opens_body(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph opens the navigation or the body, ending the cover.
 
     The heading check is what stops a document with no cover page break at all from
@@ -219,25 +219,25 @@ def _opens_body(paragraph: docx.text.paragraph.Paragraph) -> bool:
     )
 
 
-def _is_contents(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def _is_contents(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph is one of the document's contents entries."""
     return _style_name(paragraph).startswith(_CONTENTS_STYLE_PREFIXES)
 
 
-def _starts_new_page(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def _starts_new_page(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph is forced to the top of a new page by its properties."""
-    properties = paragraph._p.find(docx.oxml.ns.qn(ooxml.W_PPR))
+    properties = paragraph._p.find(ns.qn(ooxml.W_PPR))
     if properties is None:
         return False
-    return ooxml.is_toggle_on(properties.find(docx.oxml.ns.qn("w:pageBreakBefore")))
+    return ooxml.is_toggle_on(properties.find(ns.qn("w:pageBreakBefore")))
 
 
-def _ends_page(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def _ends_page(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph carries an explicit page break in its own text."""
     return any(
-        break_element.get(docx.oxml.ns.qn("w:type")) == "page"
+        break_element.get(ns.qn("w:type")) == "page"
         for run in paragraph.runs
-        for break_element in run._r.findall(docx.oxml.ns.qn("w:br"))
+        for break_element in run._r.findall(ns.qn("w:br"))
     )
 
 
@@ -312,12 +312,12 @@ def _extract_sections(
     stack = [_OpenSection()]
 
     for element, opened_ahead_of_it in _body_items(document):
-        if element.tag != docx.oxml.ns.qn("w:p"):
+        if element.tag != ns.qn("w:p"):
             _close_box(sections, run, boxed, document)
             _take_whole_block(sections, run, element, document)
             continue
 
-        paragraph = docx.text.paragraph.Paragraph(element, document)
+        paragraph = docx_paragraph.Paragraph(element, document)
         heading = _heading_of(paragraph)
 
         # A box drawn by bordering the paragraphs themselves is held until the first
@@ -367,7 +367,7 @@ def _take_whole_block(
     _append_block(sections, tables.table_markdown(element, document))
 
 
-def _heading_of(paragraph: docx.text.paragraph.Paragraph) -> _Heading | None:
+def _heading_of(paragraph: docx_paragraph.Paragraph) -> _Heading | None:
     """The section this paragraph opens, or None where it opens none.
 
     A paragraph that is not a heading holds content. So does a heading with nothing
@@ -445,12 +445,12 @@ def _body_items(
     """
     opened: list[str] = []
     for element in document.element.body:
-        if element.tag == docx.oxml.ns.qn("w:bookmarkStart"):
+        if element.tag == ns.qn("w:bookmarkStart"):
             opened.extend(_bookmark_names(element))
         elif element.tag in _BODY_BLOCKS:
             yield element, opened
             opened = []
-            if element.tag == docx.oxml.ns.qn("w:p"):
+            if element.tag == ns.qn("w:p"):
                 # A text box is a block of the page that Word wrote inside a run
                 # rather than beside it, so no walk of the body's own children can
                 # reach it. Yielding it straight after the paragraph it hangs from is
@@ -462,8 +462,8 @@ def _body_items(
 
 def _bookmark_names(element: Any) -> list[str]:
     """Every bookmark name opened by this element or anything beneath it."""
-    starts = element.iter(docx.oxml.ns.qn("w:bookmarkStart"))
-    return [name for start in starts if (name := start.get(docx.oxml.ns.qn("w:name")))]
+    starts = element.iter(ns.qn("w:bookmarkStart"))
+    return [name for start in starts if (name := start.get(ns.qn("w:name")))]
 
 
 @dataclasses.dataclass
@@ -504,7 +504,7 @@ class _OpenRun:
 def _collect_body(
     sections: list[models.MarkdownSection],
     run: _OpenRun,
-    paragraph: docx.text.paragraph.Paragraph,
+    paragraph: docx_paragraph.Paragraph,
 ) -> None:
     """Take one paragraph of the body: another item of the open list run, or prose.
 
@@ -653,7 +653,7 @@ def _append_block(sections: list[models.MarkdownSection], block: str) -> None:
     section.content = f"{section.content}\n\n{block}" if section.content else block
 
 
-def _is_appendix(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def _is_appendix(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph opens an appendix, which only its style can say.
 
     An annex style carries no outline level and is not a "Heading n", so there is
@@ -664,7 +664,7 @@ def _is_appendix(paragraph: docx.text.paragraph.Paragraph) -> bool:
     return _style_name(paragraph).startswith(_APPENDIX_STYLE_PREFIXES)
 
 
-def _heading_level(paragraph: docx.text.paragraph.Paragraph) -> int | None:
+def _heading_level(paragraph: docx_paragraph.Paragraph) -> int | None:
     """The level of a "Heading n" paragraph, or None if it is not one.
 
     The level has to come from the style name because that is the only place it is
@@ -677,7 +677,7 @@ def _heading_level(paragraph: docx.text.paragraph.Paragraph) -> int | None:
     return int(match[1]) if match else None
 
 
-def _style_name(paragraph: docx.text.paragraph.Paragraph) -> str:
+def _style_name(paragraph: docx_paragraph.Paragraph) -> str:
     """The paragraph's style name, lowercased, or "" when it has none.
 
     The two guards are not alike. python-docx annotates `style` as optional but

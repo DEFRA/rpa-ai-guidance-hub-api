@@ -1,8 +1,7 @@
 import logging
 from typing import Any
 
-import aws_embedded_metrics.storage_resolution
-from aws_embedded_metrics import metric_scope
+from aws_embedded_metrics import metric_scope, storage_resolution
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ def __put_metric(
         metric_name,
         value,
         unit,
-        aws_embedded_metrics.storage_resolution.StorageResolution.STANDARD,
+        storage_resolution.StorageResolution.STANDARD,
     )
 
 

@@ -10,10 +10,10 @@ Title style too. Without that, the "Title-styled paragraphs win" filter in
 test passes however badly the boundary logic is broken.
 """
 
-import docx.enum.style
-import docx.enum.text
-import docx.oxml.ns
 import pytest
+from docx.enum import style as enum_style
+from docx.enum import text as enum_text
+from docx.oxml import ns
 
 from app.guidance.parsing import parser
 
@@ -24,7 +24,7 @@ OVERLEAF = "Not part of the title"
 
 def _page_break(document) -> None:
     """Add the paragraph Word inserts for an explicit page break."""
-    document.add_paragraph().add_run().add_break(docx.enum.text.WD_BREAK.PAGE)
+    document.add_paragraph().add_run().add_break(enum_text.WD_BREAK.PAGE)
 
 
 class TestReconstructingTheCoverTitle:
@@ -85,12 +85,10 @@ class TestReconstructingTheCoverTitle:
         """
 
         def build(document):
-            document.styles.add_style(
-                "Nameless", docx.enum.style.WD_STYLE_TYPE.PARAGRAPH
-            )
+            document.styles.add_style("Nameless", enum_style.WD_STYLE_TYPE.PARAGRAPH)
             document.add_paragraph(TITLE, style="Nameless")
             nameless = document.styles["Nameless"]._element
-            nameless.remove(nameless.find(docx.oxml.ns.qn("w:name")))
+            nameless.remove(nameless.find(ns.qn("w:name")))
             _page_break(document)
 
         assert parser.parse_docx(docx_bytes(build)).title == TITLE
@@ -112,7 +110,7 @@ class TestWhereTheCoverEnds:
 
         def build(document):
             paragraph = document.add_paragraph(TITLE, style="Title")
-            paragraph.add_run().add_break(docx.enum.text.WD_BREAK.PAGE)
+            paragraph.add_run().add_break(enum_text.WD_BREAK.PAGE)
             document.add_paragraph(OVERLEAF, style="Title")
 
         assert parser.parse_docx(docx_bytes(build)).title == TITLE
@@ -122,7 +120,7 @@ class TestWhereTheCoverEnds:
 
         def build(document):
             paragraph = document.add_paragraph(TITLE, style="Title")
-            paragraph.add_run().add_break(docx.enum.text.WD_BREAK.LINE)
+            paragraph.add_run().add_break(enum_text.WD_BREAK.LINE)
             document.add_paragraph("2026 edition", style="Title")
             _page_break(document)
 

@@ -57,10 +57,10 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 import docx
-import docx.opc.constants
-import docx.oxml.ns
-import docx.table
-import docx.text.paragraph
+from docx import table as docx_table
+from docx.opc import constants as opc_constants
+from docx.oxml import ns
+from docx.text import paragraph as docx_paragraph
 
 from app.guidance.parsing import errors, parser
 
@@ -201,7 +201,7 @@ _W_VAL = "w:val"
 
 # The contents of a box Word drew with the drawing tools, as opposed to with a
 # one-cell table. Both are boxes to a reader, so both are BOX.
-_TEXT_BOX = docx.oxml.ns.qn("w:txbxContent")
+_TEXT_BOX = ns.qn("w:txbxContent")
 
 # The third way: a box drawn by bordering the paragraphs themselves, which is what
 # these guides use for text the reader is to copy rather than follow - a case note, an
@@ -243,9 +243,9 @@ _NOT_INHERITED_BY_A_BOX = frozenset(
 
 # Elements that separate the text either side of them without printing a word.
 _SEPARATORS = (
-    docx.oxml.ns.qn("w:tab"),
-    docx.oxml.ns.qn("w:br"),
-    docx.oxml.ns.qn("w:cr"),
+    ns.qn("w:tab"),
+    ns.qn("w:br"),
+    ns.qn("w:cr"),
 )
 
 # The far edge of a box, which a pre-order walk has no element of its own to meet:
@@ -536,20 +536,20 @@ def marks_of(
 
 def iter_blocks(
     document: docx.document.Document,
-) -> Iterator[docx.text.paragraph.Paragraph | docx.table.Table]:
+) -> Iterator[docx_paragraph.Paragraph | docx_table.Table]:
     """Yield the body's paragraphs and tables in the order they are laid out.
 
     `document.paragraphs` skips tables entirely, and seven of them in a real guide
     is a great deal of text to score as never having existed.
     """
     for child in document.element.body.iterchildren():
-        if child.tag == docx.oxml.ns.qn("w:p"):
-            yield docx.text.paragraph.Paragraph(child, document)
-        elif child.tag == docx.oxml.ns.qn("w:tbl"):
-            yield docx.table.Table(child, document)
+        if child.tag == ns.qn("w:p"):
+            yield docx_paragraph.Paragraph(child, document)
+        elif child.tag == ns.qn("w:tbl"):
+            yield docx_table.Table(child, document)
 
 
-def rendered_text(paragraph: docx.text.paragraph.Paragraph) -> str:
+def rendered_text(paragraph: docx_paragraph.Paragraph) -> str:
     """The text this paragraph puts on the page, in document order.
 
     Taken from the XML rather than `paragraph.text` so that what is counted is what
@@ -566,7 +566,7 @@ def element_text(element: Any) -> str:
     """The text this element and everything beneath it puts on the page."""
     parts: list[str] = []
     for node in rendered_nodes(element):
-        if node.tag == docx.oxml.ns.qn("w:t"):
+        if node.tag == ns.qn("w:t"):
             parts.append(node.text or "")
         elif node.tag in _BREAKS:
             parts.append(" ")
@@ -629,7 +629,7 @@ def rendered_children(element: Any) -> list[Any]:
     return [] if branch is None else [branch]
 
 
-def hyperlink_urls(paragraph: docx.text.paragraph.Paragraph) -> Iterator[str]:
+def hyperlink_urls(paragraph: docx_paragraph.Paragraph) -> Iterator[str]:
     """The targets of this paragraph's external hyperlinks, in both forms.
 
     A link's address lives in the relationships part or in a field's instruction,
@@ -643,15 +643,15 @@ def hyperlink_urls(paragraph: docx.text.paragraph.Paragraph) -> Iterator[str]:
     cancel itself out of the score.
     """
     relationships = paragraph.part.rels
-    for link in paragraph._p.iter(docx.oxml.ns.qn("w:hyperlink")):
-        relationship_id = link.get(docx.oxml.ns.qn("r:id"))
+    for link in paragraph._p.iter(ns.qn("w:hyperlink")):
+        relationship_id = link.get(ns.qn("r:id"))
         if relationship_id in relationships and element_text(link).strip():
             yield relationships[relationship_id].target_ref
 
     yield from field_hyperlink_urls(paragraph)
 
 
-def field_hyperlink_urls(paragraph: docx.text.paragraph.Paragraph) -> Iterator[str]:
+def field_hyperlink_urls(paragraph: docx_paragraph.Paragraph) -> Iterator[str]:
     """The targets of this paragraph's legacy HYPERLINK fields.
 
     A field is a run sequence: a fldChar begin, the runs spelling the instruction,
@@ -664,7 +664,7 @@ def field_hyperlink_urls(paragraph: docx.text.paragraph.Paragraph) -> Iterator[s
     rendered = ""
     showing_result = False
 
-    for run in paragraph._p.iter(docx.oxml.ns.qn("w:r")):
+    for run in paragraph._p.iter(ns.qn("w:r")):
         boundary = fld_char_type(run)
         if boundary == "begin":
             target, instruction, rendered, showing_result = "", "", "", False
@@ -679,8 +679,7 @@ def field_hyperlink_urls(paragraph: docx.text.paragraph.Paragraph) -> Iterator[s
             rendered += element_text(run)
         else:
             instruction += "".join(
-                element.text or ""
-                for element in run.iter(docx.oxml.ns.qn("w:instrText"))
+                element.text or "" for element in run.iter(ns.qn("w:instrText"))
             )
 
     if target and rendered.strip():
@@ -689,10 +688,10 @@ def field_hyperlink_urls(paragraph: docx.text.paragraph.Paragraph) -> Iterator[s
 
 def fld_char_type(run: Any) -> str:
     """Which end of a field this run marks, or "" for an ordinary run."""
-    element = run.find(docx.oxml.ns.qn("w:fldChar"))
+    element = run.find(ns.qn("w:fldChar"))
     if element is None:
         return ""
-    return str(element.get(docx.oxml.ns.qn("w:fldCharType")) or "")
+    return str(element.get(ns.qn("w:fldCharType")) or "")
 
 
 def hyperlink_field_target(instruction: str) -> str:
@@ -730,13 +729,13 @@ class OpenField:
             self.target = ""
         elif not self.target:
             self.instruction += "".join(
-                child.text or "" for child in run.iter(docx.oxml.ns.qn("w:instrText"))
+                child.text or "" for child in run.iter(ns.qn("w:instrText"))
             )
         return self.target
 
 
 def mark_paragraph(
-    bag: Bag, paragraph: docx.text.paragraph.Paragraph, features: frozenset[str]
+    bag: Bag, paragraph: docx_paragraph.Paragraph, features: frozenset[str]
 ) -> None:
     """Fold the marks this paragraph wears into the bag, under `features`.
 
@@ -779,19 +778,19 @@ def mark_paragraph(
         element, active, in_link = pending.pop()
         tag = element.tag
 
-        if tag == docx.oxml.ns.qn("w:t"):
+        if tag == ns.qn("w:t"):
             segments.append((active, element.text or ""))
             continue
         if tag in _BREAKS:
             segments.append((active, " "))
 
-        if tag == docx.oxml.ns.qn("w:hyperlink"):
+        if tag == ns.qn("w:hyperlink"):
             in_link = True
         elif tag == _TEXT_BOX:
             active = (active - _NOT_INHERITED_BY_A_BOX) | {BOX}
             in_link = False
-        elif tag == docx.oxml.ns.qn("w:p"):
-            boxed_paragraph = docx.text.paragraph.Paragraph(element, paragraph)
+        elif tag == ns.qn("w:p"):
+            boxed_paragraph = docx_paragraph.Paragraph(element, paragraph)
             active = (
                 active
                 | list_features(boxed_paragraph)
@@ -801,7 +800,7 @@ def mark_paragraph(
                     item_marker(boxed_paragraph),
                 )
             )
-        elif tag == docx.oxml.ns.qn("w:r"):
+        elif tag == ns.qn("w:r"):
             linked = in_link or bool(field.absorb(element))
             active = active | run_marks(element, in_link=linked)
             for _ in pictures(element):
@@ -826,25 +825,25 @@ def run_marks(run: Any, *, in_link: bool) -> frozenset[str]:
     """
     marks = {LINK} if in_link else set()
 
-    properties = run.find(docx.oxml.ns.qn("w:rPr"))
+    properties = run.find(ns.qn("w:rPr"))
     if properties is not None:
-        if is_toggle_on(properties.find(docx.oxml.ns.qn("w:b"))):
+        if is_toggle_on(properties.find(ns.qn("w:b"))):
             marks.add(BOLD)
-        if is_toggle_on(properties.find(docx.oxml.ns.qn("w:i"))):
+        if is_toggle_on(properties.find(ns.qn("w:i"))):
             marks.add(ITALIC)
-        if is_toggle_on(properties.find(docx.oxml.ns.qn("w:strike"))):
+        if is_toggle_on(properties.find(ns.qn("w:strike"))):
             marks.add(STRIKETHROUGH)
-        if is_underlined(properties.find(docx.oxml.ns.qn("w:u"))):
+        if is_underlined(properties.find(ns.qn("w:u"))):
             marks.add(UNDERLINE)
-        marks |= vertical_mark(properties.find(docx.oxml.ns.qn("w:vertAlign")))
-        marks |= colour_mark(properties.find(docx.oxml.ns.qn("w:color")))
+        marks |= vertical_mark(properties.find(ns.qn("w:vertAlign")))
+        marks |= colour_mark(properties.find(ns.qn("w:color")))
 
     return frozenset(marks - _PAINTED_BY_LINK if in_link else marks)
 
 
 def is_toggle_on(element: Any) -> bool:
     """Whether an OOXML boolean toggle is present and not explicitly disabled."""
-    return element is not None and element.get(docx.oxml.ns.qn(_W_VAL)) not in (
+    return element is not None and element.get(ns.qn(_W_VAL)) not in (
         "false",
         "0",
     )
@@ -852,14 +851,14 @@ def is_toggle_on(element: Any) -> bool:
 
 def is_underlined(element: Any) -> bool:
     """Underline is not a toggle: it names a line to draw, and "none" is no line."""
-    return element is not None and element.get(docx.oxml.ns.qn(_W_VAL)) != "none"
+    return element is not None and element.get(ns.qn(_W_VAL)) != "none"
 
 
 def vertical_mark(element: Any) -> frozenset[str]:
     """Whether the run is raised or lowered off the line it sits on."""
     if element is None:
         return frozenset()
-    mark = _VERTICAL_MARKS.get(element.get(docx.oxml.ns.qn(_W_VAL)))
+    mark = _VERTICAL_MARKS.get(element.get(ns.qn(_W_VAL)))
     return frozenset({mark}) if mark else frozenset()
 
 
@@ -877,7 +876,7 @@ def colour_mark(element: Any) -> frozenset[str]:
     know what to do with. It is also why the default needs no special case: Word
     spells the default out explicitly on most coloured runs, and it is achromatic.
     """
-    value = None if element is None else element.get(docx.oxml.ns.qn(_W_VAL))
+    value = None if element is None else element.get(ns.qn(_W_VAL))
     if value is None or len(value) != _HEX_LENGTH:
         return frozenset()
 
@@ -900,13 +899,13 @@ def pictures(run: Any) -> Iterator[Any]:
     mc:AlternateContent, so it is a grandchild. A drawing holding a shape rather than
     a picture has no a:blip and is no picture here.
     """
-    for drawing in run.findall(docx.oxml.ns.qn("w:drawing")):
-        for blip in drawing.iter(docx.oxml.ns.qn("a:blip")):
-            if blip.get(docx.oxml.ns.qn("r:embed")):
+    for drawing in run.findall(ns.qn("w:drawing")):
+        for blip in drawing.iter(ns.qn("a:blip")):
+            if blip.get(ns.qn("r:embed")):
                 yield blip
 
 
-def list_features(paragraph: docx.text.paragraph.Paragraph) -> frozenset[str]:
+def list_features(paragraph: docx_paragraph.Paragraph) -> frozenset[str]:
     """The list this paragraph is an item of, or nothing where it is not one.
 
     What makes a paragraph a list item is numbering being in effect on it, and
@@ -927,7 +926,7 @@ def list_features(paragraph: docx.text.paragraph.Paragraph) -> frozenset[str]:
     return frozenset({LIST, NUMBERED})
 
 
-def item_column(paragraph: docx.text.paragraph.Paragraph) -> int | None:
+def item_column(paragraph: docx_paragraph.Paragraph) -> int | None:
     """Where Word draws this item from the margin in twips, or None where it is none.
 
     The paragraph's own indent first and the list definition's for the level second,
@@ -939,7 +938,7 @@ def item_column(paragraph: docx.text.paragraph.Paragraph) -> int | None:
     if num_id is None or num_id == _NUMBERING_REMOVED:
         return None
 
-    own = left_indent(paragraph._p.find(docx.oxml.ns.qn("w:pPr")))
+    own = left_indent(paragraph._p.find(ns.qn("w:pPr")))
     if own is not None:
         return own
 
@@ -948,7 +947,7 @@ def item_column(paragraph: docx.text.paragraph.Paragraph) -> int | None:
     if declared is None:
         return 0
 
-    return left_indent(declared.find(docx.oxml.ns.qn("w:pPr"))) or 0
+    return left_indent(declared.find(ns.qn("w:pPr"))) or 0
 
 
 def left_indent(properties: Any) -> int | None:
@@ -956,15 +955,15 @@ def left_indent(properties: Any) -> int | None:
     if properties is None:
         return None
 
-    element = properties.find(docx.oxml.ns.qn("w:ind"))
+    element = properties.find(ns.qn("w:ind"))
     if element is None:
         return None
 
-    value = element.get(docx.oxml.ns.qn("w:left"))
+    value = element.get(ns.qn("w:left"))
     return None if value is None else int(value)
 
 
-def prints_something(paragraph: docx.text.paragraph.Paragraph, text: str) -> bool:
+def prints_something(paragraph: docx_paragraph.Paragraph, text: str) -> bool:
     """Whether this paragraph puts anything at all on the page.
 
     A picture is something. The parser writes a line for one, and that line ends a
@@ -977,12 +976,12 @@ def prints_something(paragraph: docx.text.paragraph.Paragraph, text: str) -> boo
     return any(
         True
         for element in rendered_nodes(paragraph._p)
-        if element.tag == docx.oxml.ns.qn("w:r")
+        if element.tag == ns.qn("w:r")
         for _ in pictures(element)
     )
 
 
-def item_marker(paragraph: docx.text.paragraph.Paragraph) -> tuple[str, int | None]:
+def item_marker(paragraph: docx_paragraph.Paragraph) -> tuple[str, int | None]:
     """What Word draws to mark this item, and its place in Word's bullet sequence.
 
     The name is what two items must share to count as marked the same way, and pairs
@@ -1013,23 +1012,19 @@ def item_marker(paragraph: docx.text.paragraph.Paragraph) -> tuple[str, int | No
 
 def _declared_value(declared: Any, name: str) -> str | None:
     """One w:val a list level declares, where it declares that element at all."""
-    element = declared.find(docx.oxml.ns.qn(name))
+    element = declared.find(ns.qn(name))
     if element is None:
         return None
-    value = element.get(docx.oxml.ns.qn(_W_VAL))
+    value = element.get(ns.qn(_W_VAL))
     return None if value is None else str(value)
 
 
 def _marker_font(declared: Any) -> str:
     """The font a list level draws its bullet in, or "" where it names none."""
-    fonts = declared.find(f"{docx.oxml.ns.qn('w:rPr')}/{docx.oxml.ns.qn('w:rFonts')}")
+    fonts = declared.find(f"{ns.qn('w:rPr')}/{ns.qn('w:rFonts')}")
     if fonts is None:
         return ""
-    return str(
-        fonts.get(docx.oxml.ns.qn("w:ascii"))
-        or fonts.get(docx.oxml.ns.qn("w:hAnsi"))
-        or ""
-    )
+    return str(fonts.get(ns.qn("w:ascii")) or fonts.get(ns.qn("w:hAnsi")) or "")
 
 
 @dataclasses.dataclass
@@ -1189,7 +1184,7 @@ class ListRun:
         self.interrupted = False
 
 
-def numbering_value(paragraph: docx.text.paragraph.Paragraph, name: str) -> str | None:
+def numbering_value(paragraph: docx_paragraph.Paragraph, name: str) -> str | None:
     """One numbering property in effect on a paragraph: its own, else its style's.
 
     Direct formatting overrides a style property by property rather than wholesale,
@@ -1197,22 +1192,20 @@ def numbering_value(paragraph: docx.text.paragraph.Paragraph, name: str) -> str 
     """
     style = paragraph.style
     sources = (
-        paragraph._p.find(docx.oxml.ns.qn("w:pPr")),
-        style.element.find(docx.oxml.ns.qn("w:pPr")) if style is not None else None,
+        paragraph._p.find(ns.qn("w:pPr")),
+        style.element.find(ns.qn("w:pPr")) if style is not None else None,
     )
     for properties in sources:
         if properties is None:
             continue
-        element = properties.find(
-            f"{docx.oxml.ns.qn('w:numPr')}/{docx.oxml.ns.qn(name)}"
-        )
-        if element is not None and element.get(docx.oxml.ns.qn(_W_VAL)) is not None:
-            return str(element.get(docx.oxml.ns.qn(_W_VAL)))
+        element = properties.find(f"{ns.qn('w:numPr')}/{ns.qn(name)}")
+        if element is not None and element.get(ns.qn(_W_VAL)) is not None:
+            return str(element.get(ns.qn(_W_VAL)))
     return None
 
 
 def numbering_format(
-    paragraph: docx.text.paragraph.Paragraph, num_id: str, level: int
+    paragraph: docx_paragraph.Paragraph, num_id: str, level: int
 ) -> str:
     """How the named list marks its items at this depth.
 
@@ -1228,20 +1221,18 @@ def numbering_format(
 
 
 def declared_formats(
-    paragraph: docx.text.paragraph.Paragraph, num_id: str
+    paragraph: docx_paragraph.Paragraph, num_id: str
 ) -> dict[int, str]:
     """The format the named list declares at each of its levels, as ilvl -> numFmt."""
     return {
         ilvl: value
         for ilvl, level in declared_levels(paragraph, num_id).items()
-        for child in level.findall(docx.oxml.ns.qn("w:numFmt"))
-        if (value := child.get(docx.oxml.ns.qn(_W_VAL))) is not None
+        for child in level.findall(ns.qn("w:numFmt"))
+        if (value := child.get(ns.qn(_W_VAL))) is not None
     }
 
 
-def declared_levels(
-    paragraph: docx.text.paragraph.Paragraph, num_id: str
-) -> dict[int, Any]:
+def declared_levels(paragraph: docx_paragraph.Paragraph, num_id: str) -> dict[int, Any]:
     """What the named list declares at each of its levels, as ilvl -> w:lvl.
 
     A w:num is only a reference: the levels, and so the format and the indent each
@@ -1253,21 +1244,21 @@ def declared_levels(
 
     wanted = {
         value
-        for num in numbering.findall(docx.oxml.ns.qn("w:num"))
-        if num.get(docx.oxml.ns.qn("w:numId")) == num_id
-        for child in num.findall(docx.oxml.ns.qn("w:abstractNumId"))
-        if (value := child.get(docx.oxml.ns.qn(_W_VAL))) is not None
+        for num in numbering.findall(ns.qn("w:num"))
+        if num.get(ns.qn("w:numId")) == num_id
+        for child in num.findall(ns.qn("w:abstractNumId"))
+        if (value := child.get(ns.qn(_W_VAL))) is not None
     }
     return {
         int(ilvl): level
-        for definition in numbering.findall(docx.oxml.ns.qn("w:abstractNum"))
-        if definition.get(docx.oxml.ns.qn("w:abstractNumId")) in wanted
-        for level in definition.findall(docx.oxml.ns.qn("w:lvl"))
-        if (ilvl := level.get(docx.oxml.ns.qn("w:ilvl"))) is not None
+        for definition in numbering.findall(ns.qn("w:abstractNum"))
+        if definition.get(ns.qn("w:abstractNumId")) in wanted
+        for level in definition.findall(ns.qn("w:lvl"))
+        if (ilvl := level.get(ns.qn("w:ilvl"))) is not None
     }
 
 
-def numbering_element(paragraph: docx.text.paragraph.Paragraph) -> Any:
+def numbering_element(paragraph: docx_paragraph.Paragraph) -> Any:
     """The document's numbering definitions, or None where it declares none.
 
     Reached through the relationships rather than through python-docx's own
@@ -1275,14 +1266,14 @@ def numbering_element(paragraph: docx.text.paragraph.Paragraph) -> Any:
     is absent - and a document with no list at all has no such part.
     """
     for relationship in paragraph.part.rels.values():
-        if relationship.reltype == docx.opc.constants.RELATIONSHIP_TYPE.NUMBERING:
+        if relationship.reltype == opc_constants.RELATIONSHIP_TYPE.NUMBERING:
             return relationship.target_part.element
     return None
 
 
 def table_cells(
-    table: docx.table.Table,
-) -> Iterator[list[docx.text.paragraph.Paragraph]]:
+    table: docx_table.Table,
+) -> Iterator[list[docx_paragraph.Paragraph]]:
     """The paragraphs of each cell of a table, in document order, each cell once.
 
     Word writes every cell exactly once however it is merged, so the cell elements
@@ -1295,25 +1286,25 @@ def table_cells(
     a cell never seen before collides with a freed one and is skipped -- silently,
     and differently on each run.
     """
-    for cell in table._tbl.iter(docx.oxml.ns.qn("w:tc")):
+    for cell in table._tbl.iter(ns.qn("w:tc")):
         yield [
-            docx.text.paragraph.Paragraph(paragraph, table)
-            for paragraph in cell.findall(docx.oxml.ns.qn("w:p"))
+            docx_paragraph.Paragraph(paragraph, table)
+            for paragraph in cell.findall(ns.qn("w:p"))
         ]
 
 
-def is_callout(table: docx.table.Table) -> bool:
+def is_callout(table: docx_table.Table) -> bool:
     """Whether this table is a box Word drew rather than a grid of data.
 
     Word has no callout of its own, so a box is drawn either as a one-cell table or
     with the drawing tools, and it means the same thing by both. A reader sees a box
     either way, which is why both count as BOX rather than as a table of one cell.
     """
-    rows = table._tbl.findall(docx.oxml.ns.qn("w:tr"))
-    return len(rows) == 1 and len(rows[0].findall(docx.oxml.ns.qn("w:tc"))) == 1
+    rows = table._tbl.findall(ns.qn("w:tr"))
+    return len(rows) == 1 and len(rows[0].findall(ns.qn("w:tc"))) == 1
 
 
-def is_bordered(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def is_bordered(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether Word drew a box round this paragraph itself.
 
     The third way a box arrives, and the only one with no container: the author
@@ -1326,22 +1317,21 @@ def is_bordered(paragraph: docx.text.paragraph.Paragraph) -> bool:
     where a style declares one. A side present but turned off is a declared absence
     and not a line.
     """
-    properties = paragraph._p.find(docx.oxml.ns.qn("w:pPr"))
+    properties = paragraph._p.find(ns.qn("w:pPr"))
     if properties is None:
         return False
 
-    border = properties.find(docx.oxml.ns.qn("w:pBdr"))
+    border = properties.find(ns.qn("w:pBdr"))
     if border is None:
         return False
 
-    sides = (border.find(docx.oxml.ns.qn(side)) for side in _BOX_SIDES)
+    sides = (border.find(ns.qn(side)) for side in _BOX_SIDES)
     return all(
-        side is not None and side.get(docx.oxml.ns.qn(_W_VAL)) not in _NO_LINE
-        for side in sides
+        side is not None and side.get(ns.qn(_W_VAL)) not in _NO_LINE for side in sides
     )
 
 
-def style_name(paragraph: docx.text.paragraph.Paragraph) -> str:
+def style_name(paragraph: docx_paragraph.Paragraph) -> str:
     """The paragraph's style name, lowercased, or "" when it has none."""
     style = paragraph.style
     if style is None:
@@ -1350,12 +1340,12 @@ def style_name(paragraph: docx.text.paragraph.Paragraph) -> str:
     return name.lower() if name else ""
 
 
-def is_heading(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def is_heading(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph opens a body section."""
     return style_name(paragraph).startswith(_BODY_STYLES)
 
 
-def is_contents(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def is_contents(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph belongs to the table of contents rather than the body."""
     if style_name(paragraph).startswith(_CONTENTS_STYLES):
         return True
@@ -1366,7 +1356,7 @@ def is_contents(paragraph: docx.text.paragraph.Paragraph) -> bool:
 
 def absorb(
     section: Section,
-    paragraph: docx.text.paragraph.Paragraph,
+    paragraph: docx_paragraph.Paragraph,
     run: ListRun,
     features: frozenset[str] = frozenset(),
 ) -> None:
@@ -1413,18 +1403,18 @@ def word_sections(document: docx.document.Document) -> list[Section]:
     sections: list[Section] = []
     current: Section | None = None
     run = ListRun(nudge=_NUDGE)
-    boxed: list[docx.text.paragraph.Paragraph] = []
+    boxed: list[docx_paragraph.Paragraph] = []
 
     for block in iter_blocks(document):
         # Held until the first block that is not part of the box, because nothing
         # but that says where it ends.
-        if isinstance(block, docx.text.paragraph.Paragraph) and belongs_to_a_box(block):
+        if isinstance(block, docx_paragraph.Paragraph) and belongs_to_a_box(block):
             take_bordered(current, boxed, block)
             continue
 
         absorb_box(current, boxed)
 
-        if isinstance(block, docx.table.Table):
+        if isinstance(block, docx_table.Table):
             run = ListRun(nudge=_NUDGE)
             absorb_table(current, block)
             continue
@@ -1458,7 +1448,7 @@ def word_sections(document: docx.document.Document) -> list[Section]:
     return sections
 
 
-def absorb_table(section: Section | None, table: docx.table.Table) -> None:
+def absorb_table(section: Section | None, table: docx_table.Table) -> None:
     """Add every cell of a table, each cell a list of its own.
 
     A one-cell table is a box rather than a grid, so its contents are BOX and not
@@ -1477,7 +1467,7 @@ def absorb_table(section: Section | None, table: docx.table.Table) -> None:
             absorb(section, paragraph, cell_run, features)
 
 
-def border_signature(paragraph: docx.text.paragraph.Paragraph) -> tuple[Any, ...]:
+def border_signature(paragraph: docx_paragraph.Paragraph) -> tuple[Any, ...]:
     """What says whether two bordered paragraphs are one box or two.
 
     Word grows a single frame down consecutive bordered paragraphs only while their
@@ -1487,11 +1477,11 @@ def border_signature(paragraph: docx.text.paragraph.Paragraph) -> tuple[Any, ...
     from its body box in the guides that draw them apart, so it is what the page
     shows and what this side has to read.
     """
-    properties = paragraph._p.find(docx.oxml.ns.qn("w:pPr"))
+    properties = paragraph._p.find(ns.qn("w:pPr"))
     if properties is None:
         return ()
 
-    border = properties.find(docx.oxml.ns.qn("w:pBdr"))
+    border = properties.find(ns.qn("w:pBdr"))
     if border is None:
         return ()
 
@@ -1503,8 +1493,8 @@ def border_signature(paragraph: docx.text.paragraph.Paragraph) -> tuple[Any, ...
 
 def take_bordered(
     section: Section | None,
-    boxed: list[docx.text.paragraph.Paragraph],
-    paragraph: docx.text.paragraph.Paragraph,
+    boxed: list[docx_paragraph.Paragraph],
+    paragraph: docx_paragraph.Paragraph,
 ) -> None:
     """Take one bordered paragraph into the box being gathered.
 
@@ -1518,7 +1508,7 @@ def take_bordered(
     boxed.append(paragraph)
 
 
-def belongs_to_a_box(paragraph: docx.text.paragraph.Paragraph) -> bool:
+def belongs_to_a_box(paragraph: docx_paragraph.Paragraph) -> bool:
     """Whether this paragraph is part of a box drawn by bordering its paragraphs.
 
     A heading is never part of one: a border round a heading is emphasis, and taking
@@ -1527,9 +1517,7 @@ def belongs_to_a_box(paragraph: docx.text.paragraph.Paragraph) -> bool:
     return is_bordered(paragraph) and not is_heading(paragraph)
 
 
-def absorb_box(
-    section: Section | None, boxed: list[docx.text.paragraph.Paragraph]
-) -> None:
+def absorb_box(section: Section | None, boxed: list[docx_paragraph.Paragraph]) -> None:
     """Add the run of bordered paragraphs held so far, and start a fresh one.
 
     They are a box, so they are a list of their own: the run they interrupt goes on

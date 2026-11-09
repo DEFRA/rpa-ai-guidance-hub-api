@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import docx.oxml.ns
+from docx.oxml import ns
 
 from app.guidance.parsing import tables
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 # The tag a caller dispatches on to recognise a box among the body's other blocks.
-TEXT_BOX = docx.oxml.ns.qn("w:txbxContent")
+TEXT_BOX = ns.qn("w:txbxContent")
 
 # Markup compatibility, spelled out because python-docx's namespace map has no "mc"
 # prefix to resolve.

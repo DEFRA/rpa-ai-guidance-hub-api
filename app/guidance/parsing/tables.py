@@ -38,8 +38,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import docx.oxml.ns
-import docx.text.paragraph
+from docx.oxml import ns
+from docx.text import paragraph as docx_paragraph
 
 from app.guidance.parsing import inline, lists, ooxml
 
@@ -71,15 +71,13 @@ def table_markdown(table: Any, parent: Any) -> str:
     `parent` is what the cell's paragraphs are built against, so that a hyperlink in
     a cell can still be resolved through the document part's relationships.
     """
-    rows = table.findall(docx.oxml.ns.qn("w:tr"))
-    columns = len(
-        table.findall(f"{docx.oxml.ns.qn('w:tblGrid')}/{docx.oxml.ns.qn('w:gridCol')}")
-    )
+    rows = table.findall(ns.qn("w:tr"))
+    columns = len(table.findall(f"{ns.qn('w:tblGrid')}/{ns.qn('w:gridCol')}"))
     if not rows or not columns:
         return ""
 
-    if len(rows) == 1 and len(rows[0].findall(docx.oxml.ns.qn("w:tc"))) == 1:
-        return callout(rows[0].findall(docx.oxml.ns.qn("w:tc"))[0], parent)
+    if len(rows) == 1 and len(rows[0].findall(ns.qn("w:tc"))) == 1:
+        return callout(rows[0].findall(ns.qn("w:tc"))[0], parent)
 
     header, *body = (_row_cells(row, columns, parent) for row in rows)
     lines = [_row(header), _delimiter(len(header))]
@@ -98,7 +96,7 @@ def callout(container: Any, parent: Any) -> str:
     puts them all on one line - or, once a blockquote marker is in front of it, breaks
     out of the quote at the first newline.
     """
-    return quote(blocks(container.findall(docx.oxml.ns.qn("w:p")), parent))
+    return quote(blocks(container.findall(ns.qn("w:p")), parent))
 
 
 def quote(rendered: list[str]) -> str:
@@ -146,7 +144,7 @@ def _columns_of(row: Any) -> Iterator[Any | None]:
     appear exactly as often as the document says them, which is also what stops the
     conversion audit from crediting itself with content Word does not have.
     """
-    for cell in row.findall(docx.oxml.ns.qn("w:tc")):
+    for cell in row.findall(ns.qn("w:tc")):
         yield None if _continues_merge(cell) else cell
         for _ in range(_span(cell) - 1):
             yield None
@@ -155,15 +153,13 @@ def _columns_of(row: Any) -> Iterator[Any | None]:
 def _continues_merge(cell: Any) -> bool:
     """Whether this cell carries on the one above rather than starting a merge."""
     merge = _property(cell, "w:vMerge")
-    return (
-        merge is not None and merge.get(docx.oxml.ns.qn(ooxml.W_VAL)) != _MERGE_ORIGIN
-    )
+    return merge is not None and merge.get(ns.qn(ooxml.W_VAL)) != _MERGE_ORIGIN
 
 
 def _span(cell: Any) -> int:
     """How many grid columns this cell covers."""
     element = _property(cell, "w:gridSpan")
-    return 1 if element is None else int(element.get(docx.oxml.ns.qn(ooxml.W_VAL)))
+    return 1 if element is None else int(element.get(ns.qn(ooxml.W_VAL)))
 
 
 def _property(cell: Any, name: str) -> Any:
@@ -172,7 +168,7 @@ def _property(cell: Any, name: str) -> Any:
     Read through the w:tcPr rather than from it, because a cell setting no property
     at all writes no w:tcPr either, and that is not a case worth a guard of its own.
     """
-    return cell.find(f"{docx.oxml.ns.qn('w:tcPr')}/{docx.oxml.ns.qn(name)}")
+    return cell.find(f"{ns.qn('w:tcPr')}/{ns.qn(name)}")
 
 
 def _cell_markdown(cell: Any | None, parent: Any) -> str:
@@ -220,7 +216,7 @@ def _own_blocks(container: Any, parent: Any) -> list[str]:
     guide, and one would need a table's shape inside a cell that cannot hold a line
     break. A text box nested inside a text box is left alone for the same reason.
     """
-    return blocks(container.findall(docx.oxml.ns.qn("w:p")), parent)
+    return blocks(container.findall(ns.qn("w:p")), parent)
 
 
 def blocks(paragraphs: Iterable[Any], parent: Any) -> list[str]:
@@ -233,7 +229,7 @@ def blocks(paragraphs: Iterable[Any], parent: Any) -> list[str]:
     run: list[tuple[lists.ListItem, str]] = []
 
     for element in paragraphs:
-        paragraph = docx.text.paragraph.Paragraph(element, parent)
+        paragraph = docx_paragraph.Paragraph(element, parent)
         markdown = inline.paragraph_markdown(paragraph)
 
         item = lists.list_item(paragraph)

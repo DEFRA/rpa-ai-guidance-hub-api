@@ -62,12 +62,12 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
 
-import docx.oxml.ns
+from docx.oxml import ns
 
 from app.guidance.parsing import colours, images, ooxml
 
 if TYPE_CHECKING:
-    import docx.text.paragraph
+    from docx.text import paragraph as docx_paragraph
 
 # Markdown has no tab stop, and a line that opens with one is a code block, so a tab
 # is spent as the separator it is.
@@ -218,13 +218,13 @@ class _Field:
 _PLAIN = _Marks()
 
 
-def paragraph_markdown(paragraph: docx.text.paragraph.Paragraph) -> str:
+def paragraph_markdown(paragraph: docx_paragraph.Paragraph) -> str:
     """The paragraph as one block of Markdown, or "" where it says nothing."""
     rendered = (_render_line(line) for line in _paragraph_lines(paragraph))
     return _LINE_BREAK.join(line for line in rendered if line)
 
 
-def _paragraph_lines(paragraph: docx.text.paragraph.Paragraph) -> list[list[_Run]]:
+def _paragraph_lines(paragraph: docx_paragraph.Paragraph) -> list[list[_Run]]:
     """The paragraph's runs, split into the lines its soft breaks divide it into.
 
     Dispatching on the paragraph's own children, rather than on every run beneath
@@ -242,7 +242,7 @@ def _paragraph_lines(paragraph: docx.text.paragraph.Paragraph) -> list[list[_Run
     open_field: _Field | None = None
 
     for child in paragraph._p:
-        if child.tag == docx.oxml.ns.qn("w:hyperlink"):
+        if child.tag == ns.qn("w:hyperlink"):
             link = _link_run(child, paragraph)
             if link is None:
                 continue
@@ -250,7 +250,7 @@ def _paragraph_lines(paragraph: docx.text.paragraph.Paragraph) -> list[list[_Run
                 lines[-1].append(link)
             else:
                 open_field.absorb_link(link)
-        elif child.tag == docx.oxml.ns.qn("w:r"):
+        elif child.tag == ns.qn("w:r"):
             open_field = _absorb_run(lines, child, open_field)
 
     if open_field is not None:
@@ -304,17 +304,15 @@ def _append_run(lines: list[list[_Run]], run: Any) -> None:
 
 def _field_boundary(run: Any) -> _FieldBoundary | None:
     """Which end of a field this run marks, or None for an ordinary run."""
-    element = run.find(docx.oxml.ns.qn("w:fldChar"))
+    element = run.find(ns.qn("w:fldChar"))
     if element is None:
         return None
-    return _FIELD_BOUNDARIES.get(element.get(docx.oxml.ns.qn("w:fldCharType")))
+    return _FIELD_BOUNDARIES.get(element.get(ns.qn("w:fldCharType")))
 
 
 def _instruction_text(run: Any) -> str:
     """The part of a field's instruction this run carries."""
-    return "".join(
-        element.text or "" for element in run.iter(docx.oxml.ns.qn("w:instrText"))
-    )
+    return "".join(element.text or "" for element in run.iter(ns.qn("w:instrText")))
 
 
 def _hyperlink_target(instruction: str) -> str:
@@ -328,26 +326,26 @@ def _run_texts(run: Any) -> list[str]:
     texts = [""]
 
     for child in run:
-        if child.tag == docx.oxml.ns.qn("w:t"):
+        if child.tag == ns.qn("w:t"):
             texts[-1] += child.text or ""
-        elif child.tag == docx.oxml.ns.qn("w:tab"):
+        elif child.tag == ns.qn("w:tab"):
             texts[-1] += _TAB
         elif (
-            child.tag == docx.oxml.ns.qn("w:br")
-            and child.get(docx.oxml.ns.qn("w:type")) in _SOFT_BREAK_TYPES
+            child.tag == ns.qn("w:br")
+            and child.get(ns.qn("w:type")) in _SOFT_BREAK_TYPES
         ):
             texts.append("")
 
     return texts
 
 
-def _link_run(hyperlink: Any, paragraph: docx.text.paragraph.Paragraph) -> _Run | None:
+def _link_run(hyperlink: Any, paragraph: docx_paragraph.Paragraph) -> _Run | None:
     """The whole of a w:hyperlink as one run, or None where it has no text.
 
     Marks are taken from the first run: a link's anchor text is uniformly styled in
     practice, so this yields one clean link rather than a fragment per run.
     """
-    runs = list(hyperlink.iter(docx.oxml.ns.qn("w:r")))
+    runs = list(hyperlink.iter(ns.qn("w:r")))
     text = "".join("".join(_run_texts(run)) for run in runs)
     if not text.strip():
         return None
@@ -396,47 +394,47 @@ def _canonical_target(target: str) -> str:
     return target.replace("\\", "%5C")
 
 
-def _link_target(hyperlink: Any, paragraph: docx.text.paragraph.Paragraph) -> str:
+def _link_target(hyperlink: Any, paragraph: docx_paragraph.Paragraph) -> str:
     """Where a w:hyperlink points: an address outside the file, or a bookmark in it.
 
     A bookmark is kept exactly as Word wrote it. Resolving one to a section is a
     separate question, answered where the whole document is known - and a name left
     raw beats a link sent confidently to the wrong section.
     """
-    relationship_id = hyperlink.get(docx.oxml.ns.qn("r:id"))
+    relationship_id = hyperlink.get(ns.qn("r:id"))
     if relationship_id in paragraph.part.rels:
         return str(paragraph.part.rels[relationship_id].target_ref)
 
-    anchor = hyperlink.get(docx.oxml.ns.qn("w:anchor"))
+    anchor = hyperlink.get(ns.qn("w:anchor"))
     return f"#{anchor}" if anchor else ""
 
 
 def _marks_of(run: Any) -> _Marks:
     """What one run is wearing, read from its run properties."""
-    properties = run.find(docx.oxml.ns.qn("w:rPr"))
+    properties = run.find(ns.qn("w:rPr"))
     if properties is None:
         return _PLAIN
 
     return _Marks(
-        bold=ooxml.is_toggle_on(properties.find(docx.oxml.ns.qn("w:b"))),
-        italic=ooxml.is_toggle_on(properties.find(docx.oxml.ns.qn("w:i"))),
-        underline=_is_underlined(properties.find(docx.oxml.ns.qn("w:u"))),
-        strikethrough=ooxml.is_toggle_on(properties.find(docx.oxml.ns.qn("w:strike"))),
-        vertical=_vertical_tag(properties.find(docx.oxml.ns.qn("w:vertAlign"))),
-        colour=_colour(properties.find(docx.oxml.ns.qn("w:color"))),
+        bold=ooxml.is_toggle_on(properties.find(ns.qn("w:b"))),
+        italic=ooxml.is_toggle_on(properties.find(ns.qn("w:i"))),
+        underline=_is_underlined(properties.find(ns.qn("w:u"))),
+        strikethrough=ooxml.is_toggle_on(properties.find(ns.qn("w:strike"))),
+        vertical=_vertical_tag(properties.find(ns.qn("w:vertAlign"))),
+        colour=_colour(properties.find(ns.qn("w:color"))),
     )
 
 
 def _is_underlined(element: Any) -> bool:
     """Underline is not a toggle: it names a line to draw, and "none" is no line."""
-    return element is not None and element.get(docx.oxml.ns.qn(ooxml.W_VAL)) != "none"
+    return element is not None and element.get(ns.qn(ooxml.W_VAL)) != "none"
 
 
 def _vertical_tag(element: Any) -> str:
     """The tag for a raised or lowered run, or "" for one sitting on the line."""
     if element is None:
         return ""
-    return _VERTICAL_TAGS.get(element.get(docx.oxml.ns.qn(ooxml.W_VAL)), "")
+    return _VERTICAL_TAGS.get(element.get(ns.qn(ooxml.W_VAL)), "")
 
 
 def _colour(element: Any) -> str:
@@ -446,11 +444,7 @@ def _colour(element: Any) -> str:
     author meant alike: two shades of the same intent merge into one span instead of
     breaking a phrase in half at a colour boundary nobody can see.
     """
-    return (
-        ""
-        if element is None
-        else colours.name_for(element.get(docx.oxml.ns.qn(ooxml.W_VAL)))
-    )
+    return "" if element is None else colours.name_for(element.get(ns.qn(ooxml.W_VAL)))
 
 
 def _render_line(runs: list[_Run]) -> str:

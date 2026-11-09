@@ -30,7 +30,7 @@ import mimetypes
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import fastapi
-import fastapi.concurrency
+from fastapi import concurrency
 
 from app import config
 from app.common import mongo, s3
@@ -231,7 +231,7 @@ async def read_content(
             detail=f"No guide {document_id}",
         )
 
-    content = await fastapi.concurrency.run_in_threadpool(
+    content = await concurrency.run_in_threadpool(
         store.read, version.content_url, s3_client=s3_client
     )
     if content is None:
@@ -263,7 +263,7 @@ async def read_asset(
             status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=f"No asset {name}"
         )
 
-    data = await fastapi.concurrency.run_in_threadpool(
+    data = await concurrency.run_in_threadpool(
         service.read_asset, document_id, name, s3_client=s3_client
     )
     if data is None:

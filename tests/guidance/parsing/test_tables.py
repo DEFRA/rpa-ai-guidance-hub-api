@@ -11,9 +11,9 @@ All fixture text is invented, as everywhere in this package.
 from collections.abc import Callable
 from typing import Any
 
-import docx.opc.constants
-import docx.oxml.ns
-import docx.oxml.shared
+from docx.opc import constants as opc_constants
+from docx.oxml import ns
+from docx.oxml import shared as oxml_shared
 
 from app.guidance.parsing import parser
 
@@ -41,34 +41,32 @@ def _table_content(
 
 def _cell(table, row: int, column: int):
     """One cell as Word wrote it, without python-docx's grid expansion."""
-    return table._tbl.findall(docx.oxml.ns.qn("w:tr"))[row].findall(
-        docx.oxml.ns.qn("w:tc")
-    )[column]
+    return table._tbl.findall(ns.qn("w:tr"))[row].findall(ns.qn("w:tc"))[column]
 
 
 def _cell_property(cell, name: str):
     """Add one cell property, creating the w:tcPr it has to live in."""
-    properties = cell.find(docx.oxml.ns.qn("w:tcPr"))
+    properties = cell.find(ns.qn("w:tcPr"))
     if properties is None:
-        properties = docx.oxml.shared.OxmlElement("w:tcPr")
+        properties = oxml_shared.OxmlElement("w:tcPr")
         # w:tcPr is the first child of a w:tc wherever it appears.
         cell.insert(0, properties)
 
-    element = docx.oxml.shared.OxmlElement(name)
+    element = oxml_shared.OxmlElement(name)
     properties.append(element)
     return element
 
 
 def _spans(cell, columns: int) -> None:
     """Make a cell cover several grid columns, as a merged heading does."""
-    _cell_property(cell, "w:gridSpan").set(docx.oxml.ns.qn("w:val"), str(columns))
+    _cell_property(cell, "w:gridSpan").set(ns.qn("w:val"), str(columns))
 
 
 def _merges(cell, *, origin: bool) -> None:
     """Mark a cell as starting a vertical merge, or as carrying one on."""
     element = _cell_property(cell, "w:vMerge")
     if origin:
-        element.set(docx.oxml.ns.qn("w:val"), "restart")
+        element.set(ns.qn("w:val"), "restart")
 
 
 def _remove(cell) -> None:
@@ -78,11 +76,11 @@ def _remove(cell) -> None:
 
 def _hyperlink(paragraph, text: str, url: str) -> None:
     """Append a w:hyperlink pointing outside the document."""
-    link = docx.oxml.shared.OxmlElement("w:hyperlink")
+    link = oxml_shared.OxmlElement("w:hyperlink")
     link.set(
-        docx.oxml.ns.qn("r:id"),
+        ns.qn("r:id"),
         paragraph.part.relate_to(
-            url, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True
+            url, opc_constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True
         ),
     )
     link.append(paragraph.add_run(text)._r)

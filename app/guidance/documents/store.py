@@ -53,15 +53,15 @@ nothing retries into one, so there is nothing for a refusal to protect.
 
 from __future__ import annotations
 
-import concurrent.futures
 import pathlib
 import posixpath
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from concurrent import futures
 from typing import TYPE_CHECKING, Any
 
-import botocore.exceptions
+from botocore import exceptions as botocore_exceptions
 
 from app.common import s3
 from app.guidance import ids
@@ -301,15 +301,13 @@ def _save_assets(
     to finish, since a write cannot be called back half way. Either way the save
     goes no further, so the Markdown naming them is never written.
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_WRITES) as pool:
+    with futures.ThreadPoolExecutor(max_workers=PARALLEL_WRITES) as pool:
         writes = [
             pool.submit(_save_asset, image, into, s3_client=s3_client)
             for image in images
         ]
         try:
-            for done, write in enumerate(
-                concurrent.futures.as_completed(writes), start=1
-            ):
+            for done, write in enumerate(futures.as_completed(writes), start=1):
                 write.result()
                 on_saved(done)
         except BaseException:
@@ -450,7 +448,7 @@ def _read_s3(location: urllib.parse.SplitResult, s3_client: Any = None) -> bytes
     client = s3_client if s3_client is not None else _s3()
     try:
         response = client.get_object(Bucket=bucket, Key=key)
-    except botocore.exceptions.ClientError as error:
+    except botocore_exceptions.ClientError as error:
         if error.response.get("Error", {}).get("Code") in _MISSING:
             return None
         raise
@@ -483,7 +481,7 @@ def _write_s3(
                 ContentType=content_type,
                 IfNoneMatch="*",
             )
-        except botocore.exceptions.ClientError as error:
+        except botocore_exceptions.ClientError as error:
             status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if status == _ALREADY_THERE:
                 return

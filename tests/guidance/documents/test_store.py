@@ -14,7 +14,7 @@ All fixture text is invented, as everywhere in this package.
 
 import pathlib
 import re
-import urllib.parse
+from urllib import parse as urllib_parse
 
 import pytest
 
@@ -194,7 +194,7 @@ class TestWhereAGuideLives:
         guide = _guide(tmp_path)
         _save(_document(_picture()), guide)
 
-        referenced = urllib.parse.urljoin(
+        referenced = urllib_parse.urljoin(
             store.content_url(guide), f"{store.ASSET_PREFIX}a3f9.png"
         )
 
@@ -327,7 +327,7 @@ class TestPicturesKeptElsewhere:
         stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
         said = _IMAGE.search(stored).group(1)
 
-        assert urllib.parse.urljoin(store.content_url(guide), said) == store.asset_url(
+        assert urllib_parse.urljoin(store.content_url(guide), said) == store.asset_url(
             guide, prefix, "a3f9.png"
         )
         assert store.load_asset(guide, prefix, "a3f9.png") == PNG

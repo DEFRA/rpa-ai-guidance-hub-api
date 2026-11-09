@@ -28,7 +28,7 @@ import logging
 from typing import Any
 
 import boto3
-import botocore.config
+from botocore import config as botocore_config
 
 from app import config as app_config
 
@@ -57,7 +57,7 @@ def get_s3_client() -> Any:
             "s3",
             endpoint_url=config.floci_endpoint_url,
             region_name=config.aws_region,
-            config=botocore.config.Config(
+            config=botocore_config.Config(
                 connect_timeout=TIMEOUT_SECONDS,
                 read_timeout=TIMEOUT_SECONDS,
                 retries={"total_max_attempts": ATTEMPTS, "mode": "standard"},

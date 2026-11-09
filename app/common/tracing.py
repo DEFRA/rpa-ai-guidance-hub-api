@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 import fastapi
-import starlette.middleware.base
+from starlette.middleware import base as middleware_base
 
 from app import config as app_config
 
@@ -18,11 +18,11 @@ ctx_response: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Contex
 )
 
 
-class TraceIdMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+class TraceIdMiddleware(middleware_base.BaseHTTPMiddleware):
     async def dispatch(
         self,
         request: fastapi.Request,
-        call_next: starlette.middleware.base.RequestResponseEndpoint,
+        call_next: middleware_base.RequestResponseEndpoint,
     ) -> fastapi.Response:
         req_trace_id = request.headers.get(app_config.get_config().tracing_header, None)
         if req_trace_id:

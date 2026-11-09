@@ -8,12 +8,12 @@ from typing import Any
 import pymongo
 import pytest
 import pytest_asyncio
-import testcontainers.community.mongodb
+from testcontainers.community import mongodb
 
 
 @pytest.fixture(scope="session")
 def mongo_container() -> Any:
-    with testcontainers.community.mongodb.MongoDbContainer("mongo:7.0") as container:
+    with mongodb.MongoDbContainer("mongo:7.0") as container:
         yield container
 
 
