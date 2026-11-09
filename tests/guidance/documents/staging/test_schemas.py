@@ -53,6 +53,14 @@ class TestUploadedDocument:
 
         assert payload.uploaded_documents() == []
 
+    def test_skips_an_entry_with_a_file_id_but_no_file_status(self):
+        body = cdp_uploader.cdp_callback_payload(
+            {"fileId": "9fcaabe5-77ec-44db-8356-3a6e8dc51b13"}
+        )
+        payload = schemas.UploadCallbackPayload.model_validate(body)
+
+        assert payload.uploaded_documents() == []
+
     def test_projects_only_the_completed_file_among_rejected_ones(self):
         payload = schemas.UploadCallbackPayload.model_validate(
             cdp_uploader.cdp_callback_payload(

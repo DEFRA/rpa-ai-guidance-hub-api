@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from logging import getLogger
 from typing import Annotated, Any
 
 import pydantic
@@ -10,7 +10,7 @@ from pydantic.alias_generators import to_camel
 from app.guidance import ids
 from app.guidance.documents.staging import models
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # The only fileStatus a completed scan lands on - cdp-uploader's "clean and
 # copied to the destination bucket" answer. Only these files carry an s3Key;
@@ -33,7 +33,9 @@ class UnfinishedFile(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="ignore")
 
     file_id: ids.FileId = pydantic.Field(validation_alias="fileId")
-    file_status: str = pydantic.Field(validation_alias="fileStatus")
+    file_status: str | None = pydantic.Field(
+        default=None, validation_alias="fileStatus"
+    )
     error_code: str | None = pydantic.Field(default=None, validation_alias="errorCode")
 
 
