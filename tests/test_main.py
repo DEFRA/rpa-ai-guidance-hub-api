@@ -2,12 +2,17 @@ import os
 import sys
 
 import fastapi.testclient
+import pytest
 
+import app.config
 import app.entrypoints.fastapi
+from app.common import aws
+from app.guidance import conversion
 
 client = fastapi.testclient.TestClient(app.entrypoints.fastapi.app)
 
 
+@pytest.mark.usefixtures("aws_at_startup")
 def test_lifespan(mocker):
     mock_mongo_client = mocker.AsyncMock()
     mock_get_mongo = mocker.patch(
@@ -32,6 +37,48 @@ def test_lifespan(mocker):
         ensure_user_indexes.assert_awaited_once()
 
     mock_mongo_client.close.assert_awaited_once()
+
+
+def _a_lifespan_with_no_database(mocker):
+    mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
+    mocker.patch(
+        "app.common.mongo.get_db", mocker.AsyncMock(return_value=mocker.MagicMock())
+    )
+    mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
+    mocker.patch("app.users.records.ensure_indexes", mocker.AsyncMock())
+
+
+def test_lifespan_works_the_queue(mocker, aws_at_startup):
+    """The consumer starts with the API and stops with it, and requests send their
+    jobs to its queue."""
+    _a_lifespan_with_no_database(mocker)
+    consumer_class = aws_at_startup.consumer_class
+    state = app.entrypoints.fastapi.app.state
+
+    with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
+        consumer_class.return_value.start.assert_called_once()
+        assert state.queue_consumer is consumer_class.return_value
+        assert isinstance(state.conversion_submitter, conversion.QueueSubmitter)
+        consumer_class.return_value.stop.assert_not_awaited()
+
+    concurrency = app.config.get_config().conversions_concurrency
+    assert consumer_class.call_args.kwargs["concurrency"] == concurrency
+    aws_at_startup.get_s3_client.assert_called_once()
+    consumer_class.return_value.stop.assert_awaited_once()
+
+
+def test_lifespan_refuses_to_start_without_aws_credentials(mocker, aws_at_startup):
+    """The buckets and the queue need them, and boto3 makes a client without any."""
+    _a_lifespan_with_no_database(mocker)
+    aws_at_startup.require_credentials.side_effect = aws.MissingCredentialsError("none")
+
+    with (
+        pytest.raises(aws.MissingCredentialsError),
+        fastapi.testclient.TestClient(app.entrypoints.fastapi.app),
+    ):
+        pass
+
+    aws_at_startup.consumer_class.assert_not_called()
 
 
 def test_root():

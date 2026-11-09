@@ -3,20 +3,13 @@
 import io
 import zipfile
 
-import docx
 import pytest
 
 from app.guidance.parsing import parser
 from app.guidance.parsing.errors import DocumentParseError
+from tests.fixtures import word_documents
 
 TITLE = "Example Grant Scheme Guide"
-
-
-def _minimal_docx() -> bytes:
-    """The smallest valid .docx, used where only the bytes matter."""
-    buffer = io.BytesIO()
-    docx.Document().save(buffer)
-    return buffer.getvalue()
 
 
 def _zip_that_is_not_an_office_package() -> bytes:
@@ -28,20 +21,12 @@ def _zip_that_is_not_an_office_package() -> bytes:
 
 def _package_that_is_not_a_word_document() -> bytes:
     """A valid Office package whose main part claims to be a spreadsheet."""
-    buffer = io.BytesIO()
-    with (
-        zipfile.ZipFile(io.BytesIO(_minimal_docx())) as source,
-        zipfile.ZipFile(buffer, "w") as target,
-    ):
-        for item in source.infolist():
-            blob = source.read(item.filename)
-            if item.filename == "[Content_Types].xml":
-                blob = blob.replace(
-                    b"wordprocessingml.document.main+xml",
-                    b"spreadsheetml.sheet.main+xml",
-                )
-            target.writestr(item, blob)
-    return buffer.getvalue()
+    return word_documents.with_part(
+        "[Content_Types].xml",
+        lambda blob: blob.replace(
+            b"wordprocessingml.document.main+xml", b"spreadsheetml.sheet.main+xml"
+        ),
+    )
 
 
 class TestAReadableDocument:
@@ -69,15 +54,20 @@ class TestAnUnreadableSource:
                 "not a Word document",
                 id="not-word",
             ),
+            pytest.param(
+                word_documents.with_malformed_xml(),
+                "not well-formed XML",
+                id="malformed-xml",
+            ),
         ],
     )
     def test_every_kind_of_bad_input_raises_one_error_type(self, source, expected):
         """python-docx raises a different exception for each of these.
 
-        BadZipFile, KeyError and ValueError respectively - and never the
-        PackageNotFoundError its documentation suggests, which it only raises for a
-        path. Callers should not have to know any of that, but they are still told
-        which of the three went wrong.
+        BadZipFile, KeyError, ValueError and lxml's XMLSyntaxError respectively - and
+        never the PackageNotFoundError its documentation suggests, which it only raises
+        for a path. Callers should not have to know any of that, but they are still
+        told which of them went wrong.
         """
         with pytest.raises(DocumentParseError) as raised:
             parser.parse_docx(source)

@@ -12,6 +12,12 @@ from app.guidance.parsing import models as parsing_models
 
 COLLECTION_NAME = "document_staging"
 
+# A save under way updates its record at every step, and the longest wait in a healthy
+# one is a message's visibility timeout between deliveries, two minutes. One with no
+# update for this long has nothing working on it: its job never reached the queue, or
+# its failure could not be recorded. If one still does, a second job is safe to repeat.
+_STALE_SAVE = timedelta(minutes=10)
+
 
 class StagingStore(Protocol):
     async def claim(self, file_id: ids.FileId, path: str) -> bool: ...
@@ -31,6 +37,14 @@ class StagingStore(Protocol):
     ) -> staging_models.StagedDocument | None: ...
 
     async def promote(self, file_id: ids.FileId) -> None: ...
+
+    async def start_saving(self, file_id: ids.FileId) -> bool: ...
+
+    async def record_save_progress(
+        self, file_id: ids.FileId, completed: int, total: int
+    ) -> None: ...
+
+    async def fail_saving(self, file_id: ids.FileId, reason: str) -> None: ...
 
 
 class MongoStagingStore:
@@ -155,5 +169,95 @@ class MongoStagingStore:
         now = datetime.now(UTC)
         await self._collection.update_one(
             {"_id": file_id},
-            {"$set": {"promoted_at": now, "updated_at": now}},
+            {
+                "$set": {
+                    "promoted_at": now,
+                    "saving_status": staging_models.SavingStatus.COMPLETE.value,
+                    "save_error": None,
+                    "updated_at": now,
+                }
+            },
+        )
+
+    async def start_saving(self, file_id: ids.FileId) -> bool:
+        """Start saving the document this file converts into, unless it is already
+        being saved or has been.
+
+        One update, so of two requests racing to start it exactly one does. A save
+        that failed can be started again, and so can one with no recent update: its
+        ids are reserved, so the second attempt finishes the same document. The record
+        is kept for its retention again from here, so it outlasts the save.
+
+        Returns:
+            True if this call started the save; False if one is under way and
+            recently updated, or finished, or the file is not staged with its ids
+            reserved.
+        """
+        now = datetime.now(UTC)
+        in_progress = staging_models.SavingStatus.IN_PROGRESS.value
+        result = await self._collection.update_one(
+            {
+                "_id": file_id,
+                "document_id": {"$exists": True},
+                "$or": [
+                    {
+                        "saving_status": {
+                            "$nin": [
+                                in_progress,
+                                staging_models.SavingStatus.COMPLETE.value,
+                            ]
+                        }
+                    },
+                    {
+                        "saving_status": in_progress,
+                        "updated_at": {"$lt": now - _STALE_SAVE},
+                    },
+                ],
+            },
+            {
+                "$set": {
+                    "saving_status": in_progress,
+                    "save_steps_completed": 0,
+                    "save_steps_total": None,
+                    "save_error": None,
+                    "updated_at": now,
+                    "expires_at": now + timedelta(seconds=self._retention_seconds),
+                }
+            },
+        )
+        return bool(result.modified_count)
+
+    async def record_save_progress(
+        self, file_id: ids.FileId, completed: int, total: int
+    ) -> None:
+        """Record how many of the save's steps are done, out of how many."""
+        await self._collection.update_one(
+            {"_id": file_id},
+            {
+                "$set": {
+                    "save_steps_completed": completed,
+                    "save_steps_total": total,
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+        )
+
+    async def fail_saving(self, file_id: ids.FileId, reason: str) -> None:
+        """Record that the save failed, and why. It can be started again.
+
+        A save already complete stays so: its document exists, whatever an overlapping
+        delivery of the same message then does.
+        """
+        await self._collection.update_one(
+            {
+                "_id": file_id,
+                "saving_status": {"$ne": staging_models.SavingStatus.COMPLETE.value},
+            },
+            {
+                "$set": {
+                    "saving_status": staging_models.SavingStatus.FAILED.value,
+                    "save_error": reason,
+                    "updated_at": datetime.now(UTC),
+                }
+            },
         )

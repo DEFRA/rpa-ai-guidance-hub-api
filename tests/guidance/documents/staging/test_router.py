@@ -33,6 +33,7 @@ def client(
     mock_service: service.StagingService,
     staging_store: staging_store_fake.InMemoryStagingStore,
     mocker,
+    aws_at_startup,  # noqa: ARG001 - wanted for its effect
 ):
     # These tests exercise the router with fakes for storage, so the app
     # lifespan's real Mongo probe is stubbed out. Otherwise each fresh

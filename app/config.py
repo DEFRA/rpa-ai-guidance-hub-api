@@ -126,6 +126,21 @@ class AppConfig(pydantic_settings.BaseSettings):
     mongo_database: str = "rpa-ai-guidance-hub-api"
     mongo_truststore: str = "TRUSTSTORE_CDP_ROOT_CA"
     floci_endpoint_url: str | None = None
+    conversions_sqs_queue_url: str = pydantic.Field(
+        ...,
+        description=(
+            "The URL of the queue that documents to convert go through "
+            "(rpa_ai_guidance_hub_conversions)"
+        ),
+    )
+    conversions_concurrency: int = pydantic.Field(
+        2,
+        ge=1,
+        description=(
+            "How many documents one instance converts at once: more than one, so "
+            "that others still get through while one is slow or failing"
+        ),
+    )
     source_docs_s3_bucket: str = pydantic.Field(
         ..., description="Bucket cdp-uploader deposits scanned source documents into"
     )

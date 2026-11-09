@@ -7,14 +7,17 @@ from typing import Any
 
 import fastapi
 import fastapi.security
+import pymongo.asynchronous.database
 import uvicorn
 
 from app import config as app_config
 from app.auth import service as auth_service
-from app.common import mongo, tracing
-from app.guidance import records
+from app.background import consumer, sqs
+from app.common import aws, mongo, s3, tracing
+from app.guidance import conversion, records, service
 from app.guidance import router as guidance_router
 from app.guidance.documents.staging import router as staging_router
+from app.guidance.documents.staging import store as staging_store
 from app.health import router as health_router
 from app.reference import router as reference_router
 from app.review import router as review_router
@@ -25,9 +28,10 @@ logger = getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
+async def lifespan(application: fastapi.FastAPI) -> AsyncGenerator[None]:
     if app_config.get_config().use_auth:
         logger.info("Using WebIdentity authentication for API routes")
+    aws.require_credentials()
 
     client = await mongo.get_mongo_client()
     logger.info("MongoDB client connected")
@@ -37,10 +41,38 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     database = await mongo.get_db(client)
     await records.ensure_indexes(database)
     await user_records.ensure_indexes(database)
+
+    working = _working_the_queue(application, database)
     yield
+    await working.stop()
     if client:
         await client.close()
         logger.info("MongoDB client closed")
+
+
+def _working_the_queue(
+    application: fastapi.FastAPI,
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> consumer.Consumer:
+    """Start converting uploads off the queue, and send requests' jobs to it."""
+    config = app_config.get_config()
+    url = config.conversions_sqs_queue_url
+    logger.info("Working the queue %s", url)
+    queue = sqs.SqsQueue(
+        sqs.client(), url, polling_threads=config.conversions_concurrency
+    )
+    handler = conversion.ConversionHandler(
+        database,
+        staging_store.MongoStagingStore(database, config.staging_retention_seconds),
+        service.GuidanceService(s3_client=s3.get_s3_client()),
+    )
+    working = consumer.Consumer(
+        queue, handler, concurrency=config.conversions_concurrency
+    )
+    working.start()
+    application.state.queue_consumer = working
+    application.state.conversion_submitter = conversion.QueueSubmitter(queue)
+    return working
 
 
 app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")

@@ -6,6 +6,7 @@ signature/claim checks -> caller check -> response and logs.
 import json
 import logging
 import re
+import types
 from typing import Annotated
 
 import fastapi
@@ -438,6 +439,22 @@ class TestRealAppWiring:
             response = real_app.get("/health")
 
         assert response.status_code == 200
+        assert cassette.play_count == 0
+
+    def test_the_sqs_worker_status_stays_open_and_never_touches_the_issuer(
+        self, real_app, jwks_cassette, mocker
+    ):
+        mocker.patch.object(
+            entrypoint.app.state,
+            "queue_consumer",
+            types.SimpleNamespace(healthy=True),
+            create=True,
+        )
+        with jwks_cassette("no_requests") as cassette:
+            response = real_app.get("/health/sqs-worker/status")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
         assert cassette.play_count == 0
 
     def test_a_protected_route_demands_a_token(self, real_app, jwks_cassette):
