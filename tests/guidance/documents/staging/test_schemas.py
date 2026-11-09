@@ -70,10 +70,10 @@ class TestUploadedDocument:
         entry = cdp_uploader.uploaded_file_entry()
         del entry["s3Key"]
 
+        body = cdp_uploader.cdp_callback_payload(entry)
+
         with pytest.raises(pydantic.ValidationError):
-            schemas.UploadCallbackPayload.model_validate(
-                cdp_uploader.cdp_callback_payload(entry)
-            )
+            schemas.UploadCallbackPayload.model_validate(body)
 
     def test_returns_empty_with_no_file_field_at_all(self):
         payload = schemas.UploadCallbackPayload.model_validate(
