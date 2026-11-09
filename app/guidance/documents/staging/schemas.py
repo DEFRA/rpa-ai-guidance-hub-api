@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
-from datetime import datetime
 from typing import Annotated, Any
 
 import pydantic
-from pydantic.alias_generators import to_camel
+import pydantic.alias_generators
 
 from app.guidance import ids
 from app.guidance.documents.staging import models
@@ -94,19 +94,21 @@ class UploadCallbackPayload(pydantic.BaseModel):
 
 
 class StagedDocumentResponse(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    model_config = pydantic.ConfigDict(
+        alias_generator=pydantic.alias_generators.to_camel, populate_by_name=True
+    )
 
     file_id: ids.FileId
     parsing_status: models.ParsingStatus
     parsing_error: str | None = None
     title: str | None = None
     version: str | None = None
-    last_modified: datetime | None = None
+    last_modified: dt.datetime | None = None
     # The document this file was converted into, and when it was committed: set
     # once the conversion finishes, so a caller that gave up waiting on POST
     # /guides can tell whether it finished anyway.
     document_id: ids.DocumentId | None = None
-    promoted_at: datetime | None = None
+    promoted_at: dt.datetime | None = None
     # Saving that document, once started: how many of its steps are done out of
     # how many (a write per picture, then the Markdown), and why it failed if it did.
     saving_status: models.SavingStatus | None = None

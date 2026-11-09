@@ -1,22 +1,22 @@
 from __future__ import annotations
 
+import dataclasses
+import datetime as dt
+import enum
 from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from enum import StrEnum
 from typing import Any
 
 from app.guidance import ids
 
 
-class ParsingStatus(StrEnum):
+class ParsingStatus(enum.StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETE = "complete"
     FAILED = "failed"
 
 
-class SavingStatus(StrEnum):
+class SavingStatus(enum.StrEnum):
     """How far saving the document this file converts into has got.
 
     None on a record means no save has been started.
@@ -27,7 +27,7 @@ class SavingStatus(StrEnum):
     FAILED = "failed"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class UploadedDocument:
     """A file cdp-uploader has scanned and delivered: what it is called, and where."""
 
@@ -35,23 +35,23 @@ class UploadedDocument:
     s3_key: str
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class StagedDocument:
     file_id: ids.FileId
     parsing_status: ParsingStatus
     path: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: dt.datetime
+    updated_at: dt.datetime
     title: str | None = None
     version: str | None = None
-    last_modified: datetime | None = None
+    last_modified: dt.datetime | None = None
     parse_error: str | None = None
     # The ids a document made from this file is stored under, reserved the first
     # time it is created and reused by every attempt after (see store.reserve_ids).
     document_id: ids.DocumentId | None = None
     version_id: ids.VersionId | None = None
     # When the document made from this file was committed (see store.promote).
-    promoted_at: datetime | None = None
+    promoted_at: dt.datetime | None = None
     # Saving that document: started once (see store.start_saving), counted in steps -
     # one write per picture and one for the Markdown - and finished or failed.
     saving_status: SavingStatus | None = None
@@ -82,26 +82,26 @@ class StagedDocument:
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> StagedDocument:
         created_at = document["created_at"]
-        if isinstance(created_at, datetime) and created_at.tzinfo is None:
+        if isinstance(created_at, dt.datetime) and created_at.tzinfo is None:
             created_at = created_at.replace(
-                tzinfo=datetime.now().astimezone().tzinfo or UTC
+                tzinfo=dt.datetime.now().astimezone().tzinfo or dt.UTC
             )
-            created_at = created_at.astimezone(UTC)
+            created_at = created_at.astimezone(dt.UTC)
 
         updated_at = document["updated_at"]
-        if isinstance(updated_at, datetime) and updated_at.tzinfo is None:
+        if isinstance(updated_at, dt.datetime) and updated_at.tzinfo is None:
             updated_at = updated_at.replace(
-                tzinfo=datetime.now().astimezone().tzinfo or UTC
+                tzinfo=dt.datetime.now().astimezone().tzinfo or dt.UTC
             )
-            updated_at = updated_at.astimezone(UTC)
+            updated_at = updated_at.astimezone(dt.UTC)
 
         promoted_at = document.get("promoted_at", None)
-        if isinstance(promoted_at, datetime) and promoted_at.tzinfo is None:
-            promoted_at = promoted_at.replace(tzinfo=UTC)
+        if isinstance(promoted_at, dt.datetime) and promoted_at.tzinfo is None:
+            promoted_at = promoted_at.replace(tzinfo=dt.UTC)
 
         last_modified = document.get("last_modified", None)
-        if isinstance(last_modified, datetime) and last_modified.tzinfo is None:
-            last_modified = last_modified.replace(tzinfo=UTC)
+        if isinstance(last_modified, dt.datetime) and last_modified.tzinfo is None:
+            last_modified = last_modified.replace(tzinfo=dt.UTC)
 
         return cls(
             file_id=document["_id"],

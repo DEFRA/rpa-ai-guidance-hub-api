@@ -20,9 +20,9 @@ from collections.abc import Iterator
 from typing import Any
 
 import boto3
+import botocore.exceptions
 import pytest
-from botocore.exceptions import BotoCoreError, ClientError
-from testcontainers.core.container import DockerContainer
+import testcontainers.core.container
 
 FLOCI_IMAGE = (
     "floci/floci@sha256:"
@@ -45,7 +45,9 @@ def _client(endpoint_url: str) -> Any:
 @pytest.fixture(scope="session")
 def floci_endpoint() -> Iterator[str]:
     """A running floci for the session, answered as its endpoint URL."""
-    with DockerContainer(FLOCI_IMAGE).with_exposed_ports(_PORT) as container:
+    with testcontainers.core.container.DockerContainer(FLOCI_IMAGE).with_exposed_ports(
+        _PORT
+    ) as container:
         endpoint = (
             f"http://{container.get_container_host_ip()}:"
             f"{container.get_exposed_port(_PORT)}"
@@ -55,7 +57,7 @@ def floci_endpoint() -> Iterator[str]:
             try:
                 _client(endpoint).list_buckets()
                 break
-            except BotoCoreError, ClientError:
+            except botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError:
                 if time.monotonic() > deadline:
                     raise
                 time.sleep(0.5)

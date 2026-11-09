@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pymongo
 import pytest
 import pytest_asyncio
-from pymongo import AsyncMongoClient
-from testcontainers.community.mongodb import MongoDbContainer
+import testcontainers.community.mongodb
 
 
 @pytest.fixture(scope="session")
 def mongo_container() -> Any:
-    with MongoDbContainer("mongo:7.0") as container:
+    with testcontainers.community.mongodb.MongoDbContainer("mongo:7.0") as container:
         yield container
 
 
@@ -25,7 +25,7 @@ async def mongo_database(mongo_container: Any) -> AsyncIterator[Any]:
     the whole test session so TestClient-based tests use the same test DB.
     """
     connection_url = mongo_container.get_connection_url()
-    client: AsyncMongoClient = AsyncMongoClient(
+    client: pymongo.AsyncMongoClient = pymongo.AsyncMongoClient(
         connection_url, uuidRepresentation="standard"
     )
 
@@ -39,7 +39,7 @@ async def mongo_database(mongo_container: Any) -> AsyncIterator[Any]:
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def override_fastapi_mongo(
-    mongo_database: AsyncMongoClient,
+    mongo_database: pymongo.AsyncMongoClient,
 ) -> AsyncIterator[None]:
     """Autouse fixture that makes the app use the test Mongo client.
 

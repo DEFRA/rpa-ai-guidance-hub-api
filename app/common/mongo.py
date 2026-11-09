@@ -1,4 +1,4 @@
-from logging import getLogger
+import logging
 
 import fastapi
 import pymongo
@@ -7,7 +7,7 @@ from app import config as app_config
 from app.common import tls
 from app.guidance.documents.staging import store
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 client: pymongo.AsyncMongoClient | None = None
 db: pymongo.asynchronous.database.AsyncDatabase | None = None

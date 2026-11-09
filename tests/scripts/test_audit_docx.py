@@ -8,26 +8,26 @@ what Word says and no more.
 All fixture text is invented, as everywhere in the suite.
 """
 
-from collections import Counter
+import collections
 from typing import Any
 
 import audit_docx
 import docx
-from docx.enum.style import WD_STYLE_TYPE
-from docx.oxml.ns import qn
-from docx.oxml.shared import OxmlElement
-from docx.text.paragraph import Paragraph
+import docx.enum.style
+import docx.oxml.ns
+import docx.oxml.shared
+import docx.text.paragraph
 
 
 def _text_box(*runs: tuple[str, str]) -> Any:
     """A w:txbxContent holding one paragraph of runs, each with a colour or "" ."""
-    box = OxmlElement("w:txbxContent")
-    paragraph = OxmlElement("w:p")
+    box = docx.oxml.shared.OxmlElement("w:txbxContent")
+    paragraph = docx.oxml.shared.OxmlElement("w:p")
     for text, colour in runs:
-        run = OxmlElement("w:r")
+        run = docx.oxml.shared.OxmlElement("w:r")
         if colour:
             run.append(_colour(colour))
-        element = OxmlElement("w:t")
+        element = docx.oxml.shared.OxmlElement("w:t")
         element.text = text
         run.append(element)
         paragraph.append(run)
@@ -37,9 +37,9 @@ def _text_box(*runs: tuple[str, str]) -> Any:
 
 def _colour(value: str) -> Any:
     """The run properties that paint a run one colour."""
-    properties = OxmlElement("w:rPr")
-    element = OxmlElement("w:color")
-    element.set(qn("w:val"), value)
+    properties = docx.oxml.shared.OxmlElement("w:rPr")
+    element = docx.oxml.shared.OxmlElement("w:color")
+    element.set(docx.oxml.ns.qn("w:val"), value)
     properties.append(element)
     return properties
 
@@ -52,23 +52,25 @@ def _in_style(document: Any, text: str, style_name: str) -> None:
     exactly the ones it does not have.
     """
     if all(style.name != style_name for style in document.styles):
-        document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        document.styles.add_style(style_name, docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
     document.add_paragraph(text, style=style_name)
 
 
-def _border(paragraph: Paragraph, *sides: str, value: str = "single") -> Paragraph:
+def _border(
+    paragraph: docx.text.paragraph.Paragraph, *sides: str, value: str = "single"
+) -> docx.text.paragraph.Paragraph:
     """Draw a border on the sides named, or on all four when none are."""
-    border = OxmlElement("w:pBdr")
+    border = docx.oxml.shared.OxmlElement("w:pBdr")
     for side in sides or ("w:top", "w:left", "w:bottom", "w:right"):
-        edge = OxmlElement(side)
-        edge.set(qn("w:val"), value)
+        edge = docx.oxml.shared.OxmlElement(side)
+        edge.set(docx.oxml.ns.qn("w:val"), value)
         border.append(edge)
 
     paragraph._p.get_or_add_pPr().append(border)
     return paragraph
 
 
-def _bulleted(paragraph: Paragraph) -> None:
+def _bulleted(paragraph: docx.text.paragraph.Paragraph) -> None:
     """Put numbering on a paragraph, which is the whole of what makes it an item.
 
     The list itself is left undeclared: with no numbering part to read a format
@@ -76,13 +78,13 @@ def _bulleted(paragraph: Paragraph) -> None:
     nothing else to draw.
     """
     numbering = paragraph._p.get_or_add_pPr().get_or_add_numPr()
-    numbering.get_or_add_numId().set(qn("w:val"), "1")
+    numbering.get_or_add_numId().set(docx.oxml.ns.qn("w:val"), "1")
 
 
-def _at_column(paragraph: Paragraph, left: int) -> None:
+def _at_column(paragraph: docx.text.paragraph.Paragraph, left: int) -> None:
     """Draw a paragraph at a given indent, the way dragging one in Word does."""
     indent = paragraph._p.get_or_add_pPr().get_or_add_ind()
-    indent.set(qn("w:left"), str(left))
+    indent.set(docx.oxml.ns.qn("w:left"), str(left))
 
 
 def _item(document: Any, text: str, left: int) -> None:
@@ -92,7 +94,9 @@ def _item(document: Any, text: str, left: int) -> None:
     _at_column(paragraph, left)
 
 
-def _anchor(paragraph: Paragraph, box: Any, colour: str = "") -> None:
+def _anchor(
+    paragraph: docx.text.paragraph.Paragraph, box: Any, colour: str = ""
+) -> None:
     """Hang a text box off a run of the paragraph, the way a drawing does.
 
     Only the nesting matters to the walk, not the shape around it, so the w:drawing
@@ -101,7 +105,7 @@ def _anchor(paragraph: Paragraph, box: Any, colour: str = "") -> None:
     run = paragraph.add_run()
     if colour:
         run._r.append(_colour(colour))
-    drawing = OxmlElement("w:drawing")
+    drawing = docx.oxml.shared.OxmlElement("w:drawing")
     drawing.append(box)
     run._r.append(drawing)
 
@@ -126,7 +130,7 @@ class TestTextBoxMarks:
         bag = audit_docx.Bag()
         audit_docx.mark_paragraph(bag, paragraph, frozenset())
 
-        assert audit_docx.marks_of(bag.marks, audit_docx.RED) == Counter(
+        assert audit_docx.marks_of(bag.marks, audit_docx.RED) == collections.Counter(
             {"input": 1, "the": 1, "date": 1}
         )
 
@@ -149,12 +153,12 @@ class TestTextBoxMarks:
         section = audit_docx.Section("Amending the agreement")
         audit_docx.absorb(section, paragraph, audit_docx.ListRun())
 
-        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST) == Counter(
-            {"update": 1, "the": 1, "case": 1, "note": 1}
-        )
-        assert audit_docx.marks_of(section.bag.marks, audit_docx.BOX) == Counter(
-            {"example": 1, "parcel": 1, "abc": 1, "1234": 1}
-        )
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.LIST
+        ) == collections.Counter({"update": 1, "the": 1, "case": 1, "note": 1})
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.BOX
+        ) == collections.Counter({"example": 1, "parcel": 1, "abc": 1, "1234": 1})
 
     def test_a_box_does_not_weld_its_text_onto_the_prose_it_is_tethered_to(self):
         """A floating box has no place in the line, only a paragraph it hangs off.
@@ -174,7 +178,7 @@ class TestTextBoxMarks:
         bag = audit_docx.Bag()
         bag.add_text(audit_docx.rendered_text(paragraph))
 
-        assert bag.words == Counter(
+        assert bag.words == collections.Counter(
             {
                 "4": 1,
                 "9": 1,
@@ -199,7 +203,7 @@ class TestTextBoxMarks:
         bag = audit_docx.Bag()
         audit_docx.mark_paragraph(bag, paragraph, frozenset())
 
-        assert audit_docx.marks_of(bag.marks, audit_docx.BOX) == Counter(
+        assert audit_docx.marks_of(bag.marks, audit_docx.BOX) == collections.Counter(
             {"4": 1, "9": 1}
         )
 
@@ -230,7 +234,7 @@ class TestContentsEntries:
         sections = audit_docx.word_sections(document)
 
         assert [section.heading for section in sections] == ["Applying"]
-        assert sections[0].bag.words == Counter(
+        assert sections[0].bag.words == collections.Counter(
             {"applying": 1, "before": 1, "the": 2, "entry": 2, "after": 1}
         )
 
@@ -255,7 +259,7 @@ class TestListSteps:
         [section] = audit_docx.word_sections(document)
 
         assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
-            Counter({"open": 1, "the": 1, "register": 1})
+            collections.Counter({"open": 1, "the": 1, "register": 1})
         )
         assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT)
 
@@ -269,7 +273,7 @@ class TestListSteps:
         [section] = audit_docx.word_sections(document)
 
         assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_OUTDENT) == (
-            Counter({"if": 1, "no": 1})
+            collections.Counter({"if": 1, "no": 1})
         )
 
     def test_an_item_dragged_a_little_is_still_in_its_neighbour_column(self):
@@ -299,27 +303,27 @@ class TestListSteps:
         [section] = audit_docx.word_sections(document)
 
         assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
-            Counter({"open": 1, "the": 1, "register": 1})
+            collections.Counter({"open": 1, "the": 1, "register": 1})
         )
 
     def test_the_markdown_side_reads_a_step_from_the_marker_column(self):
         bag = audit_docx.markdown_bag("- If yes,\n  - Open the register\n- If no,")
 
-        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_INDENT) == Counter(
-            {"open": 1, "the": 1, "register": 1}
-        )
-        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_OUTDENT) == Counter(
-            {"if": 1, "no": 1}
-        )
+        assert audit_docx.marks_of(
+            bag.marks, audit_docx.LIST_INDENT
+        ) == collections.Counter({"open": 1, "the": 1, "register": 1})
+        assert audit_docx.marks_of(
+            bag.marks, audit_docx.LIST_OUTDENT
+        ) == collections.Counter({"if": 1, "no": 1})
 
     def test_a_blank_line_does_not_close_the_markdown_run(self):
         """A blank line inside a list makes it loose rather than ending it, which is
         the same reason the Word side holds its run open across an empty paragraph."""
         bag = audit_docx.markdown_bag("- If yes,\n\n  - Open the register")
 
-        assert audit_docx.marks_of(bag.marks, audit_docx.LIST_INDENT) == Counter(
-            {"open": 1, "the": 1, "register": 1}
-        )
+        assert audit_docx.marks_of(
+            bag.marks, audit_docx.LIST_INDENT
+        ) == collections.Counter({"open": 1, "the": 1, "register": 1})
 
 
 class TestTheBulletWordDraws:
@@ -420,9 +424,9 @@ class TestKnownLimits:
         )
 
         assert not audit_docx.marks_of(section.bag.marks, audit_docx.LIST)
-        assert audit_docx.marks_of(section.bag.limits, audit_docx.IN_A_CELL) == Counter(
-            {"open": 1, "the": 1, "register": 1}
-        )
+        assert audit_docx.marks_of(
+            section.bag.limits, audit_docx.IN_A_CELL
+        ) == collections.Counter({"open": 1, "the": 1, "register": 1})
 
     def test_a_list_in_a_callout_is_not_a_limit(self):
         """A box is a blockquote, and a blockquote holds blocks of its own - so a
@@ -437,9 +441,9 @@ class TestKnownLimits:
             section, paragraph, audit_docx.ListRun(), frozenset({audit_docx.BOX})
         )
 
-        assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST) == Counter(
-            {"open": 1, "the": 1, "register": 1}
-        )
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.LIST
+        ) == collections.Counter({"open": 1, "the": 1, "register": 1})
         assert not section.bag.limits
 
     def test_a_step_out_from_deeper_is_drawn_however_far_left_it_lands(self):
@@ -459,7 +463,7 @@ class TestKnownLimits:
 
         assert audit_docx.marks_of(
             section.bag.marks, audit_docx.LIST_OUTDENT
-        ) == Counter({"if": 1, "no": 1})
+        ) == collections.Counter({"if": 1, "no": 1})
         assert not section.bag.limits
 
     def test_a_step_out_to_a_column_the_run_has_used_is_not_a_limit(self):
@@ -475,7 +479,7 @@ class TestKnownLimits:
 
         assert audit_docx.marks_of(
             section.bag.marks, audit_docx.LIST_OUTDENT
-        ) == Counter({"if": 1, "no": 1})
+        ) == collections.Counter({"if": 1, "no": 1})
         assert not section.bag.limits
 
 
@@ -582,9 +586,9 @@ class TestTheBoxWordDrawsWithABorder:
             section, [_border(document.add_paragraph("Claim reference: xxxxx"))]
         )
 
-        assert audit_docx.marks_of(section.bag.marks, audit_docx.BOX) == Counter(
-            {"claim": 1, "reference": 1, "xxxxx": 1}
-        )
+        assert audit_docx.marks_of(
+            section.bag.marks, audit_docx.BOX
+        ) == collections.Counter({"claim": 1, "reference": 1, "xxxxx": 1})
 
     def test_a_box_is_a_list_of_its_own(self):
         """Its items step from each other and from nothing outside it, exactly as a
@@ -604,5 +608,5 @@ class TestTheBoxWordDrawsWithABorder:
         audit_docx.absorb_box(section, [inside])
 
         assert audit_docx.marks_of(section.bag.marks, audit_docx.LIST_INDENT) == (
-            Counter()
+            collections.Counter()
         )

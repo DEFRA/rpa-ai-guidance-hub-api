@@ -11,10 +11,10 @@ All fixture text is invented, as everywhere in this package.
 from collections.abc import Callable
 from typing import Any
 
-from docx.document import Document
-from docx.oxml.ns import qn
-from docx.oxml.shared import OxmlElement
-from docx.text.paragraph import Paragraph
+import docx.document
+import docx.oxml.ns
+import docx.oxml.shared
+import docx.text.paragraph
 from lxml import etree
 
 from app.guidance.parsing import parser
@@ -31,7 +31,7 @@ _MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 # the test directory is never put on sys.path and `from conftest import ...` fails at
 # collection. Naming it is what stops an editor inferring these helpers' parameters
 # structurally and guessing wrong.
-Build = Callable[[Document], None]
+Build = Callable[[docx.document.Document], None]
 DocxBytes = Callable[[Build], bytes]
 
 
@@ -45,7 +45,7 @@ def _box_content(docx_bytes: DocxBytes, build: Build, index: int = 0) -> str:
     helpers are three different functions.
     """
 
-    def with_heading(document: Document) -> None:
+    def with_heading(document: docx.document.Document) -> None:
         document.add_heading(HEADING, level=1)
         build(document)
 
@@ -54,11 +54,11 @@ def _box_content(docx_bytes: DocxBytes, build: Build, index: int = 0) -> str:
 
 def _text_box(*texts: str) -> Any:
     """A w:txbxContent holding one paragraph per text given."""
-    box = OxmlElement("w:txbxContent")
+    box = docx.oxml.shared.OxmlElement("w:txbxContent")
     for text in texts:
-        paragraph = OxmlElement("w:p")
-        run = OxmlElement("w:r")
-        element = OxmlElement("w:t")
+        paragraph = docx.oxml.shared.OxmlElement("w:p")
+        run = docx.oxml.shared.OxmlElement("w:r")
+        element = docx.oxml.shared.OxmlElement("w:t")
         element.text = text
         run.append(element)
         paragraph.append(run)
@@ -66,20 +66,23 @@ def _text_box(*texts: str) -> Any:
     return box
 
 
-def _anchor(paragraph: Paragraph, box: Any) -> None:
+def _anchor(paragraph: docx.text.paragraph.Paragraph, box: Any) -> None:
     """Hang a text box off a paragraph the way a drawing does.
 
     Only the nesting matters to the walk, not the shape around it, so the w:drawing
     is written without the DrawingML that would tell Word how big to draw it.
     """
     run = paragraph.add_run()
-    drawing = OxmlElement("w:drawing")
+    drawing = docx.oxml.shared.OxmlElement("w:drawing")
     drawing.append(box)
     run._r.append(drawing)
 
 
 def _alternate(
-    paragraph: Paragraph, *, choice: Any = None, fallback: Any = None
+    paragraph: docx.text.paragraph.Paragraph,
+    *,
+    choice: Any = None,
+    fallback: Any = None,
 ) -> Any:
     """Hang an mc:AlternateContent off a paragraph, holding only the branches given.
 
@@ -91,7 +94,7 @@ def _alternate(
     for tag, box in ((f"{_MC}Choice", choice), (f"{_MC}Fallback", fallback)):
         if box is None:
             continue
-        drawing = OxmlElement("w:drawing")
+        drawing = docx.oxml.shared.OxmlElement("w:drawing")
         drawing.append(box)
         etree.SubElement(alternate, tag).append(drawing)
 
@@ -135,11 +138,13 @@ class TestReachingTheBox:
 
         def build(document):
             box = _text_box("")
-            run = box.findall(qn("w:p"))[0].findall(qn("w:r"))[0]
-            properties = OxmlElement("w:rPr")
-            properties.append(OxmlElement("w:b"))
+            run = box.findall(docx.oxml.ns.qn("w:p"))[0].findall(
+                docx.oxml.ns.qn("w:r")
+            )[0]
+            properties = docx.oxml.shared.OxmlElement("w:rPr")
+            properties.append(docx.oxml.shared.OxmlElement("w:b"))
             run.insert(0, properties)
-            run.findall(qn("w:t"))[0].text = "Withdrawal"
+            run.findall(docx.oxml.ns.qn("w:t"))[0].text = "Withdrawal"
             _anchor(document.add_paragraph(), box)
 
         assert _box_content(docx_bytes, build) == "> **Withdrawal**"
@@ -184,9 +189,11 @@ class TestWordWritingItTwice:
             outer = _text_box("Check the version")
             _anchor(document.add_paragraph(), outer)
             inner = _text_box("Check the claim")
-            drawing = OxmlElement("w:drawing")
+            drawing = docx.oxml.shared.OxmlElement("w:drawing")
             drawing.append(inner)
-            outer.findall(qn("w:p"))[0].findall(qn("w:r"))[0].append(drawing)
+            outer.findall(docx.oxml.ns.qn("w:p"))[0].findall(docx.oxml.ns.qn("w:r"))[
+                0
+            ].append(drawing)
 
         assert _box_content(docx_bytes, build) == "> Check the version"
 

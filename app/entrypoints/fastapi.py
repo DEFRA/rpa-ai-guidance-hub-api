@@ -1,8 +1,8 @@
+import contextlib
 import copy
+import logging
 import os
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from logging import getLogger
 from typing import Any
 
 import fastapi
@@ -24,10 +24,10 @@ from app.review import router as review_router
 from app.users import records as user_records
 from app.users import router as users_router
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
+@contextlib.asynccontextmanager
 async def lifespan(application: fastapi.FastAPI) -> AsyncGenerator[None]:
     if app_config.get_config().use_auth:
         logger.info("Using WebIdentity authentication for API routes")

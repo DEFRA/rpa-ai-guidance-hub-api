@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+import datetime as dt
 
 import pydantic
 import pytest
@@ -112,9 +112,9 @@ class TestUploadedDocument:
 
 class TestStagedDocumentResponse:
     def test_from_staged_document_maps_all_fields(self):
-        created_at = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
-        updated_at = datetime(2026, 9, 10, 12, 5, 0, tzinfo=UTC)
-        last_modified = datetime(2026, 3, 4, 10, 0, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 9, 10, 12, 0, 0, tzinfo=dt.UTC)
+        updated_at = dt.datetime(2026, 9, 10, 12, 5, 0, tzinfo=dt.UTC)
+        last_modified = dt.datetime(2026, 3, 4, 10, 0, 0, tzinfo=dt.UTC)
         staged_document = models.StagedDocument(
             file_id="f-456",
             parsing_status=models.ParsingStatus.COMPLETE,
@@ -137,8 +137,8 @@ class TestStagedDocumentResponse:
         assert response.parsing_error is None
 
     def test_serializes_with_camel_case_aliases(self):
-        created_at = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
-        updated_at = datetime(2026, 9, 10, 12, 5, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 9, 10, 12, 0, 0, tzinfo=dt.UTC)
+        updated_at = dt.datetime(2026, 9, 10, 12, 5, 0, tzinfo=dt.UTC)
         staged_document = models.StagedDocument(
             file_id="f-789",
             parsing_status=models.ParsingStatus.FAILED,
@@ -157,7 +157,7 @@ class TestStagedDocumentResponse:
         assert "file_id" not in dumped
 
     def test_says_how_far_saving_has_got(self):
-        created_at = datetime(2026, 10, 7, 12, 0, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 10, 7, 12, 0, 0, tzinfo=dt.UTC)
         staged_document = models.StagedDocument(
             file_id="f-saving",
             parsing_status=models.ParsingStatus.COMPLETE,

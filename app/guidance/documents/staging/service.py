@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from logging import getLogger
+import logging
 from typing import Any
 
 from app.guidance import ids
 from app.guidance.documents.staging import models, store
 from app.guidance.parsing import errors, parser
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class StagingService:

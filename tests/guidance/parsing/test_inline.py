@@ -10,13 +10,13 @@ the output as a section's content.
 
 from collections.abc import Callable
 
+import docx.document
+import docx.opc.constants
+import docx.oxml.ns
+import docx.oxml.shared
+import docx.text.paragraph
+import docx.text.run
 import pytest
-from docx.document import Document
-from docx.opc.constants import RELATIONSHIP_TYPE as RT
-from docx.oxml.ns import qn
-from docx.oxml.shared import OxmlElement
-from docx.text.paragraph import Paragraph
-from docx.text.run import Run
 
 from app.guidance.parsing import parser
 
@@ -26,38 +26,44 @@ HEADING = "Applying"
 # prose: a test hands it a callable that populates a document and gets the .docx
 # bytes back. Naming it here is also what stops an editor inferring these helpers'
 # parameters structurally and guessing wrong.
-Build = Callable[[Document], None]
+Build = Callable[[docx.document.Document], None]
 DocxBytes = Callable[[Build], bytes]
 
 
 def _content(docx_bytes: DocxBytes, build: Build) -> str:
     """The Markdown of the one section `build` writes its paragraphs into."""
 
-    def with_heading(document: Document) -> None:
+    def with_heading(document: docx.document.Document) -> None:
         document.add_heading(HEADING, level=1)
         build(document)
 
     return parser.parse_docx(docx_bytes(with_heading)).sections[0].content
 
 
-def _colour(run: Run, value: str) -> None:
+def _colour(run: docx.text.run.Run, value: str) -> None:
     """Colour a run by raw w:val, including values python-docx will not write."""
-    element = OxmlElement("w:color")
-    element.set(qn("w:val"), value)
+    element = docx.oxml.shared.OxmlElement("w:color")
+    element.set(docx.oxml.ns.qn("w:val"), value)
     run._r.get_or_add_rPr().append(element)
 
 
 def _hyperlink(
-    paragraph: Paragraph, *texts: str, url: str = "", anchor: str = ""
-) -> list[Run]:
+    paragraph: docx.text.paragraph.Paragraph,
+    *texts: str,
+    url: str = "",
+    anchor: str = "",
+) -> list[docx.text.run.Run]:
     """Append a w:hyperlink holding one run per text, as Word splits anchor text."""
-    link = OxmlElement("w:hyperlink")
+    link = docx.oxml.shared.OxmlElement("w:hyperlink")
     if url:
         link.set(
-            qn("r:id"), paragraph.part.relate_to(url, RT.HYPERLINK, is_external=True)
+            docx.oxml.ns.qn("r:id"),
+            paragraph.part.relate_to(
+                url, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True
+            ),
         )
     if anchor:
-        link.set(qn("w:anchor"), anchor)
+        link.set(docx.oxml.ns.qn("w:anchor"), anchor)
 
     runs = [paragraph.add_run(text) for text in texts]
     for run in runs:
@@ -66,22 +72,22 @@ def _hyperlink(
     return runs
 
 
-def _fld_char(paragraph: Paragraph, char_type: str) -> None:
+def _fld_char(paragraph: docx.text.paragraph.Paragraph, char_type: str) -> None:
     """Append a run holding one field boundary."""
-    element = OxmlElement("w:fldChar")
-    element.set(qn("w:fldCharType"), char_type)
+    element = docx.oxml.shared.OxmlElement("w:fldChar")
+    element.set(docx.oxml.ns.qn("w:fldCharType"), char_type)
     paragraph.add_run()._r.append(element)
 
 
-def _instr_text(paragraph: Paragraph, text: str) -> None:
+def _instr_text(paragraph: docx.text.paragraph.Paragraph, text: str) -> None:
     """Append a run holding part of a field's instruction."""
-    element = OxmlElement("w:instrText")
+    element = docx.oxml.shared.OxmlElement("w:instrText")
     element.text = text
     paragraph.add_run()._r.append(element)
 
 
 def _field(
-    paragraph: Paragraph,
+    paragraph: docx.text.paragraph.Paragraph,
     *instructions: str,
     result: str | None = None,
     closed: bool = True,
@@ -102,11 +108,11 @@ def _field(
         _fld_char(paragraph, "end")
 
 
-def _break(run: Run, break_type: str | None = None) -> None:
+def _break(run: docx.text.run.Run, break_type: str | None = None) -> None:
     """Add a w:br to a run, of the given type or of none at all."""
-    element = OxmlElement("w:br")
+    element = docx.oxml.shared.OxmlElement("w:br")
     if break_type is not None:
-        element.set(qn("w:type"), break_type)
+        element.set(docx.oxml.ns.qn("w:type"), break_type)
     run._r.append(element)
 
 

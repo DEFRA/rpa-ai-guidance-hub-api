@@ -34,20 +34,19 @@ repository, which resolves paths and converts several documents at once.
 """
 
 import argparse
+import pathlib
 import sys
 import uuid
-from pathlib import Path
 
 from app.guidance import ids
 from app.guidance.documents import store
-from app.guidance.parsing import models, parser
-from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing import errors, models, parser
 
 # Matches app.guidance.service._ASSETS: pictures sit one level above versions, so
 # every version of a document shares one asset pool rather than duplicating them.
 _ASSETS = "../assets"
 
-_DEFAULT_OUTPUT_DIR = Path.home() / "rpa-ai-guidance-hub" / "parsed-guides"
+_DEFAULT_OUTPUT_DIR = pathlib.Path.home() / "rpa-ai-guidance-hub" / "parsed-guides"
 
 
 def summarise(document: models.MarkdownDocument) -> str:
@@ -83,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     )
     argument_parser.add_argument(
         "--output-dir",
-        type=Path,
+        type=pathlib.Path,
         default=_DEFAULT_OUTPUT_DIR,
         help=f"Directory the bucket layout is written under "
         f"(default: {_DEFAULT_OUTPUT_DIR}).",
@@ -99,11 +98,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    source = Path(args.document)
+    source = pathlib.Path(args.document)
 
     try:
         document = parser.parse_docx(source.read_bytes())
-    except (OSError, DocumentParseError) as error:
+    except (OSError, errors.DocumentParseError) as error:
         print(f"{source.name}: {error}", file=sys.stderr)
         return 1
 

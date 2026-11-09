@@ -7,8 +7,8 @@ organisation name appears anywhere in the suite - keep it that way when adding c
 import io
 
 import docx
+import docx.enum.style
 import pytest
-from docx.enum.style import WD_STYLE_TYPE
 
 
 @pytest.fixture
@@ -46,7 +46,9 @@ def in_style():
 
     def add_paragraph(document, text: str, style_name: str) -> None:
         if all(style.name != style_name for style in document.styles):
-            document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+            document.styles.add_style(
+                style_name, docx.enum.style.WD_STYLE_TYPE.PARAGRAPH
+            )
         document.add_paragraph(text, style=style_name)
 
     return add_paragraph

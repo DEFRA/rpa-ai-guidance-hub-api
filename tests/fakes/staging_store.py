@@ -8,8 +8,8 @@ claimed and tracked independently.
 
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import UTC, datetime
+import dataclasses
+import datetime as dt
 
 from app.guidance.documents.staging import models, store
 from app.guidance.parsing import models as parsing_models
@@ -28,7 +28,7 @@ class InMemoryStagingStore(store.StagingStore):
         ):
             return False
 
-        now = datetime.now(UTC)
+        now = dt.datetime.now(dt.UTC)
         if existing is None:
             existing = models.StagedDocument(
                 file_id=file_id,
@@ -38,7 +38,7 @@ class InMemoryStagingStore(store.StagingStore):
                 updated_at=now,
             )
 
-        self.records[file_id] = replace(
+        self.records[file_id] = dataclasses.replace(
             existing, parsing_status=models.ParsingStatus.IN_PROGRESS, updated_at=now
         )
         return True
@@ -46,21 +46,21 @@ class InMemoryStagingStore(store.StagingStore):
     async def mark_complete(
         self, file_id: str, info: parsing_models.MinimalDocumentInfo
     ) -> None:
-        self.records[file_id] = replace(
+        self.records[file_id] = dataclasses.replace(
             self.records[file_id],
             parsing_status=models.ParsingStatus.COMPLETE,
             title=info.title,
             version=info.version,
             last_modified=info.last_modified,
-            updated_at=datetime.now(UTC),
+            updated_at=dt.datetime.now(dt.UTC),
         )
 
     async def mark_failed(self, file_id: str, reason: str) -> None:
-        self.records[file_id] = replace(
+        self.records[file_id] = dataclasses.replace(
             self.records[file_id],
             parsing_status=models.ParsingStatus.FAILED,
             parse_error=reason,
-            updated_at=datetime.now(UTC),
+            updated_at=dt.datetime.now(dt.UTC),
         )
 
     async def get(self, file_id: str) -> models.StagedDocument | None:

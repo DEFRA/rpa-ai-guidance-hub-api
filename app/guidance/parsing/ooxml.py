@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from docx.oxml.ns import qn
+import docx.oxml.ns
 
 W_VAL = "w:val"
 
@@ -21,4 +21,4 @@ def is_toggle_on(element: Any) -> bool:
     """
     if element is None:
         return False
-    return element.get(qn(W_VAL)) not in ("false", "0")
+    return element.get(docx.oxml.ns.qn(W_VAL)) not in ("false", "0")

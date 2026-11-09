@@ -4,8 +4,8 @@ from collections.abc import Iterator
 from typing import Any
 
 import boto3
+import moto
 import pytest
-from moto import mock_aws
 
 from app.guidance.documents.staging import models, service
 from app.guidance.parsing import errors, parser
@@ -15,7 +15,7 @@ from tests.fakes import staging_store as staging_store_fake
 
 @pytest.fixture
 def fake_s3() -> Iterator[Any]:
-    with mock_aws():
+    with moto.mock_aws():
         client = boto3.client("s3", region_name="eu-west-2")
         client.create_bucket(
             Bucket="a-bucket",

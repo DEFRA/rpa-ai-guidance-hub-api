@@ -24,15 +24,15 @@ connection pool (10 by default) is larger than the most writes a store makes at
 once.
 """
 
-from logging import getLogger
+import logging
 from typing import Any
 
 import boto3
-from botocore.config import Config
+import botocore.config
 
 from app import config as app_config
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 2.5
 ATTEMPTS = 2
@@ -57,7 +57,7 @@ def get_s3_client() -> Any:
             "s3",
             endpoint_url=config.floci_endpoint_url,
             region_name=config.aws_region,
-            config=Config(
+            config=botocore.config.Config(
                 connect_timeout=TIMEOUT_SECONDS,
                 read_timeout=TIMEOUT_SECONDS,
                 retries={"total_max_attempts": ATTEMPTS, "mode": "standard"},

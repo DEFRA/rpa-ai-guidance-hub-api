@@ -1,11 +1,11 @@
-from logging import getLogger
+import logging
 
 import httpx2
 
 from app import config as app_config
 from app.common import tracing
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def async_hook_request_tracing(request: httpx2.Request) -> None:

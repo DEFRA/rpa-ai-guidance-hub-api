@@ -1,9 +1,9 @@
-from logging import getLogger
+import logging
 
-from fastapi import APIRouter
+import fastapi
 
-router = APIRouter(prefix="/review")
-logger = getLogger(__name__)
+router = fastapi.APIRouter(prefix="/review")
+logger = logging.getLogger(__name__)
 
 
 # basic endpoint example

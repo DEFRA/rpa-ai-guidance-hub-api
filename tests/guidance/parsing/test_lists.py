@@ -11,10 +11,10 @@ at ilvl 0 and nowhere else and indents neither, so anything about depth has to b
 a list definition of its own.
 """
 
+import docx.enum.style
+import docx.oxml.ns
+import docx.oxml.shared
 import pytest
-from docx.enum.style import WD_STYLE_TYPE
-from docx.oxml.ns import qn
-from docx.oxml.shared import OxmlElement
 
 from app.guidance.parsing import parser
 
@@ -24,16 +24,16 @@ _INDENT_STEP = 360
 
 def _val(name: str, value: object):
     """An element carrying nothing but a w:val, as OOXML writes most settings."""
-    element = OxmlElement(name)
-    element.set(qn("w:val"), str(value))
+    element = docx.oxml.shared.OxmlElement(name)
+    element.set(docx.oxml.ns.qn("w:val"), str(value))
     return element
 
 
 def _indented(left: int):
     """The paragraph properties a list level uses to indent the items in it."""
-    properties = OxmlElement("w:pPr")
-    indent = OxmlElement("w:ind")
-    indent.set(qn("w:left"), str(left))
+    properties = docx.oxml.shared.OxmlElement("w:pPr")
+    indent = docx.oxml.shared.OxmlElement("w:ind")
+    indent.set(docx.oxml.ns.qn("w:left"), str(left))
     properties.append(indent)
     return properties
 
@@ -41,15 +41,15 @@ def _indented(left: int):
 def _drag(paragraph, left: int) -> None:
     """Indent one paragraph directly, as dragging an item in Word does."""
     indent = paragraph._p.get_or_add_pPr().get_or_add_ind()
-    indent.set(qn("w:left"), str(left))
+    indent.set(docx.oxml.ns.qn("w:left"), str(left))
 
 
 def _numbered(paragraph, num_id: int, level: int | None = None) -> None:
     """Attach numbering to a paragraph directly, over whatever its style says."""
     properties = paragraph._p.get_or_add_pPr().get_or_add_numPr()
     if level is not None:
-        properties.get_or_add_ilvl().set(qn("w:val"), str(level))
-    properties.get_or_add_numId().set(qn("w:val"), str(num_id))
+        properties.get_or_add_ilvl().set(docx.oxml.ns.qn("w:val"), str(level))
+    properties.get_or_add_numId().set(docx.oxml.ns.qn("w:val"), str(num_id))
 
 
 def _numbering_style(document, name: str, num_id: int) -> str:
@@ -58,9 +58,9 @@ def _numbering_style(document, name: str, num_id: int) -> str:
     The name is deliberately the caller's to choose: what makes the paragraphs in
     this style list items is the numbering it declares, never what it is called.
     """
-    style = document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+    style = document.styles.add_style(name, docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
     properties = style.element.get_or_add_pPr().get_or_add_numPr()
-    properties.get_or_add_numId().set(qn("w:val"), str(num_id))
+    properties.get_or_add_numId().set(docx.oxml.ns.qn("w:val"), str(num_id))
     return name
 
 
@@ -86,34 +86,36 @@ def _list_definition(
     marker outside Word's sequence and so has no say in depth.
     """
     numbering = document.part.numbering_part.element
-    definitions = numbering.findall(qn("w:abstractNum"))
+    definitions = numbering.findall(docx.oxml.ns.qn("w:abstractNum"))
     abstract_id = 1 + max(
-        int(definition.get(qn("w:abstractNumId"))) for definition in definitions
+        int(definition.get(docx.oxml.ns.qn("w:abstractNumId")))
+        for definition in definitions
     )
     num_id = 1 + max(
-        int(num.get(qn("w:numId"))) for num in numbering.findall(qn("w:num"))
+        int(num.get(docx.oxml.ns.qn("w:numId")))
+        for num in numbering.findall(docx.oxml.ns.qn("w:num"))
     )
 
-    definition = OxmlElement("w:abstractNum")
-    definition.set(qn("w:abstractNumId"), str(abstract_id))
+    definition = docx.oxml.shared.OxmlElement("w:abstractNum")
+    definition.set(docx.oxml.ns.qn("w:abstractNumId"), str(abstract_id))
     for level, number_format in enumerate(formats):
-        element = OxmlElement("w:lvl")
-        element.set(qn("w:ilvl"), str(level))
+        element = docx.oxml.shared.OxmlElement("w:lvl")
+        element.set(docx.oxml.ns.qn("w:ilvl"), str(level))
         element.append(_val("w:numFmt", number_format))
         if level < len(bullets):
             font, glyph = bullets[level]
             element.append(_val("w:lvlText", glyph))
-            properties = OxmlElement("w:rPr")
-            fonts = OxmlElement("w:rFonts")
-            fonts.set(qn("w:ascii"), font)
+            properties = docx.oxml.shared.OxmlElement("w:rPr")
+            fonts = docx.oxml.shared.OxmlElement("w:rFonts")
+            fonts.set(docx.oxml.ns.qn("w:ascii"), font)
             properties.append(fonts)
             element.append(properties)
         element.append(_indented(step * (level + 1)))
         definition.append(element)
     definitions[-1].addnext(definition)
 
-    num = OxmlElement("w:num")
-    num.set(qn("w:numId"), str(num_id))
+    num = docx.oxml.shared.OxmlElement("w:num")
+    num.set(docx.oxml.ns.qn("w:numId"), str(num_id))
     num.append(_val("w:abstractNumId", abstract_id))
     numbering.append(num)
     return num_id
@@ -192,7 +194,9 @@ class TestFindingListItems:
         """The other half of the same rule, and what Word itself prints."""
 
         def build(document):
-            document.styles.add_style("List Bullet 4", WD_STYLE_TYPE.PARAGRAPH)
+            document.styles.add_style(
+                "List Bullet 4", docx.enum.style.WD_STYLE_TYPE.PARAGRAPH
+            )
             document.add_paragraph("Before you start", style="List Bullet 4")
 
         assert _content(opened(build)) == "Before you start"

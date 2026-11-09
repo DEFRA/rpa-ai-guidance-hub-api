@@ -14,7 +14,7 @@ All fixture text is invented, as everywhere in this package.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
 from typing import Any
 
 from app.guidance.documents import store
@@ -80,7 +80,7 @@ def test_saves_racing_for_one_version_all_succeed(
     version = f"s3://{bucket}/doc/v1"
     titles = [f"Attempt {n}" for n in range(4)]
 
-    with ThreadPoolExecutor(max_workers=len(titles)) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(titles)) as pool:
         saves = [
             pool.submit(
                 store.save,

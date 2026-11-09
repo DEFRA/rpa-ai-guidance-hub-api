@@ -19,8 +19,8 @@ the structure.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
+import dataclasses
+import datetime as dt
 
 from app.guidance.parsing import alignment, anchors
 
@@ -39,7 +39,7 @@ def _letters(ordinal: int) -> str:
     return label
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Image:
     """An image extracted from a document.
 
@@ -58,7 +58,7 @@ class Image:
     data: bytes | None = None
 
 
-@dataclass
+@dataclasses.dataclass
 class MarkdownSection:
     """One numbered section of a document, holding its own Markdown.
 
@@ -75,11 +75,11 @@ class MarkdownSection:
     # Held out of equality and repr because `parent` points back at us: compared, two
     # sections would walk up from one and down from the other and never finish. A
     # child says nothing about identity that the parent chain does not say already.
-    children: list[MarkdownSection] = field(
+    children: list[MarkdownSection] = dataclasses.field(
         default_factory=list, repr=False, compare=False
     )
     content: str = ""
-    images: list[Image] = field(default_factory=list)
+    images: list[Image] = dataclasses.field(default_factory=list)
 
     @property
     def level(self) -> int:
@@ -176,13 +176,13 @@ class MarkdownSection:
     # image paths are the ones the document will actually carry.
 
 
-@dataclass
+@dataclasses.dataclass
 class MarkdownDocument:
     """A parsed guidance document: a title and its sections in document order."""
 
     title: str = ""
-    sections: list[MarkdownSection] = field(default_factory=list)
-    bookmarks: dict[str, MarkdownSection] = field(default_factory=dict)
+    sections: list[MarkdownSection] = dataclasses.field(default_factory=list)
+    bookmarks: dict[str, MarkdownSection] = dataclasses.field(default_factory=dict)
 
     @property
     def images(self) -> list[Image]:
@@ -219,7 +219,7 @@ class MarkdownDocument:
         }
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MinimalDocumentInfo:
     """The handful of fields `capture-guide-details` wants pre-populated.
 
@@ -235,4 +235,4 @@ class MinimalDocumentInfo:
 
     title: str = "Unavailable"
     version: str = "Unavailable"
-    last_modified: datetime | None = None
+    last_modified: dt.datetime | None = None

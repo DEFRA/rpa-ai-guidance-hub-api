@@ -7,8 +7,8 @@ during claim, update mutations, and round-trip retrieval.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import uuid
-from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -40,7 +40,7 @@ class TestClaim:
     ):
         file_id = "test-file-1"
         s3_path = "scanned/test-file-1.docx"
-        before = datetime.now(UTC) - timedelta(seconds=1)
+        before = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
 
         claimed = await staging_store.claim(file_id, s3_path)
 
@@ -50,12 +50,14 @@ class TestClaim:
         assert raw_doc["_id"] == file_id
         assert raw_doc["path"] == s3_path
         assert raw_doc["parsing_status"] == models.ParsingStatus.IN_PROGRESS.value
-        created_at = raw_doc["created_at"].replace(tzinfo=UTC)
-        updated_at = raw_doc["updated_at"].replace(tzinfo=UTC)
+        created_at = raw_doc["created_at"].replace(tzinfo=dt.UTC)
+        updated_at = raw_doc["updated_at"].replace(tzinfo=dt.UTC)
         assert created_at >= before
         assert updated_at >= before
         # Retention TTL matches roughly now + 14400s
-        expected_expiry = raw_doc["updated_at"] + timedelta(seconds=RETENTION_SECONDS)
+        expected_expiry = raw_doc["updated_at"] + dt.timedelta(
+            seconds=RETENTION_SECONDS
+        )
         assert abs((raw_doc["expires_at"] - expected_expiry).total_seconds()) < 2
 
     async def test_returns_false_when_document_has_already_been_claimed(
@@ -77,7 +79,7 @@ class TestMarkComplete:
 
         await staging_store.claim(file_id, "scanned/complete.docx")
 
-        last_modified = datetime(2026, 3, 4, 10, 0, tzinfo=UTC)
+        last_modified = dt.datetime(2026, 3, 4, 10, 0, tzinfo=dt.UTC)
         info = parsing_models.MinimalDocumentInfo(
             title="Guidance Scheme A",
             version="1.2",
@@ -219,7 +221,7 @@ class TestPromote:
         file_id = f"promote-{uuid.uuid4()}"
         await TestReserveIds()._parsed(staging_store, file_id)
         reserved = await staging_store.reserve_ids(file_id)
-        before = datetime.now(UTC) - timedelta(seconds=1)
+        before = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
 
         await staging_store.promote(file_id)
 
@@ -293,10 +295,10 @@ class TestSaving:
         assert (await staging_store.get(file_id)).save_error is None
 
     async def _with_no_update_for(
-        self, mongo_database, file_id: str, age: timedelta
+        self, mongo_database, file_id: str, age: dt.timedelta
     ) -> None:
         await mongo_database[store.COLLECTION_NAME].update_one(
-            {"_id": file_id}, {"$set": {"updated_at": datetime.now(UTC) - age}}
+            {"_id": file_id}, {"$set": {"updated_at": dt.datetime.now(dt.UTC) - age}}
         )
 
     async def test_a_save_with_no_recent_update_can_be_started_again(
@@ -309,7 +311,9 @@ class TestSaving:
         await staging_store.start_saving(file_id)
         await staging_store.record_save_progress(file_id, 12, 74)
         before = await staging_store.get(file_id)
-        await self._with_no_update_for(mongo_database, file_id, timedelta(minutes=11))
+        await self._with_no_update_for(
+            mongo_database, file_id, dt.timedelta(minutes=11)
+        )
 
         started = await staging_store.start_saving(file_id)
 
@@ -328,7 +332,7 @@ class TestSaving:
         file_id = f"save-{uuid.uuid4()}"
         await self._reserved(staging_store, file_id)
         await staging_store.start_saving(file_id)
-        await self._with_no_update_for(mongo_database, file_id, timedelta(minutes=9))
+        await self._with_no_update_for(mongo_database, file_id, dt.timedelta(minutes=9))
 
         assert await staging_store.start_saving(file_id) is False
 
@@ -338,7 +342,9 @@ class TestSaving:
         file_id = f"save-{uuid.uuid4()}"
         await self._reserved(staging_store, file_id)
         await staging_store.start_saving(file_id)
-        await self._with_no_update_for(mongo_database, file_id, timedelta(minutes=11))
+        await self._with_no_update_for(
+            mongo_database, file_id, dt.timedelta(minutes=11)
+        )
 
         started = await asyncio.gather(
             *(staging_store.start_saving(file_id) for _ in range(10))
@@ -353,7 +359,7 @@ class TestSaving:
         await self._reserved(staging_store, file_id)
         await staging_store.start_saving(file_id)
         await staging_store.promote(file_id)
-        await self._with_no_update_for(mongo_database, file_id, timedelta(hours=3))
+        await self._with_no_update_for(mongo_database, file_id, dt.timedelta(hours=3))
 
         assert await staging_store.start_saving(file_id) is False
 
@@ -393,13 +399,13 @@ class TestSaving:
         records = mongo_database[store.COLLECTION_NAME]
         await records.update_one(
             {"_id": file_id},
-            {"$set": {"expires_at": datetime.now(UTC) + timedelta(minutes=1)}},
+            {"$set": {"expires_at": dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1)}},
         )
 
         await staging_store.start_saving(file_id)
 
         raw = await records.find_one({"_id": file_id})
-        assert raw["expires_at"] == raw["updated_at"] + timedelta(
+        assert raw["expires_at"] == raw["updated_at"] + dt.timedelta(
             seconds=RETENTION_SECONDS
         )
 

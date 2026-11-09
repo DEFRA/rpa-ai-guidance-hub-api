@@ -5,8 +5,7 @@ import zipfile
 
 import pytest
 
-from app.guidance.parsing import parser
-from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing import errors, parser
 from tests.fixtures import word_documents
 
 TITLE = "Example Grant Scheme Guide"
@@ -69,13 +68,13 @@ class TestAnUnreadableSource:
         for a path. Callers should not have to know any of that, but they are still
         told which of them went wrong.
         """
-        with pytest.raises(DocumentParseError) as raised:
+        with pytest.raises(errors.DocumentParseError) as raised:
             parser.parse_docx(source)
 
         assert expected in str(raised.value)
 
     def test_the_underlying_failure_is_kept_as_the_cause(self):
-        with pytest.raises(DocumentParseError) as raised:
+        with pytest.raises(errors.DocumentParseError) as raised:
             parser.parse_docx(b"")
 
         assert isinstance(raised.value.__cause__, zipfile.BadZipFile)
@@ -84,7 +83,7 @@ class TestAnUnreadableSource:
         """python-docx interpolates the BytesIO repr, which tells a caller nothing."""
         source = _package_that_is_not_a_word_document()
 
-        with pytest.raises(DocumentParseError) as raised:
+        with pytest.raises(errors.DocumentParseError) as raised:
             parser.parse_docx(source)
 
         assert "BytesIO" not in str(raised.value)

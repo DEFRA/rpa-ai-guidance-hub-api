@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from enum import StrEnum
+import dataclasses
+import enum
 
 from app import config
 
@@ -8,7 +8,7 @@ def _role_arn_prefix() -> str:
     return f"arn:aws:iam::{config.get_config().aws_account}:role/"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ServiceCaller:
     name: str
 
@@ -17,7 +17,7 @@ class ServiceCaller:
         return f"{_role_arn_prefix()}{self.name}"
 
 
-class KnownCallers(StrEnum):
+class KnownCallers(enum.StrEnum):
     GUIDANCE_HUB_UI = "rpa-ai-guidance-hub-ui"
 
 

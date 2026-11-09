@@ -53,15 +53,15 @@ nothing retries into one, so there is nothing for a refusal to protect.
 
 from __future__ import annotations
 
+import concurrent.futures
+import pathlib
 import posixpath
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from botocore.exceptions import ClientError
+import botocore.exceptions
 
 from app.common import s3
 from app.guidance import ids
@@ -301,13 +301,15 @@ def _save_assets(
     to finish, since a write cannot be called back half way. Either way the save
     goes no further, so the Markdown naming them is never written.
     """
-    with ThreadPoolExecutor(max_workers=PARALLEL_WRITES) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_WRITES) as pool:
         writes = [
             pool.submit(_save_asset, image, into, s3_client=s3_client)
             for image in images
         ]
         try:
-            for done, write in enumerate(as_completed(writes), start=1):
+            for done, write in enumerate(
+                concurrent.futures.as_completed(writes), start=1
+            ):
                 write.result()
                 on_saved(done)
         except BaseException:
@@ -408,14 +410,14 @@ def _reached(url: str) -> tuple[str, urllib.parse.SplitResult]:
     return parsed.scheme, parsed
 
 
-def _file_path(location: urllib.parse.SplitResult) -> Path:
+def _file_path(location: urllib.parse.SplitResult) -> pathlib.Path:
     """The file a `file://` URL names.
 
     `url2pathname` rather than taking `.path` as it stands, because a URL escapes
     the characters a path is allowed to contain and a guide's directory is named by
     whatever minted its id.
     """
-    return Path(urllib.request.url2pathname(location.path))
+    return pathlib.Path(urllib.request.url2pathname(location.path))
 
 
 def _read_file(location: urllib.parse.SplitResult) -> bytes | None:
@@ -448,7 +450,7 @@ def _read_s3(location: urllib.parse.SplitResult, s3_client: Any = None) -> bytes
     client = s3_client if s3_client is not None else _s3()
     try:
         response = client.get_object(Bucket=bucket, Key=key)
-    except ClientError as error:
+    except botocore.exceptions.ClientError as error:
         if error.response.get("Error", {}).get("Code") in _MISSING:
             return None
         raise
@@ -481,7 +483,7 @@ def _write_s3(
                 ContentType=content_type,
                 IfNoneMatch="*",
             )
-        except ClientError as error:
+        except botocore.exceptions.ClientError as error:
             status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if status == _ALREADY_THERE:
                 return

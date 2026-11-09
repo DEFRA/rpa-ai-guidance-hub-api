@@ -31,9 +31,9 @@ the picture is stored under.
 
 from __future__ import annotations
 
+import dataclasses
 import mimetypes
 import re
-from dataclasses import dataclass
 
 from app.guidance.parsing import anchors, models
 
@@ -106,7 +106,7 @@ def _title_of(lines: list[str]) -> str:
     return matched.group(1).strip()
 
 
-@dataclass
+@dataclasses.dataclass
 class _OpenSection:
     """A section that later headings may still be nested beneath.
 

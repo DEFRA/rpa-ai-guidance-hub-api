@@ -11,12 +11,12 @@ its required environment variables need to be set.
 
 import argparse
 import json
+import pathlib
 import sys
-from pathlib import Path
 
 from app.entrypoints import fastapi as entrypoint
 
-OPENAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
+OPENAPI_PATH = pathlib.Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
 
 
 def render() -> str:

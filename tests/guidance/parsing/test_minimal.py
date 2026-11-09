@@ -5,16 +5,15 @@ Title reuses `_extract_title`, which `test_title.py` already covers exhaustively
 these cases only check that `parse_minimal` wires it in, not the heuristic itself.
 """
 
-from datetime import UTC, datetime
+import datetime as dt
 
 import pytest
 
-from app.guidance.parsing import parser
-from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing import errors, parser
 
 TITLE = "Example Grant Scheme Guide"
 VERSION = "2.1"
-MODIFIED = datetime(2026, 3, 4, 9, 30, tzinfo=UTC)
+MODIFIED = dt.datetime(2026, 3, 4, 9, 30, tzinfo=dt.UTC)
 
 
 class TestParseMinimal:
@@ -44,5 +43,5 @@ class TestParseMinimal:
 
     def test_raises_document_parse_error_for_a_file_that_is_not_a_docx(self):
         """AC7: unreadable is the only failure mode - not a missing field."""
-        with pytest.raises(DocumentParseError):
+        with pytest.raises(errors.DocumentParseError):
             parser.parse_minimal(b"not a docx file")

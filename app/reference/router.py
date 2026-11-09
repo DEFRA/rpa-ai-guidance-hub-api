@@ -1,9 +1,9 @@
-from fastapi import APIRouter
+import fastapi
 
 from app import config as app_config
 from app.reference import schemas
 
-router = APIRouter(prefix="/reference")
+router = fastapi.APIRouter(prefix="/reference")
 
 
 @router.get(

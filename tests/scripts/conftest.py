@@ -6,10 +6,10 @@ does. Adding the directory here is what lets a test import one without the scrip
 having to know it is being tested.
 """
 
+import pathlib
 import sys
-from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))

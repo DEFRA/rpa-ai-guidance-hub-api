@@ -13,11 +13,11 @@ All fixture text is invented, as everywhere in this package.
 
 from collections.abc import Callable
 
+import docx.document
+import docx.oxml.ns
+import docx.oxml.shared
+import docx.text.run
 import pytest
-from docx.document import Document
-from docx.oxml.ns import qn
-from docx.oxml.shared import OxmlElement
-from docx.text.run import Run
 
 from app.guidance.parsing import parser
 
@@ -27,7 +27,7 @@ HEADING = "Applying"
 # cannot be shared through conftest.py: pytest runs with --import-mode=importlib, so the
 # test directory is never put on sys.path and `from conftest import ...` fails at
 # collection.
-Build = Callable[[Document], None]
+Build = Callable[[docx.document.Document], None]
 DocxBytes = Callable[[Build], bytes]
 
 
@@ -39,21 +39,21 @@ def _colour_content(docx_bytes: DocxBytes, build: Build) -> str:
     the directory has no boundary to tell it they are different functions.
     """
 
-    def with_heading(document: Document) -> None:
+    def with_heading(document: docx.document.Document) -> None:
         document.add_heading(HEADING, level=1)
         build(document)
 
     return parser.parse_docx(docx_bytes(with_heading)).sections[0].content
 
 
-def _painted(run: Run, value: str) -> None:
+def _painted(run: docx.text.run.Run, value: str) -> None:
     """Colour a run by raw w:val, including values python-docx will not write."""
-    element = OxmlElement("w:color")
-    element.set(qn("w:val"), value)
+    element = docx.oxml.shared.OxmlElement("w:color")
+    element.set(docx.oxml.ns.qn("w:val"), value)
     run._r.get_or_add_rPr().append(element)
 
 
-def _coloured(document: Document, text: str, value: str) -> None:
+def _coloured(document: docx.document.Document, text: str, value: str) -> None:
     """A paragraph of one coloured run."""
     _painted(document.add_paragraph().add_run(text), value)
 

@@ -20,16 +20,16 @@ import datetime as dt
 import uuid
 from typing import Any
 
+import fastapi.testclient
 import pymongo.errors
 import pytest
-from fastapi.testclient import TestClient
 
 from app.common import mongo
-from app.entrypoints.fastapi import app
+from app.entrypoints import fastapi as entrypoint
 from app.guidance import conversion, models, records, router, service
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
-from app.guidance.parsing.errors import DocumentParseError
+from app.guidance.parsing import errors
 from tests.fakes import submitter as fake_submitter
 
 UPLOAD = "854a1f43-aab4-4579-b166-d708c0aad436"
@@ -156,9 +156,9 @@ def collections():
     async def _database() -> FakeDatabase:
         return database
 
-    app.dependency_overrides[mongo.get_db] = _database
+    entrypoint.app.dependency_overrides[mongo.get_db] = _database
     yield stored
-    app.dependency_overrides.clear()
+    entrypoint.app.dependency_overrides.clear()
 
 
 class FakeStaging:
@@ -246,7 +246,7 @@ def staging(collections):  # noqa: ARG001 - its overrides are cleared with these
     """A staging store holding the journey's file, parsed."""
     fake = FakeStaging()
     fake.stage()
-    app.dependency_overrides[staging_router.get_staging_store] = lambda: fake
+    entrypoint.app.dependency_overrides[staging_router.get_staging_store] = lambda: fake
     return fake
 
 
@@ -285,7 +285,7 @@ def submitter(collections, staging):
             collections, staging, service.GuidanceService(s3_client=None)
         )
     )
-    app.dependency_overrides[router.get_conversion_submitter] = lambda: fake
+    entrypoint.app.dependency_overrides[router.get_conversion_submitter] = lambda: fake
     return fake
 
 
@@ -297,7 +297,7 @@ def client(collections, converts, staging, submitter):  # noqa: ARG001 - for the
     connects to MongoDB, and these cases are about the endpoint rather than about
     the service coming up.
     """
-    return TestClient(app)
+    return fastapi.testclient.TestClient(entrypoint.app)
 
 
 class TestCreatingADocument:
@@ -521,7 +521,7 @@ class TestWhenTheSaveFails:
         [
             service.SourceRefusedError("not the bucket"),
             service.SourceMissingError("nothing there"),
-            DocumentParseError("not a .docx"),
+            errors.DocumentParseError("not a .docx"),
         ],
     )
     def test_the_failure_and_its_reason_are_recorded(
@@ -540,7 +540,7 @@ class TestWhenTheSaveFails:
     ):
         """Neither half: both records are written only after the content is stored,
         so a conversion that fails must leave no record of either."""
-        converts.side_effect = DocumentParseError("not a .docx")
+        converts.side_effect = errors.DocumentParseError("not a .docx")
 
         client.post("/guides", json=_request())
 
@@ -551,7 +551,7 @@ class TestWhenTheSaveFails:
         self, client, converts, documents, staging
     ):
         converts.side_effect = [
-            DocumentParseError("not a .docx"),
+            errors.DocumentParseError("not a .docx"),
             converts.return_value,
         ]
         client.post("/guides", json=_request())
@@ -724,7 +724,7 @@ class TestTheStagedFileIsPromoted:
     def test_not_when_the_conversion_fails(self, client, staging, converts):
         """Nothing was committed: the record keeps its ids for the next attempt, and
         is not promoted."""
-        converts.side_effect = DocumentParseError("not a .docx")
+        converts.side_effect = errors.DocumentParseError("not a .docx")
 
         client.post("/guides", json=_request())
 

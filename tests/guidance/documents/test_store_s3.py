@@ -19,8 +19,8 @@ import threading
 import time
 from typing import Any
 
+import botocore.exceptions
 import pytest
-from botocore.exceptions import ClientError
 
 from app.common import s3 as common_s3
 from app.guidance.documents import store
@@ -88,7 +88,7 @@ class TestWhatIsNotThere:
         empty store and says nothing about the cause."""
         s3.delete_bucket(Bucket="docs")
 
-        with pytest.raises(ClientError):
+        with pytest.raises(botocore.exceptions.ClientError):
             store.load(GUIDE)
 
     def test_being_refused_is_raised(self, s3: Any) -> None:
@@ -105,7 +105,7 @@ class TestWhatIsNotThere:
         }
         s3.put_bucket_policy(Bucket="docs", Policy=json.dumps(policy))
 
-        with pytest.raises(ClientError):
+        with pytest.raises(botocore.exceptions.ClientError):
             store.read(f"{GUIDE}/content.md")
 
 
@@ -242,8 +242,8 @@ class TestAVersionSharingTheDocumentsPictures:
         assert content == b"\x89PNG"
 
 
-def _refused(status: int, code: str) -> ClientError:
-    return ClientError(
+def _refused(status: int, code: str) -> botocore.exceptions.ClientError:
+    return botocore.exceptions.ClientError(
         {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}},
         "PutObject",
     )
@@ -312,7 +312,7 @@ class TestNothingIsReplaced:
         client.put_object.side_effect = _refused(409, "ConditionalRequestConflict")
         document = models.MarkdownDocument(title="Claims")
 
-        with pytest.raises(ClientError):
+        with pytest.raises(botocore.exceptions.ClientError):
             store.save(document, GUIDE, BESIDE, s3_client=client)
 
         assert client.put_object.call_count == 2
@@ -322,7 +322,7 @@ class TestNothingIsReplaced:
         client.put_object.side_effect = _refused(403, "AccessDenied")
         document = models.MarkdownDocument(title="Claims")
 
-        with pytest.raises(ClientError):
+        with pytest.raises(botocore.exceptions.ClientError):
             store.save(document, GUIDE, BESIDE, s3_client=client)
 
         assert client.put_object.call_count == 1
@@ -395,7 +395,7 @@ class TestPicturesAreWrittenSideBySide:
         client.put_object.side_effect = put_object
         document = _with_pictures(8)
 
-        with pytest.raises(ClientError):
+        with pytest.raises(botocore.exceptions.ClientError):
             store.save(document, GUIDE, BESIDE, s3_client=client)
 
         written = [call.kwargs["Key"] for call in client.put_object.call_args_list]

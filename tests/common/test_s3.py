@@ -1,5 +1,4 @@
 from unittest import mock
-from unittest.mock import MagicMock
 
 import boto3
 
@@ -11,12 +10,12 @@ class TestGetS3Client:
         self, monkeypatch
     ):
         monkeypatch.setattr(s3, "client", None)
-        mock_config = MagicMock()
+        mock_config = mock.MagicMock()
         mock_config.floci_endpoint_url = "http://floci:4566"
         mock_config.aws_region = "eu-west-2"
         monkeypatch.setattr("app.config.get_config", lambda: mock_config)
 
-        mock_boto3_client = MagicMock()
+        mock_boto3_client = mock.MagicMock()
         monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
         client = s3.get_s3_client()
@@ -32,12 +31,12 @@ class TestGetS3Client:
     def test_passes_none_endpoint_when_unconfigured(self, monkeypatch):
         """No floci_endpoint_url: falls through to default endpoint resolution."""
         monkeypatch.setattr(s3, "client", None)
-        mock_config = MagicMock()
+        mock_config = mock.MagicMock()
         mock_config.floci_endpoint_url = None
         mock_config.aws_region = "eu-west-2"
         monkeypatch.setattr("app.config.get_config", lambda: mock_config)
 
-        mock_boto3_client = MagicMock()
+        mock_boto3_client = mock.MagicMock()
         monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
         client = s3.get_s3_client()
@@ -62,11 +61,11 @@ class TestGetS3Client:
         """The UI waits 5 seconds for this service; one S3 call gets half of that
         to connect and half to answer, and one retry."""
         monkeypatch.setattr(s3, "client", None)
-        mock_config = MagicMock()
+        mock_config = mock.MagicMock()
         mock_config.floci_endpoint_url = None
         mock_config.aws_region = "eu-west-2"
         monkeypatch.setattr("app.config.get_config", lambda: mock_config)
-        mock_boto3_client = MagicMock()
+        mock_boto3_client = mock.MagicMock()
         monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
         s3.get_s3_client()

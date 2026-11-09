@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest import mock
 
 import fastapi
 import pytest
@@ -12,12 +12,12 @@ UI_ARN = "arn:aws:iam::123456789012:role/rpa-ai-guidance-hub-ui"
 def mock_claims(mocker):
     mocker.patch(
         "app.config.get_config",
-        return_value=MagicMock(aws_account="123456789012"),
+        return_value=mock.MagicMock(aws_account="123456789012"),
     )
 
     def _set(sub: str) -> None:
         mocker.patch.object(
-            service, "_verify_caller", AsyncMock(return_value={"sub": sub})
+            service, "_verify_caller", mock.AsyncMock(return_value={"sub": sub})
         )
 
     return _set
@@ -36,14 +36,14 @@ class TestAllow:
         mock_claims(UI_ARN)
         check = service.allow(callers.KnownCallers.GUIDANCE_HUB_UI)
 
-        caller = await check(MagicMock())
+        caller = await check(mock.MagicMock())
 
         assert caller.name == "rpa-ai-guidance-hub-ui"
 
     async def test_unrecognised_arn_is_forbidden(self, mock_claims):
         mock_claims("arn:aws:iam::123456789012:role/unknown-service")
         check = service.allow(callers.KnownCallers.GUIDANCE_HUB_UI)
-        request = MagicMock()
+        request = mock.MagicMock()
 
         with pytest.raises(fastapi.HTTPException) as exc:
             await check(request)
@@ -51,9 +51,9 @@ class TestAllow:
         assert exc.value.status_code == fastapi.status.HTTP_403_FORBIDDEN
 
     async def test_missing_sub_is_forbidden(self, mocker):
-        mocker.patch.object(service, "_verify_caller", AsyncMock(return_value={}))
+        mocker.patch.object(service, "_verify_caller", mock.AsyncMock(return_value={}))
         check = service.allow(callers.KnownCallers.GUIDANCE_HUB_UI)
-        request = MagicMock()
+        request = mock.MagicMock()
 
         with pytest.raises(fastapi.HTTPException) as exc:
             await check(request)
@@ -68,7 +68,7 @@ class TestAllowAllKnown:
         for known in callers.KnownCallers:
             mock_claims(callers.CALLERS_BY_NAME[known].arn)
 
-            caller = await check(MagicMock())
+            caller = await check(mock.MagicMock())
 
             assert caller.name == known
 
@@ -80,7 +80,9 @@ class TestVerifyCaller:
         [None, "", "Bearer", "Bearer ", "Basic abc.def.ghi", "abc.def.ghi"],
     )
     async def test_missing_or_non_bearer_header_is_unauthorised(self, header):
-        request = MagicMock(headers={} if header is None else {"Authorization": header})
+        request = mock.MagicMock(
+            headers={} if header is None else {"Authorization": header}
+        )
 
         with pytest.raises(fastapi.HTTPException) as exc:
             await service._verify_caller(request)
@@ -90,10 +92,10 @@ class TestVerifyCaller:
     @pytest.mark.parametrize("scheme", ["Bearer", "bearer"])
     async def test_bearer_prefix_is_stripped(self, mocker, auth_env, scheme):
         get_key = mocker.patch.object(
-            auth_env, "get_signing_key_from_jwt", return_value=MagicMock()
+            auth_env, "get_signing_key_from_jwt", return_value=mock.MagicMock()
         )
         decode = mocker.patch("jwt.decode", return_value={"sub": "x"})
-        request = MagicMock(headers={"Authorization": f"{scheme} abc.def.ghi"})
+        request = mock.MagicMock(headers={"Authorization": f"{scheme} abc.def.ghi"})
 
         assert await service._verify_caller(request) == {"sub": "x"}
         get_key.assert_called_once_with("abc.def.ghi")

@@ -1,13 +1,13 @@
-from datetime import UTC, datetime
+import datetime as dt
 
 from app.guidance.documents.staging import models
 
 
 class TestStagedDocument:
     def test_round_trip_document_serialization(self):
-        created_at = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
-        updated_at = datetime(2026, 9, 10, 12, 5, 0, tzinfo=UTC)
-        last_modified = datetime(2026, 3, 4, 10, 0, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 9, 10, 12, 0, 0, tzinfo=dt.UTC)
+        updated_at = dt.datetime(2026, 9, 10, 12, 5, 0, tzinfo=dt.UTC)
+        last_modified = dt.datetime(2026, 3, 4, 10, 0, 0, tzinfo=dt.UTC)
         staged_document = models.StagedDocument(
             file_id="staged-123",
             parsing_status=models.ParsingStatus.COMPLETE,
@@ -45,8 +45,8 @@ class TestStagedDocument:
         assert reconstituted == staged_document
 
     def test_from_document_handles_missing_optional_fields_as_none(self):
-        created_at = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
-        updated_at = datetime(2026, 9, 10, 12, 5, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 9, 10, 12, 0, 0, tzinfo=dt.UTC)
+        updated_at = dt.datetime(2026, 9, 10, 12, 5, 0, tzinfo=dt.UTC)
         doc = {
             "_id": "staged-bare",
             "parsing_status": "in_progress",
@@ -65,7 +65,7 @@ class TestStagedDocument:
         assert staged_document.parse_error is None
 
     def test_how_far_saving_has_got_reads_back_as_it_was_stored(self):
-        created_at = datetime(2026, 10, 7, 12, 0, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 10, 7, 12, 0, 0, tzinfo=dt.UTC)
         staged_document = models.StagedDocument(
             file_id="staged-saving",
             parsing_status=models.ParsingStatus.COMPLETE,
@@ -84,7 +84,7 @@ class TestStagedDocument:
         assert models.StagedDocument.from_document(doc) == staged_document
 
     def test_a_record_from_before_saving_was_tracked_reads_back_with_none(self):
-        created_at = datetime(2026, 10, 7, 12, 0, 0, tzinfo=UTC)
+        created_at = dt.datetime(2026, 10, 7, 12, 0, 0, tzinfo=dt.UTC)
         doc = {
             "_id": "staged-old",
             "parsing_status": "complete",

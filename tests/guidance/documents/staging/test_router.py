@@ -5,8 +5,8 @@ Addresses the ASGI request boundary using `fastapi.testclient.TestClient`.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
-from datetime import UTC, datetime
 
 import fastapi.testclient
 import pytest
@@ -168,13 +168,13 @@ class TestGetStagedDocument:
     def test_returns_document_with_camel_case_fields_when_found(
         self, client, staging_store: staging_store_fake.InMemoryStagingStore
     ):
-        last_modified = datetime(2026, 3, 4, 10, 0, 0, tzinfo=UTC)
+        last_modified = dt.datetime(2026, 3, 4, 10, 0, 0, tzinfo=dt.UTC)
         staged_document = models.StagedDocument(
             file_id="guide-123",
             parsing_status=models.ParsingStatus.COMPLETE,
             path="scanned/guide.docx",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+            created_at=dt.datetime.now(dt.UTC),
+            updated_at=dt.datetime.now(dt.UTC),
             title="Grant Application Guide",
             version="1.5",
             last_modified=last_modified,
@@ -200,8 +200,8 @@ class TestGetStagedDocument:
             file_id="guide-failed",
             parsing_status=models.ParsingStatus.FAILED,
             path="scanned/guide.docx",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+            created_at=dt.datetime.now(dt.UTC),
+            updated_at=dt.datetime.now(dt.UTC),
             parse_error="Invalid docx document",
         )
         staging_store.records["guide-failed"] = staged_document
@@ -221,11 +221,11 @@ class TestGetStagedDocument:
             file_id="guide-converted",
             parsing_status=models.ParsingStatus.COMPLETE,
             path="upload-1/guide-converted",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+            created_at=dt.datetime.now(dt.UTC),
+            updated_at=dt.datetime.now(dt.UTC),
             document_id=DOCUMENT,
             version_id=VERSION,
-            promoted_at=datetime(2026, 10, 6, 11, 0, 0, tzinfo=UTC),
+            promoted_at=dt.datetime(2026, 10, 6, 11, 0, 0, tzinfo=dt.UTC),
         )
 
         response = client.get("/guides/staging/guide-converted")
@@ -242,8 +242,8 @@ class TestGetStagedDocument:
             file_id="guide-converting",
             parsing_status=models.ParsingStatus.COMPLETE,
             path="upload-1/guide-converting",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+            created_at=dt.datetime.now(dt.UTC),
+            updated_at=dt.datetime.now(dt.UTC),
             document_id=DOCUMENT,
             version_id=VERSION,
         )

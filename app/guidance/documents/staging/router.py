@@ -1,4 +1,4 @@
-from logging import getLogger
+import logging
 from typing import Annotated, Any
 
 import fastapi
@@ -14,7 +14,7 @@ PREFIX = "/guides/staging"
 router = fastapi.APIRouter(prefix=PREFIX)
 callback_router = fastapi.APIRouter(prefix=PREFIX)
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def get_staging_store(

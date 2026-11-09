@@ -12,9 +12,9 @@ answers it.
 All fixture text is invented, as everywhere in this package.
 """
 
+import pathlib
 import re
-from pathlib import Path
-from urllib.parse import urljoin
+import urllib.parse
 
 import pytest
 
@@ -48,12 +48,12 @@ def _document(*images: models.Image) -> models.MarkdownDocument:
     return models.MarkdownDocument(title="Claims", sections=[section])
 
 
-def _elsewhere(tmp_path: Path) -> str:
+def _elsewhere(tmp_path: pathlib.Path) -> str:
     """Somewhere for pictures that is not beneath the guide that draws them."""
     return f"{tmp_path.as_uri()}/pictures"
 
 
-def _guide(tmp_path: Path, document_id: str = GUIDE) -> str:
+def _guide(tmp_path: pathlib.Path, document_id: str = GUIDE) -> str:
     """The URL of a guide kept under `tmp_path`, as a caller would compose it."""
     return store.document_url(tmp_path.as_uri(), document_id)
 
@@ -65,7 +65,7 @@ def _save(document: models.MarkdownDocument, guide: str) -> str:
     return store.save(document, guide, RELATIVE)
 
 
-def _assets_in(tmp_path: Path) -> list[str]:
+def _assets_in(tmp_path: pathlib.Path) -> list[str]:
     directory = tmp_path / GUIDE / "assets"
     return (
         sorted(path.name for path in directory.iterdir()) if directory.is_dir() else []
@@ -194,7 +194,9 @@ class TestWhereAGuideLives:
         guide = _guide(tmp_path)
         _save(_document(_picture()), guide)
 
-        referenced = urljoin(store.content_url(guide), f"{store.ASSET_PREFIX}a3f9.png")
+        referenced = urllib.parse.urljoin(
+            store.content_url(guide), f"{store.ASSET_PREFIX}a3f9.png"
+        )
 
         assert referenced == store.asset_url(guide, RELATIVE, "a3f9.png")
         assert store.load_asset(guide, RELATIVE, "a3f9.png") == PNG
@@ -325,7 +327,7 @@ class TestPicturesKeptElsewhere:
         stored = (tmp_path / GUIDE / "content.md").read_text(encoding="utf-8")
         said = _IMAGE.search(stored).group(1)
 
-        assert urljoin(store.content_url(guide), said) == store.asset_url(
+        assert urllib.parse.urljoin(store.content_url(guide), said) == store.asset_url(
             guide, prefix, "a3f9.png"
         )
         assert store.load_asset(guide, prefix, "a3f9.png") == PNG

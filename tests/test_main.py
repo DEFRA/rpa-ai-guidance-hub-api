@@ -112,9 +112,9 @@ def test_main_sets_proxy_envs(mocker, monkeypatch):
     # Patch before importing
     mocker.patch("app.config.get_config", return_value=mock_config)
 
-    from app.entrypoints.fastapi import main
+    import app.entrypoints.fastapi
 
-    main()
+    app.entrypoints.fastapi.main()
 
     assert os.environ.get("HTTP_PROXY") == "http://proxy:8080"
     assert os.environ.get("HTTPS_PROXY") == "http://proxy:8080"
@@ -140,9 +140,9 @@ def test_main_no_proxy_in_config(mocker, monkeypatch):
     # Patch before importing
     mocker.patch("app.config.get_config", return_value=mock_config)
 
-    from app.entrypoints.fastapi import main
+    import app.entrypoints.fastapi
 
-    main()
+    app.entrypoints.fastapi.main()
 
     assert os.environ.get("HTTP_PROXY") is None
     assert os.environ.get("HTTPS_PROXY") is None

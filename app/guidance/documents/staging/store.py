@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import datetime as dt
 from typing import Protocol
 
 import pymongo.asynchronous.database
@@ -16,7 +16,7 @@ COLLECTION_NAME = "document_staging"
 # one is a message's visibility timeout between deliveries, two minutes. One with no
 # update for this long has nothing working on it: its job never reached the queue, or
 # its failure could not be recorded. If one still does, a second job is safe to repeat.
-_STALE_SAVE = timedelta(minutes=10)
+_STALE_SAVE = dt.timedelta(minutes=10)
 
 
 class StagingStore(Protocol):
@@ -58,7 +58,7 @@ class MongoStagingStore:
         await self._collection.create_index("expires_at", expireAfterSeconds=0)
 
     async def claim(self, file_id: ids.FileId, path: str) -> bool:
-        now = datetime.now(UTC)
+        now = dt.datetime.now(dt.UTC)
 
         try:
             await self._collection.update_one(
@@ -70,7 +70,8 @@ class MongoStagingStore:
                     "$set": {
                         "parsing_status": staging_models.ParsingStatus.IN_PROGRESS.value,
                         "updated_at": now,
-                        "expires_at": now + timedelta(seconds=self._retention_seconds),
+                        "expires_at": now
+                        + dt.timedelta(seconds=self._retention_seconds),
                     },
                     "$setOnInsert": {"path": path, "created_at": now},
                 },
@@ -92,7 +93,7 @@ class MongoStagingStore:
                     "title": info.title,
                     "version": info.version,
                     "last_modified": info.last_modified,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": dt.datetime.now(dt.UTC),
                 }
             },
         )
@@ -104,7 +105,7 @@ class MongoStagingStore:
                 "$set": {
                     "parsing_status": staging_models.ParsingStatus.FAILED.value,
                     "parse_error": reason,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": dt.datetime.now(dt.UTC),
                 }
             },
         )
@@ -142,7 +143,7 @@ class MongoStagingStore:
                 "$set": {
                     "document_id": ids.new_document_id(),
                     "version_id": ids.new_version_id(),
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": dt.datetime.now(dt.UTC),
                 }
             },
         )
@@ -166,7 +167,7 @@ class MongoStagingStore:
         attempt that never committed looks like. Promoting a file whose record has
         already gone is not an error.
         """
-        now = datetime.now(UTC)
+        now = dt.datetime.now(dt.UTC)
         await self._collection.update_one(
             {"_id": file_id},
             {
@@ -193,7 +194,7 @@ class MongoStagingStore:
             recently updated, or finished, or the file is not staged with its ids
             reserved.
         """
-        now = datetime.now(UTC)
+        now = dt.datetime.now(dt.UTC)
         in_progress = staging_models.SavingStatus.IN_PROGRESS.value
         result = await self._collection.update_one(
             {
@@ -221,7 +222,7 @@ class MongoStagingStore:
                     "save_steps_total": None,
                     "save_error": None,
                     "updated_at": now,
-                    "expires_at": now + timedelta(seconds=self._retention_seconds),
+                    "expires_at": now + dt.timedelta(seconds=self._retention_seconds),
                 }
             },
         )
@@ -237,7 +238,7 @@ class MongoStagingStore:
                 "$set": {
                     "save_steps_completed": completed,
                     "save_steps_total": total,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": dt.datetime.now(dt.UTC),
                 }
             },
         )
@@ -257,7 +258,7 @@ class MongoStagingStore:
                 "$set": {
                     "saving_status": staging_models.SavingStatus.FAILED.value,
                     "save_error": reason,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": dt.datetime.now(dt.UTC),
                 }
             },
         )
