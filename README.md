@@ -78,6 +78,7 @@ or malformed, naming the offending variable. Copy `.env.example` to `.env` for l
 | `HTTP_PROXY` | no | Outbound proxy | |
 | `ENABLE_METRICS` | no | Emit CloudWatch EMF metrics, see [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics) | `false` |
 | `STAGING_RETENTION_SECONDS` | no | How long a staged document's minimal parse is kept awaiting user action | `14400` (4 hours) |
+| `FEATURE_SBI_BOOKMARKS` | no | Whether a guide can be bookmarked to an SBI, as well as to a case ID. When false, a new SBI is refused (422). Turn it on in the UI too, which otherwise shows the SBI choices disabled | `false` |
 | `USE_AUTH` | no | Require a CDP web-identity token on API routes, see [Authentication](#authentication) | `false` |
 | `CDP_JWT_ISSUER` | with `USE_AUTH` (set by CDP) | Expected token issuer (`iss`) | |
 | `CDP_JWT_JWKS_URI` | with `USE_AUTH` (set by CDP) | URL of the issuer's JWKS, used to verify token signatures | |
