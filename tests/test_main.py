@@ -51,6 +51,7 @@ def _a_lifespan_with_no_database(mocker):
     )
     mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
     mocker.patch("app.users.records.ensure_indexes", mocker.AsyncMock())
+    mocker.patch("app.users.records.convert_pins_kept_as_ids", mocker.AsyncMock())
 
 
 def test_lifespan_works_the_queue(mocker, aws_at_startup):
