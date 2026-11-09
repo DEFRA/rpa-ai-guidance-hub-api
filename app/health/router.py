@@ -16,11 +16,7 @@ async def sqs_worker_status(
 ) -> dict[str, str]:
     """Whether uploads can be converted: 503 for as long as the queue has a problem.
     Nothing restarts on this one, so the API can recover by itself."""
-    consumer = request.app.state.queue_consumer
-    if consumer is None:
-        response.status_code = fastapi.status.HTTP_503_SERVICE_UNAVAILABLE
-        return {"status": "no queue configured"}
-    if not consumer.healthy:
+    if not request.app.state.queue_consumer.healthy:
         response.status_code = fastapi.status.HTTP_503_SERVICE_UNAVAILABLE
         return {"status": "queue unavailable"}
     return {"status": "ok"}

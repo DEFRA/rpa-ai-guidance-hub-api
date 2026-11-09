@@ -13,6 +13,7 @@ def _a_consumer(*, healthy: bool):
         app.entrypoints.fastapi.app.state,
         "queue_consumer",
         types.SimpleNamespace(healthy=healthy),
+        create=True,
     )
 
 
@@ -48,11 +49,3 @@ class TestSqsWorkerStatus:
 
         assert response.status_code == 503
         assert response.json() == {"status": "queue unavailable"}
-
-    def test_is_unavailable_with_no_queue_configured(self):
-        """Uploads cannot be converted then, so a deployment missing its setting
-        shows up here."""
-        response = client.get("/health/sqs-worker/status")
-
-        assert response.status_code == 503
-        assert response.json() == {"status": "no queue configured"}

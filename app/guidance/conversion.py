@@ -79,18 +79,6 @@ class QueueSubmitter:
         await self._queue.send(job.model_dump_json(by_alias=True))
 
 
-class NoQueueError(RuntimeError):
-    """Raised for a job there is no queue to send to."""
-
-
-class NoQueue:
-    """Where no queue is configured: nothing would run a job, so it is refused."""
-
-    async def submit(self, _job: ConversionJob) -> None:
-        message = "No queue is configured to convert uploads"
-        raise NoQueueError(message)
-
-
 class ConversionHandler:
     """Runs one job, for the consumer: see the module docstring."""
 

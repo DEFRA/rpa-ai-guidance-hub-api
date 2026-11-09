@@ -126,11 +126,11 @@ class AppConfig(pydantic_settings.BaseSettings):
     mongo_database: str = "rpa-ai-guidance-hub-api"
     mongo_truststore: str = "TRUSTSTORE_CDP_ROOT_CA"
     floci_endpoint_url: str | None = None
-    conversions_sqs_queue_url: str | None = pydantic.Field(
-        None,
+    conversions_sqs_queue_url: str = pydantic.Field(
+        ...,
         description=(
             "The URL of the queue that documents to convert go through "
-            "(rpa_ai_guidance_hub_conversions); none, no documents are converted"
+            "(rpa_ai_guidance_hub_conversions)"
         ),
     )
     conversions_concurrency: int = pydantic.Field(

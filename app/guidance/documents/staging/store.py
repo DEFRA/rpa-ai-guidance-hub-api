@@ -173,6 +173,7 @@ class MongoStagingStore:
                 "$set": {
                     "promoted_at": now,
                     "saving_status": staging_models.SavingStatus.COMPLETE.value,
+                    "save_error": None,
                     "updated_at": now,
                 }
             },

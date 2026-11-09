@@ -194,13 +194,12 @@ class TestAppConfig:
         assert cfg.source_docs_s3_bucket == "rpa-ai-guidance-hub-source-docs"
         assert cfg.http_proxy is None
 
-    def test_works_no_queue_and_two_messages_at_once_unless_told(self):
+    def test_works_two_messages_at_once_unless_told(self):
         cfg = config.AppConfig(
             CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
             **VALID_REFERENCE_KWARGS,
         )
 
-        assert cfg.conversions_sqs_queue_url is None
         assert cfg.conversions_concurrency == 2  # noqa: PLR2004 - the default
 
     def test_reads_the_queue_and_how_many_messages_to_work_at_once(self):
@@ -314,6 +313,13 @@ class TestGetConfig:
 
         assert config.get_config() is cached
         constructor.assert_not_called()
+
+    def test_refuses_to_build_without_the_queue(self, monkeypatch):
+        """Nothing would convert uploads, so the API does not start without it."""
+        monkeypatch.delenv("CONVERSIONS_SQS_QUEUE_URL", raising=False)
+
+        with pytest.raises(RuntimeError, match="(?i)conversions_sqs_queue_url"):
+            config.get_config()
 
     def test_raises_runtime_error_naming_the_offending_variable(self, monkeypatch):
         monkeypatch.delenv("CLAUDE_SONNET_MODEL_CONFIG", raising=False)

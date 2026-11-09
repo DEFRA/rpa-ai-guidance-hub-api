@@ -590,16 +590,6 @@ class TestWhenTheSaveCannotBeStarted:
         assert response.status_code == 202
         assert staging.staged[FILE].saving_status == "complete"
 
-    def test_with_no_queue_configured_it_is_a_service_unavailable(
-        self, client, staging
-    ):
-        app.dependency_overrides.pop(router.get_conversion_submitter)
-
-        response = client.post("/guides", json=_request())
-
-        assert response.status_code == 503
-        assert staging.staged[FILE].saving_status == "failed"
-
 
 class TestTheUploadIsTheStagedOne:
     """The file is named by its id, and read from its staging record: never from a

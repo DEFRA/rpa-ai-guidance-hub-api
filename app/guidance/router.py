@@ -84,7 +84,7 @@ async def _answered(
 def get_conversion_submitter(
     request: fastapi.Request,
 ) -> conversion.ConversionSubmitter:
-    """What the app started with: the queue, or a refusal where none is configured."""
+    """The queue the app started with."""
     submitter: conversion.ConversionSubmitter = request.app.state.conversion_submitter
     return submitter
 

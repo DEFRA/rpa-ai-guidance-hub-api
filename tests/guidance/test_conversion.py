@@ -263,12 +263,6 @@ class TestAnyOtherFailure:
 
 
 class TestSendingAJob:
-    async def test_with_no_queue_configured_is_refused(self, job):
-        submitter = conversion.NoQueue()
-
-        with pytest.raises(conversion.NoQueueError):
-            await submitter.submit(job)
-
     @pytest.mark.usefixtures("converts")
     async def test_through_the_queue_saves_its_document(
         self, floci_endpoint, handler, job, database

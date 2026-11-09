@@ -418,6 +418,21 @@ class TestSaving:
         assert staged.saving_status == models.SavingStatus.COMPLETE
         assert staged.save_error is None
 
+    async def test_a_save_completed_after_an_overlapping_delivery_failed_has_no_error(
+        self, staging_store
+    ):
+        """The other order: once the guide exists, the failure no longer stands."""
+        file_id = f"save-{uuid.uuid4()}"
+        await self._reserved(staging_store, file_id)
+        await staging_store.start_saving(file_id)
+        await staging_store.fail_saving(file_id, "The document store refused a write")
+
+        await staging_store.promote(file_id)
+
+        staged = await staging_store.get(file_id)
+        assert staged.saving_status == models.SavingStatus.COMPLETE
+        assert staged.save_error is None
+
     async def test_promoting_the_file_marks_its_save_complete(self, staging_store):
         file_id = f"save-{uuid.uuid4()}"
         await self._reserved(staging_store, file_id)
