@@ -41,6 +41,28 @@ def uploaded_file_entry(
     return entry
 
 
+def rejected_file_entry(
+    file_id: str = EXAMPLE_FILE_ID,
+    *,
+    error_code: str = "FILE_VIRUS",
+    error_message: str = "The selected file contains a virus",
+    filename: str = "malicious.docx",
+    **overrides: Any,
+) -> dict[str, Any]:
+    """A rejected file: cdp-uploader sends no s3Key or s3Bucket for these."""
+    entry = {
+        "fileId": file_id,
+        "filename": filename,
+        "contentType": "application/octet-stream",
+        "fileStatus": "rejected",
+        "hasError": True,
+        "errorCode": error_code,
+        "errorMessage": error_message,
+    }
+    entry.update(overrides)
+    return entry
+
+
 def cdp_callback_payload(
     file_entries: list[dict[str, Any]] | dict[str, Any] | None = None,
     *,
