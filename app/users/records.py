@@ -50,9 +50,11 @@ async def convert_pins_kept_as_ids(
     be pinned, into a pin of that whole guide, where it was. Idempotent, and called
     at startup, before a request reads a pin; not needed once every environment has
     run it."""
+    # Each pin, as the `$map` below names it.
+    each_pin = "$$pin"
     # A whole guide's pin as stored, with the guide id `$map` gives it.
     of_guide_id = models.Pin(
-        document_id=typing.cast("guidance_ids.DocumentId", "$$pin")
+        document_id=typing.cast("guidance_ids.DocumentId", each_pin)
     ).to_document()
     await database[USERS].update_many(
         {models.PINS: {"$type": "binData"}},
@@ -65,9 +67,9 @@ async def convert_pins_kept_as_ids(
                             "as": "pin",
                             "in": {
                                 "$cond": [
-                                    {"$eq": [{"$type": "$$pin"}, "binData"]},
+                                    {"$eq": [{"$type": each_pin}, "binData"]},
                                     of_guide_id,
-                                    "$$pin",
+                                    each_pin,
                                 ]
                             },
                         }
