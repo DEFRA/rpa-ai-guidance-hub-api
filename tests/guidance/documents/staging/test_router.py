@@ -79,6 +79,49 @@ class TestHandleCallback:
 
         assert response.status_code == 204
 
+    @pytest.mark.parametrize("error_code", ["FILE_VIRUS", "FILE_INVALID_TYPE"])
+    def test_returns_204_for_a_rejected_file_without_an_s3_key(
+        self, client, error_code
+    ):
+        payload = cdp_uploader.cdp_callback_payload(
+            cdp_uploader.rejected_file_entry(error_code=error_code),
+            number_of_rejected_files=1,
+        )
+
+        response = client.post("/guides/staging/callback", json=payload)
+
+        assert response.status_code == 204
+
+    def test_rejects_a_completed_file_without_an_s3_key_with_422(self, client):
+        entry = cdp_uploader.uploaded_file_entry()
+        del entry["s3Key"]
+
+        response = client.post(
+            "/guides/staging/callback",
+            json=cdp_uploader.cdp_callback_payload(entry),
+        )
+
+        assert response.status_code == 422
+
+    def test_processes_only_the_completed_file_alongside_a_rejected_one(
+        self, client, mocker
+    ):
+        mock_parse = mocker.AsyncMock()
+        mocker.patch.object(service.StagingService, "validate_and_parse", mock_parse)
+        payload = cdp_uploader.cdp_callback_payload(
+            [
+                cdp_uploader.rejected_file_entry(file_id="bad"),
+                cdp_uploader.uploaded_file_entry(file_id="good"),
+            ],
+            number_of_rejected_files=1,
+        )
+
+        response = client.post("/guides/staging/callback", json=payload)
+
+        assert response.status_code == 202
+        assert mock_parse.await_count == 1
+        assert mock_parse.await_args[0][0].file_id == "good"
+
     def test_skips_background_task_for_duplicate_or_already_claimed_file(
         self, client, mocker
     ):

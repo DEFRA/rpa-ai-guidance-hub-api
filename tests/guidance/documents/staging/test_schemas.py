@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+import pydantic
+import pytest
+
 from app.guidance.documents.staging import models, schemas
 from tests.fixtures import cdp_uploader
 
@@ -39,6 +42,46 @@ class TestUploadedDocument:
         payload = schemas.UploadCallbackPayload.model_validate(body)
 
         assert payload.uploaded_documents() == []
+
+    @pytest.mark.parametrize("error_code", ["FILE_VIRUS", "FILE_INVALID_TYPE"])
+    def test_skips_rejected_files_that_have_no_s3_key(self, error_code):
+        body = cdp_uploader.cdp_callback_payload(
+            cdp_uploader.rejected_file_entry(error_code=error_code),
+            number_of_rejected_files=1,
+        )
+        payload = schemas.UploadCallbackPayload.model_validate(body)
+
+        assert payload.uploaded_documents() == []
+
+    def test_skips_an_entry_with_a_file_id_but_no_file_status(self):
+        body = cdp_uploader.cdp_callback_payload(
+            {"fileId": "9fcaabe5-77ec-44db-8356-3a6e8dc51b13"}
+        )
+        payload = schemas.UploadCallbackPayload.model_validate(body)
+
+        assert payload.uploaded_documents() == []
+
+    def test_projects_only_the_completed_file_among_rejected_ones(self):
+        payload = schemas.UploadCallbackPayload.model_validate(
+            cdp_uploader.cdp_callback_payload(
+                [
+                    cdp_uploader.rejected_file_entry(file_id="bad"),
+                    cdp_uploader.uploaded_file_entry(file_id="good"),
+                ],
+                number_of_rejected_files=1,
+            )
+        )
+
+        assert [d.file_id for d in payload.uploaded_documents()] == ["good"]
+
+    def test_rejects_a_completed_file_without_an_s3_key(self):
+        entry = cdp_uploader.uploaded_file_entry()
+        del entry["s3Key"]
+
+        body = cdp_uploader.cdp_callback_payload(entry)
+
+        with pytest.raises(pydantic.ValidationError):
+            schemas.UploadCallbackPayload.model_validate(body)
 
     def test_returns_empty_with_no_file_field_at_all(self):
         payload = schemas.UploadCallbackPayload.model_validate(
