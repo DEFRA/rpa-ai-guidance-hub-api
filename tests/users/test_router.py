@@ -15,6 +15,7 @@ from app.guidance import ids as guidance_ids
 from app.guidance import models as guidance_models
 from app.guidance import records as guidance_records
 from app.users import records
+from app.users import router as users_router
 
 TENANT = "00000000-0000-0000-0000-000000000456"
 
@@ -48,7 +49,7 @@ async def _user(client) -> str:
 
 
 async def _guide(
-    database, title: str, metadata: dict | None = None
+    database, title: str, metadata: dict | None = None, content_url: str | None = None
 ) -> guidance_ids.DocumentId:
     """A guide as stored now, with one version."""
     document_id = guidance_ids.new_document_id()
@@ -58,7 +59,7 @@ async def _guide(
         guidance_models.Version(
             id=guidance_ids.new_version_id(),
             document_id=document_id,
-            content_url=f"s3://docs/{document_id}/v/content.md",
+            content_url=content_url or f"s3://docs/{document_id}/v/content.md",
             title=title,
             version_number="1.0",
             created_at=now,
@@ -313,6 +314,303 @@ async def _open(client, user_id: str, guide_id) -> int:
 async def _opened_ids(database, user_id: str) -> list[guidance_ids.DocumentId]:
     user = await records.find(database, uuid.UUID(user_id))
     return [opened.document_id for opened in user.recently_opened]
+
+
+# A guide's content, as stored: its sections are "1 One" at `1-one` and "2 Two" at
+# `2-two`, in that order.
+CONTENT = "# Claims\n\n## 1 One\n\nText one.\n\n## 2 Two\n\nText two.\n"
+
+
+@pytest.fixture
+def content_url(tmp_path) -> str:
+    stored = tmp_path / "content.md"
+    stored.write_text(CONTENT)
+    return stored.as_uri()
+
+
+@pytest.fixture
+def sbis_switched_on():
+    fastapi_app = app.entrypoints.fastapi.app
+    fastapi_app.dependency_overrides[users_router.sbi_bookmarks] = lambda: True
+    yield
+    fastapi_app.dependency_overrides.pop(users_router.sbi_bookmarks, None)
+
+
+async def _patch_cases(client, user_id: str, *operations) -> httpx2.Response:
+    return await client.patch(
+        f"/users/{user_id}/cases",
+        json=list(operations),
+        headers={"Content-Type": "application/json-patch+json"},
+    )
+
+
+async def _cases(client, user_id: str) -> list[dict]:
+    return (await client.get(f"/users/{user_id}")).json()["cases"]
+
+
+def _new_case(guide, section="2-two", heading="2 Two", ref="W1234567", kind="case"):
+    return {
+        "op": "add",
+        "path": "/-",
+        "value": {
+            "type": kind,
+            "ref": ref,
+            "bookmarks": [
+                {"guideId": str(guide), "section": section, "heading": heading}
+            ],
+        },
+    }
+
+
+class TestCaseBookmarks:
+    async def test_a_section_bookmarked_to_a_new_case_comes_back_under_the_case(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        response = await _patch_cases(client, user_id, _new_case(guide, ref="w1234567"))
+
+        assert response.status_code == 204
+        [case] = await _cases(client, user_id)
+        assert uuid.UUID(case["key"]).version == 4
+        assert (case["type"], case["ref"]) == ("case", "W1234567")
+        [bookmarked] = case["guides"]
+        assert (bookmarked["id"], bookmarked["title"]) == (str(guide), "Claims")
+        assert [
+            (b["section"], b["heading"], b["position"]) for b in bookmarked["bookmarks"]
+        ] == [("2-two", "2 Two", 0)]
+
+    async def test_a_bookmarked_section_keeps_the_id_its_guide_gave_it(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        await _patch_cases(client, user_id, _new_case(guide))
+
+        version = await database[guidance_records.VERSIONS].find_one(
+            {"documentId": guide}
+        )
+        given = {each["anchor"]: str(each["id"]) for each in version["sectionIds"]}
+        [case] = await _cases(client, user_id)
+        [bookmark] = case["guides"][0]["bookmarks"]
+        assert list(given) == ["1-one", "2-two"]
+        assert bookmark["sectionId"] == given["2-two"]
+
+    async def test_a_case_s_sections_come_in_the_guide_s_order(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide, "2-two", "2 Two"))
+
+        await _patch_cases(
+            client,
+            user_id,
+            {
+                "op": "add",
+                "path": "/0/bookmarks/-",
+                "value": {
+                    "guideId": str(guide),
+                    "section": "1-one",
+                    "heading": "1 One",
+                },
+            },
+        )
+
+        [case] = await _cases(client, user_id)
+        assert [
+            (b["section"], b["position"]) for b in case["guides"][0]["bookmarks"]
+        ] == [("1-one", 1), ("2-two", 0)]
+
+    async def test_a_bookmark_added_to_a_case_keeps_its_key(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide, "2-two"))
+        [before] = await _cases(client, user_id)
+
+        await _patch_cases(
+            client,
+            user_id,
+            {"op": "test", "path": "/0/key", "value": before["key"]},
+            {
+                "op": "add",
+                "path": "/0/bookmarks/-",
+                "value": {"guideId": str(guide), "section": "1-one"},
+            },
+        )
+
+        [after] = await _cases(client, user_id)
+        assert after["key"] == before["key"]
+
+    async def test_a_patch_on_cases_that_have_changed_since_is_a_conflict(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide))
+
+        response = await _patch_cases(
+            client,
+            user_id,
+            {"op": "test", "path": "/0/key", "value": str(uuid.uuid4())},
+            {"op": "remove", "path": "/0"},
+        )
+
+        assert response.status_code == 409
+        assert len(await _cases(client, user_id)) == 1
+
+    async def test_a_section_the_guide_has_not_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        response = await _patch_cases(client, user_id, _new_case(guide, "9-never"))
+
+        assert response.status_code == 422
+        assert await _cases(client, user_id) == []
+
+    async def test_a_section_id_of_another_guide_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        other = await _guide(database, "Payments", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(other, "1-one"))
+        [before] = await _cases(client, user_id)
+        [bookmark] = before["guides"][0]["bookmarks"]
+        operation = _new_case(guide, ref="W7654321")
+        operation["value"]["bookmarks"][0] |= {
+            "section": None,
+            "sectionId": bookmark["sectionId"],
+        }
+
+        response = await _patch_cases(client, user_id, operation)
+
+        assert response.status_code == 422
+        assert await _cases(client, user_id) == [before]
+
+    async def test_a_bookmark_moved_to_a_guide_there_is_not_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide))
+        [before] = await _cases(client, user_id)
+
+        response = await _patch_cases(
+            client,
+            user_id,
+            {
+                "op": "add",
+                "path": "/0/bookmarks/0/guideId",
+                "value": str(uuid.uuid7()),
+            },
+        )
+
+        assert response.status_code == 422
+        assert await _cases(client, user_id) == [before]
+
+    async def test_a_guide_there_is_not_is_refused(self, client):
+        user_id = await _user(client)
+
+        response = await _patch_cases(client, user_id, _new_case(uuid.uuid7()))
+
+        assert response.status_code == 422
+
+    async def test_a_version_whose_guide_was_never_saved_is_refused(
+        self, client, database, content_url
+    ):
+        """Saving a guide writes its version before the guide, so a failure between
+        the two leaves a version that nothing lists, and a bookmark of it would never
+        be seen."""
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": guide})
+
+        response = await _patch_cases(client, user_id, _new_case(guide))
+
+        assert response.status_code == 422
+        assert await _cases(client, user_id) == []
+
+    async def test_a_bookmark_whose_guide_has_gone_stays_when_its_case_changes(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        gone = await _guide(database, "Claims", content_url=content_url)
+        other = await _guide(database, "Payments", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(gone))
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
+
+        response = await _patch_cases(
+            client,
+            user_id,
+            {
+                "op": "add",
+                "path": "/0/bookmarks/-",
+                "value": {"guideId": str(other), "section": "1-one"},
+            },
+        )
+
+        assert response.status_code == 204
+        stored = await database[records.USERS].find_one({"_id": uuid.UUID(user_id)})
+        [case] = stored["cases"]
+        assert [b["documentId"] for b in case["bookmarks"]] == [gone, other]
+
+    async def test_a_reference_that_is_not_one_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        response = await _patch_cases(client, user_id, _new_case(guide, ref="W123"))
+
+        assert response.status_code == 422
+
+    async def test_an_sbi_is_refused_while_sbis_are_switched_off(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        response = await _patch_cases(
+            client, user_id, _new_case(guide, ref="123456789", kind="sbi")
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.usefixtures("sbis_switched_on")
+    async def test_an_sbi_is_bookmarked_to_once_sbis_are_switched_on(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        response = await _patch_cases(
+            client, user_id, _new_case(guide, ref="123456789", kind="sbi")
+        )
+
+        assert response.status_code == 204
+        [case] = await _cases(client, user_id)
+        assert (case["type"], case["ref"]) == ("sbi", "123456789")
+
+    async def test_a_user_there_is_not_is_not_found(
+        self, client, database, content_url
+    ):
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        response = await _patch_cases(client, str(uuid.uuid7()), _new_case(guide))
+
+        assert response.status_code == 404
+
+    async def test_a_user_with_no_cases_has_none(self, client):
+        user_id = await _user(client)
+
+        assert await _cases(client, user_id) == []
 
 
 class TestRecordingAGuideAsOpened:

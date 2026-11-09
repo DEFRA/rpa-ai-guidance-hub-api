@@ -6,7 +6,7 @@ the OpenAPI document, and spelt in camelCase on the wire; they convert to and fr
 from __future__ import annotations
 
 import datetime as dt
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import pydantic
 
@@ -14,6 +14,9 @@ from app.guidance import ids as guidance_ids
 from app.guidance import models as guidance_models
 from app.guidance import schemas as guidance_schemas
 from app.users import ids, models
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class Identity(pydantic.BaseModel):
@@ -45,30 +48,109 @@ class PinnedGuide(pydantic.BaseModel):
     title: str | None
 
 
+class PlacedBookmark(pydantic.BaseModel):
+    """A section bookmarked to a case, as the side navigation shows it: its id, its
+    anchor and heading, and where the bookmark is among the case's, from 0, which is
+    what a patch that moves or removes it names it by."""
+
+    section_id: guidance_ids.SectionId = pydantic.Field(alias="sectionId")
+    section: str | None
+    heading: str | None
+    position: int
+
+
+class CaseGuideInBrief(pydantic.BaseModel):
+    """A guide bookmarked to a case, as the side navigation names it, with its
+    bookmarked sections in the order the guide has them."""
+
+    id: guidance_ids.DocumentId
+    title: str | None
+    bookmarks: list[PlacedBookmark]
+
+
+class CaseInBrief(pydantic.BaseModel):
+    """A case the user has bookmarked guides to, as the side navigation shows it:
+    its key, its type and reference, and its guides in the order first bookmarked."""
+
+    key: ids.CaseKey
+    type: models.CaseType
+    ref: str
+    guides: list[CaseGuideInBrief]
+
+    @classmethod
+    def from_model(
+        cls,
+        case: models.Case,
+        guides: Mapping[guidance_ids.DocumentId, models.GuideInBrief],
+    ) -> CaseInBrief:
+        """The case, its guides as `guides` has them; a guide not there is one that
+        no longer exists, and is left out."""
+        by_guide: dict[guidance_ids.DocumentId, list[tuple[int, models.Bookmark]]] = {}
+        for position, bookmark in enumerate(case.bookmarks):
+            by_guide.setdefault(bookmark.document_id, []).append((position, bookmark))
+        return cls(
+            key=case.key,
+            type=case.type,
+            ref=case.ref,
+            guides=[
+                CaseGuideInBrief(
+                    id=guide,
+                    title=guides[guide].title,
+                    bookmarks=_in_guide_order(bookmarks, guides[guide].sections),
+                )
+                for guide, bookmarks in by_guide.items()
+                if guide in guides
+            ],
+        )
+
+
+def _in_guide_order(
+    bookmarks: list[tuple[int, models.Bookmark]], sections: models.GuideSections
+) -> list[PlacedBookmark]:
+    """A guide's bookmarks in the order the guide has their sections; one whose
+    section the guide does not have now, last."""
+    return [
+        PlacedBookmark(
+            sectionId=bookmark.section_id,
+            section=sections.anchor_of(bookmark.section_id),
+            heading=bookmark.heading,
+            position=position,
+        )
+        for position, bookmark in sorted(
+            bookmarks, key=lambda each: (sections.order_of(each[1].section_id), each[0])
+        )
+    ]
+
+
 class User(pydantic.BaseModel):
     """A user as answered: the hub's own id for them, who they are to the identity
     provider, their name as of their latest sign-in, and when they first signed
-    in. With them, the guides they have pinned, in their order, so a page asks
-    once."""
+    in. With them, what the side navigation shows of their own lists, so a page asks
+    once: the guides they have pinned, in their order, and their cases."""
 
     id: ids.UserId
     identity: Identity
     display_name: str | None = pydantic.Field(alias="displayName")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
     pinned: list[PinnedGuide]
+    cases: list[CaseInBrief]
 
     @classmethod
     def from_model(
         cls,
         user: models.User,
         pinned: list[tuple[guidance_ids.DocumentId, str | None]],
+        guides: Mapping[guidance_ids.DocumentId, models.GuideInBrief],
     ) -> User:
+        """The user, with their pins with titles, and their cases with the guides
+        bookmarked to them (`guides`)."""
         return cls(
             id=user.id,
             identity=Identity(tenantId=user.tenant_id, objectId=user.object_id),
             displayName=user.display_name,
             createdAt=user.created_at,
             pinned=[PinnedGuide(id=pin, title=title) for pin, title in pinned],
+            cases=[CaseInBrief.from_model(case, guides) for case in user.cases],
         )
 
 
@@ -158,3 +240,113 @@ PatchOperation = Annotated[
     AddOperation | RemoveOperation | MoveOperation | TestOperation,
     pydantic.Field(discriminator="op"),
 ]
+
+
+class UnknownSectionError(ValueError):
+    """Raised for a bookmark of a section the guide does not have."""
+
+
+class CaseBookmark(pydantic.BaseModel):
+    """A section of a guide bookmarked to a case, as the user's cases are patched
+    whole. It is kept by the section's id, and answered with the section's anchor
+    too (`section`); one added by its anchor alone is the section the guide has
+    there. `heading` is the section's heading as it read when it was bookmarked;
+    `createdAt` is set when the bookmark is added, if it is not given."""
+
+    guide_id: guidance_ids.DocumentId = pydantic.Field(alias="guideId")
+    section_id: guidance_ids.SectionId | None = pydantic.Field(
+        default=None, alias="sectionId"
+    )
+    section: str | None = pydantic.Field(default=None, min_length=1)
+    heading: str | None = None
+    created_at: dt.datetime | None = pydantic.Field(default=None, alias="createdAt")
+
+    model_config = pydantic.ConfigDict(extra="forbid", populate_by_name=True)
+
+    @classmethod
+    def from_model(
+        cls, bookmark: models.Bookmark, sections: models.GuideSections | None
+    ) -> CaseBookmark:
+        return cls(
+            guideId=bookmark.document_id,
+            sectionId=bookmark.section_id,
+            section=None
+            if sections is None
+            else sections.anchor_of(bookmark.section_id),
+            heading=bookmark.heading,
+            createdAt=bookmark.created_at,
+        )
+
+    def to_model(
+        self, now: dt.datetime, sections: models.GuideSections | None
+    ) -> models.Bookmark:
+        """Raises:
+        UnknownSectionError: if the bookmark names no section, or names one by an
+            anchor the guide does not have.
+        """
+        section_id = self.section_id
+        if section_id is None and self.section is not None and sections is not None:
+            section_id = sections.id_at(self.section)
+        if section_id is None:
+            message = f"Guide {self.guide_id} has no section {self.section!r}"
+            raise UnknownSectionError(message)
+        return models.Bookmark(
+            document_id=self.guide_id,
+            section_id=section_id,
+            heading=self.heading,
+            created_at=self.created_at or now,
+        )
+
+
+class Case(pydantic.BaseModel):
+    """A case the user has bookmarked guides to, as their cases are patched whole:
+    its key (given to a new case), its type and reference, and its bookmarks in the
+    user's order. A Case ID is a letter, kept upper case, then exactly seven digits;
+    an SBI is nine digits, from 105000000 to 999999999."""
+
+    key: ids.CaseKey | None = None
+    type: models.CaseType
+    ref: str
+    bookmarks: list[CaseBookmark]
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+    @pydantic.model_validator(mode="after")
+    def _ref_as_kept(self) -> Case:
+        self.ref = models.kept_reference(self.type, self.ref)
+        return self
+
+    @classmethod
+    def from_model(
+        cls,
+        case: models.Case,
+        sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+    ) -> Case:
+        """The case, each bookmarked section at its anchor (`sections`, by guide)."""
+        return cls(
+            key=case.key,
+            type=case.type,
+            ref=case.ref,
+            bookmarks=[
+                CaseBookmark.from_model(b, sections.get(b.document_id))
+                for b in case.bookmarks
+            ],
+        )
+
+    def to_model(
+        self,
+        now: dt.datetime,
+        sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+    ) -> models.Case:
+        """Raises:
+        UnknownSectionError: as `CaseBookmark.to_model`.
+        """
+        return models.Case(
+            key=self.key or ids.new_case_key(),
+            type=self.type,
+            ref=self.ref,
+            bookmarks=tuple(
+                bookmark.to_model(now, sections.get(bookmark.guide_id))
+                for bookmark in self.bookmarks
+            ),
+        )

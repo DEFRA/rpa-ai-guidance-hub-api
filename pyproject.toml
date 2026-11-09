@@ -69,7 +69,7 @@ output = "coverage/coverage.xml"
 
 [tool.taskipy.tasks]
 format = "uv run ruff format . && uv run ruff check . --fix"
-lint = "uv run ruff format ./app ./tests --check && uv run ruff check ./app ./tests"
+lint = "uv run ruff format ./app ./tests --check && uv run ruff check ./app ./tests && uv run python -m scripts.check_raises ./tests"
 typecheck = "uv run mypy ./app ./tests"
 openapi = "uv run python -m scripts.export_openapi"
 openapi-check = "uv run python -m scripts.export_openapi --check"

@@ -13,7 +13,7 @@ refreshed each time; the id and `createdAt` are set only when the record is made
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import pymongo
@@ -145,14 +145,31 @@ async def patch_pins(
 ) -> bool:
     """Change the user's pins to what `patched` makes of them, whole or not at all
     (`_patch_list`)."""
-    return await _patch_list(database, user_id, models.PINS, patched)
+
+    async def made(
+        read: list[guidance_ids.DocumentId],
+    ) -> list[guidance_ids.DocumentId]:
+        return patched(read)
+
+    return await _patch_list(database, user_id, models.PINS, made)
+
+
+async def patch_cases(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    user_id: ids.UserId,
+    patched: Callable[[list[dict[str, Any]]], Awaitable[list[dict[str, Any]]]],
+) -> bool:
+    """Change the user's cases, as stored, to what `patched` makes of them, whole or
+    not at all (`_patch_list`). `patched` may read the database, for what the cases
+    name."""
+    return await _patch_list(database, user_id, models.CASES, patched)
 
 
 async def _patch_list[T](
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
     field: str,
-    patched: Callable[[list[T]], list[T]],
+    patched: Callable[[list[T]], Awaitable[list[T]]],
 ) -> bool:
     """Change one of the user's lists to what `patched` makes of it, whole or not at
     all.
@@ -174,7 +191,7 @@ async def _patch_list[T](
 
         written = await database[USERS].update_one(
             {"_id": user_id, **_still(field, read)},
-            {"$set": {field: patched(read)}},
+            {"$set": {field: await patched(read)}},
         )
         if written.matched_count == 1:
             return True

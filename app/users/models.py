@@ -7,7 +7,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 from app.guidance import ids as guidance_ids
 from app.users import ids
@@ -27,6 +27,54 @@ RECENTLY_OPENED = "recentlyOpened"
 # How many guides a user's recently opened list keeps.
 RECENTLY_OPENED_KEPT = 5
 
+# The cases the user has bookmarked guides to, in their own order, each with its
+# bookmarks in order.
+CASES = "cases"
+
+# What a case is known by: a Case ID, or an SBI (Single Business Identifier).
+CaseType = Literal["case", "sbi"]
+
+# A Case ID is a letter, then this many digits.
+_CASE_ID_DIGITS = 7
+
+# An SBI is nine digits, and only those in this range are SBIs: DEFRA's services
+# accept no others, and CRM and FDM validate against the same range.
+_SBI_DIGITS = 9
+_SBIS = range(105_000_000, 1_000_000_000)
+
+
+def kept_reference(case_type: CaseType, ref: str) -> str:
+    """A case's reference as it is kept: a Case ID's letter in upper case; an SBI as
+    it is.
+
+    Raises:
+        ValueError: if `ref` is not a reference of that type.
+    """
+    if case_type == "case" and _is_case_id(ref):
+        return ref.upper()
+    if case_type == "sbi" and _is_sbi(ref):
+        return ref
+    message = f"{ref!r} is not a reference of type {case_type!r}"
+    raise ValueError(message)
+
+
+def _is_case_id(ref: str) -> bool:
+    letter, digits = ref[:1], ref[1:]
+    return (
+        letter.isascii()
+        and letter.isalpha()
+        and _are_digits(digits)
+        and len(digits) == _CASE_ID_DIGITS
+    )
+
+
+def _is_sbi(ref: str) -> bool:
+    return _are_digits(ref) and len(ref) == _SBI_DIGITS and int(ref) in _SBIS
+
+
+def _are_digits(text: str) -> bool:
+    return text.isascii() and text.isdigit()
+
 
 @dataclasses.dataclass(frozen=True)
 class Opened:
@@ -43,6 +91,101 @@ class Opened:
         return cls(document_id=document["documentId"], opened_at=document["openedAt"])
 
 
+@dataclasses.dataclass(frozen=True)
+class Bookmark:
+    """A section of a guide bookmarked to a case, by the section's id, so that it
+    keeps its section when a new version renumbers it; with the section's heading as
+    it read when it was bookmarked."""
+
+    document_id: guidance_ids.DocumentId
+    section_id: guidance_ids.SectionId
+    heading: str | None
+    created_at: dt.datetime
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "documentId": self.document_id,
+            "sectionId": self.section_id,
+            "heading": self.heading,
+            "createdAt": self.created_at,
+        }
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, Any]) -> Bookmark:
+        return cls(
+            document_id=document["documentId"],
+            section_id=document["sectionId"],
+            heading=document.get("heading"),
+            created_at=document["createdAt"],
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class Case:
+    """A case the user has bookmarked guides to: its key, which names it wherever
+    its reference must not go, its type and reference (`kept_reference`), and its
+    bookmarks in the user's order."""
+
+    key: ids.CaseKey
+    type: CaseType
+    ref: str
+    bookmarks: tuple[Bookmark, ...] = ()
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "type": self.type,
+            "ref": self.ref,
+            "bookmarks": [bookmark.to_document() for bookmark in self.bookmarks],
+        }
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, Any]) -> Case:
+        return cls(
+            key=document["key"],
+            type=document["type"],
+            ref=document["ref"],
+            bookmarks=tuple(
+                Bookmark.from_document(bookmark)
+                for bookmark in document.get("bookmarks", [])
+            ),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class GuideSections:
+    """A guide's sections as its latest version has them: each anchor with the id it
+    was given, in the guide's order."""
+
+    by_anchor: Mapping[str, guidance_ids.SectionId]
+
+    def id_at(self, anchor: str) -> guidance_ids.SectionId | None:
+        return self.by_anchor.get(anchor)
+
+    def has(self, section_id: guidance_ids.SectionId) -> bool:
+        return section_id in self.by_anchor.values()
+
+    def anchor_of(self, section_id: guidance_ids.SectionId) -> str | None:
+        return next((a for a, s in self.by_anchor.items() if s == section_id), None)
+
+    def order_of(self, section_id: guidance_ids.SectionId) -> int:
+        """Where the section comes in the guide; one it does not have, after all of
+        them."""
+        in_order = list(self.by_anchor.values())
+        if section_id in in_order:
+            return in_order.index(section_id)
+        return len(in_order)
+
+
+@dataclasses.dataclass(frozen=True)
+class GuideInBrief:
+    """A guide bookmarked to the user's cases, as the side navigation names it: its
+    title, and its sections."""
+
+    title: str | None
+    sections: GuideSections
+
+
 def _recently_opened(openings: Iterable[Opened]) -> tuple[Opened, ...]:
     """The newest `RECENTLY_OPENED_KEPT` guides, each by its latest opening, newest
     first."""
@@ -57,7 +200,7 @@ class User:
     """Someone who has signed in to the hub.
 
     The display name is a copy from their latest sign-in, so a page can name them
-    without asking a directory. `pins` are in the user's own order;
+    without asking a directory. `pins` and `cases` are in the user's own order;
     `recently_opened` is worked out from the stored openings, newest first.
     """
 
@@ -68,6 +211,7 @@ class User:
     created_at: dt.datetime
     pins: tuple[guidance_ids.DocumentId, ...] = ()
     recently_opened: tuple[Opened, ...] = ()
+    cases: tuple[Case, ...] = ()
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -77,6 +221,7 @@ class User:
             "createdAt": self.created_at,
             PINS: list(self.pins),
             RECENTLY_OPENED: [opened.to_document() for opened in self.recently_opened],
+            CASES: [case.to_document() for case in self.cases],
         }
 
     @classmethod
@@ -93,4 +238,5 @@ class User:
                 Opened.from_document(opened)
                 for opened in document.get(RECENTLY_OPENED, [])
             ),
+            cases=tuple(Case.from_document(case) for case in document.get(CASES, [])),
         )

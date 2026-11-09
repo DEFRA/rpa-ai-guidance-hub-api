@@ -158,6 +158,10 @@ class AppConfig(pydantic_settings.BaseSettings):
     )
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
+    feature_sbi_bookmarks: bool = pydantic.Field(
+        default=False,
+        description="Whether a guide can be bookmarked to an SBI, as well as to a Case ID",
+    )
     tracing_header: str = "x-cdp-request-id"
     staging_retention_seconds: int = pydantic.Field(
         default=14400,  # 4 hours in seconds

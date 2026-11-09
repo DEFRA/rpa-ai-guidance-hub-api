@@ -20,6 +20,12 @@ class TestMintingIds:
         assert isinstance(version_id, uuid.UUID)
         assert version_id.version == 7
 
+    def test_a_new_section_id_is_a_time_ordered_uuid(self):
+        section_id = ids.new_section_id()
+
+        assert isinstance(section_id, uuid.UUID)
+        assert section_id.version == 7
+
     def test_ids_minted_one_after_another_sort_in_the_order_they_were_minted(self):
         """What a time-ordered id is for: the newest sorts last, in Mongo's index and
         in a listing of the bucket alike. Nothing reads meaning into the order -

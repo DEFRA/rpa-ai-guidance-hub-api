@@ -188,6 +188,7 @@ class TestAppConfig:
         assert cfg.aws_region == "eu-west-2"
         assert cfg.tracing_header == "x-cdp-request-id"
         assert cfg.enable_metrics is False
+        assert cfg.feature_sbi_bookmarks is False
         assert cfg.floci_endpoint_url is None
         # Required, so read back from the env default conftest.py seeds, not a
         # field default - source_docs_s3_bucket has none.
@@ -222,6 +223,16 @@ class TestAppConfig:
                 CONVERSIONS_CONCURRENCY="0",
                 **VALID_REFERENCE_KWARGS,
             )
+
+    def test_sbi_bookmarks_are_switched_on_by_their_setting(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_SBI_BOOKMARKS", "true")
+
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            **VALID_REFERENCE_KWARGS,
+        )
+
+        assert cfg.feature_sbi_bookmarks is True
 
     def test_validator_parses_the_packed_model_config(self):
         cfg = config.AppConfig(
