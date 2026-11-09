@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import docx
+import lxml.etree
 from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
@@ -120,6 +121,9 @@ def _open(source: bytes) -> docx.document.Document:
         raise DocumentParseError(msg) from exc
     except (ValueError, PackageNotFoundError) as exc:
         msg = "Source is not a Word document."
+        raise DocumentParseError(msg) from exc
+    except lxml.etree.XMLSyntaxError as exc:
+        msg = "Source is not a readable Word document: a part is not well-formed XML."
         raise DocumentParseError(msg) from exc
 
 

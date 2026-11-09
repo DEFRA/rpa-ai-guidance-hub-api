@@ -18,9 +18,11 @@ import pytest
 
 from app.background import consumer, sqs
 from app.guidance import conversion, models, records, schemas, service
+from app.guidance.documents import store
 from app.guidance.documents.staging import store as staging_store
 from app.guidance.parsing import errors
 from app.guidance.parsing import models as parsing_models
+from tests.fixtures import word_documents
 
 _NOW = dt.datetime(2026, 11, 6, 12, 0, tzinfo=dt.UTC)
 
@@ -187,6 +189,20 @@ class TestAFailureRetryingCannotFix:
         staged = await staging.get(job.file_id)
         assert staged.saving_status == "failed"
         assert staged.save_error == str(failure)
+
+    async def test_includes_a_word_document_that_is_not_well_formed(
+        self, handler, body, job, staging, mocker
+    ):
+        """Read for real, so python-docx's own error is what reaches the handler."""
+        mocker.patch.object(
+            store, "read", return_value=word_documents.with_malformed_xml()
+        )
+
+        await handler(body, last_delivery=False)
+
+        staged = await staging.get(job.file_id)
+        assert staged.saving_status == "failed"
+        assert "not well-formed XML" in staged.save_error
 
     @pytest.mark.usefixtures("converts")
     async def test_includes_a_version_id_another_document_has(
