@@ -23,29 +23,54 @@ async def pinned(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user: models.User,
     filters: Mapping[str, Sequence[str | None]],
-) -> tuple[
-    list[tuple[guidance_models.DocumentSummary, int]],
-    dict[str, list[guidance_models.OptionCount]],
-]:
-    """The guides the user has pinned, in their order, that the filters let
-    through, as `GET /guides` lists them, each with its position among all the
-    user's pins; and each filter's values among all the pinned guides, with their
-    counts. A guide that no longer exists is left out, of the list and of the
-    positions, as a patch of the pins leaves it out.
+    s3_client: Any,
+) -> tuple[list[models.ListedPin], dict[str, list[guidance_models.OptionCount]]]:
+    """Every pin of the user's, guides and sections of guides, in their order, whose
+    guide the filters let through, each with its position among all the user's pins;
+    and each filter's values among the guides pinned, whole or by a section, each
+    guide counted once. A guide that no longer exists is left out, of the list and
+    of the positions, as a patch of the pins leaves it out.
 
     Raises:
         guidance_service.UnknownFilterValueError: if a filter value is not in the
             reference data.
     """
-    existing = await guidance_records.existing(database, list(user.pins))
-    live = [pin for pin in user.pins if pin in existing]
-    summaries, counts = await _listed(database, live, filters)
-    listed = [
-        (summaries[pin], position)
+    named = [pin.document_id for pin in user.pins]
+    existing = await guidance_records.existing(database, named)
+    live = [pin for pin in user.pins if pin.document_id in existing]
+    guides = list(dict.fromkeys(pin.document_id for pin in live))
+    summaries, counts = await _listed(database, guides, filters)
+    shown = [
+        (position, pin)
         for position, pin in enumerate(live)
-        if pin in summaries
+        if pin.document_id in summaries
+    ]
+    sections = await guide_sections(
+        database,
+        {pin.document_id for _, pin in shown if pin.section_id is not None},
+        s3_client,
+    )
+    listed = [
+        models.ListedPin(
+            summary=summaries[pin.document_id],
+            pin=pin,
+            anchor=_anchor(pin, sections),
+            position=position,
+        )
+        for position, pin in shown
     ]
     return listed, counts
+
+
+def _anchor(
+    pin: models.Pin,
+    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+) -> str | None:
+    """A pinned section's anchor in its guide's latest version; none for a whole
+    guide, or for a section the guide no longer has."""
+    if pin.section_id is None or pin.document_id not in sections:
+        return None
+    return sections[pin.document_id].anchor_of(pin.section_id)
 
 
 async def recently_opened(
@@ -117,33 +142,25 @@ async def _summaries(
     }
 
 
-async def pinned_titles(
-    database: pymongo.asynchronous.database.AsyncDatabase, user: models.User
-) -> list[tuple[guidance_ids.DocumentId, str | None]]:
-    """The guides the user has pinned, in their order, each with its title, for the
-    side navigation: its newest version's, else what its author called it. A guide
-    that no longer exists is left out."""
-    documents = await guidance_records.find_many(database, list(user.pins))
-    latest = await guidance_records.latest_versions_of(database, list(documents))
-    return [
-        (pin, _title(documents[pin], latest.get(pin)))
-        for pin in user.pins
-        if pin in documents
-    ]
-
-
-async def case_guides(
+async def guides_in_brief(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user: models.User,
     s3_client: Any,
 ) -> dict[guidance_ids.DocumentId, models.GuideInBrief]:
-    """The guides bookmarked to the user's cases, for the side navigation, each with
-    its title, as a pinned guide's, and its sections. A guide that no longer exists
-    is left out."""
-    named = {b.document_id for case in user.cases for b in case.bookmarks}
-    documents = await guidance_records.find_many(database, list(named))
+    """The guides the user's pins and cases name, for the side navigation, each with
+    its title (its newest version's, else what its author called it) and, for a
+    guide with a section pinned or bookmarked, its sections. A guide that no longer
+    exists is left out."""
+    pinned = {pin.document_id for pin in user.pins}
+    sectioned = {pin.document_id for pin in user.pins if pin.section_id is not None}
+    sectioned |= {b.document_id for case in user.cases for b in case.bookmarks}
+    documents = await guidance_records.find_many(database, list(pinned | sectioned))
     latest = await guidance_records.latest_versions_of(database, list(documents))
-    given = await section_ids.of_latest(database, latest, s3_client)
+    given = await section_ids.of_latest(
+        database,
+        {guide: version for guide, version in latest.items() if guide in sectioned},
+        s3_client,
+    )
     return {
         guide: models.GuideInBrief(
             title=_title(document, latest.get(guide)),

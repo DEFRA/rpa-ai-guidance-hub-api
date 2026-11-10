@@ -147,8 +147,8 @@ async def _pinned_ids(client, user_id: str) -> list[str]:
     return [guide["id"] for guide in pinned]
 
 
-def _add(guide, at="/0"):
-    return {"op": "add", "path": at, "value": str(guide)}
+def _add(guide, at="/0", **section):
+    return {"op": "add", "path": at, "value": {"guideId": str(guide), **section}}
 
 
 class TestPins:
@@ -175,7 +175,7 @@ class TestPins:
         status = await _patch(
             client,
             user_id,
-            {"op": "test", "path": "/0", "value": str(guides[0])},
+            {"op": "test", "path": "/0/guideId", "value": str(guides[0])},
             {"op": "move", "from": "/0", "path": "/1"},
         )
 
@@ -209,7 +209,7 @@ class TestPins:
         status = await _patch(
             client,
             user_id,
-            {"op": "test", "path": "/0", "value": str(other)},
+            {"op": "test", "path": "/0/guideId", "value": str(other)},
             {"op": "remove", "path": "/0"},
         )
 
@@ -264,9 +264,10 @@ class TestPins:
 
         user = (await client.get(f"/users/{user_id}")).json()
 
+        whole_guide = {"sectionId": None, "section": None, "heading": None}
         assert user["pinned"] == [
-            {"id": str(second), "title": "Second"},
-            {"id": str(first), "title": "First"},
+            {"id": str(second), "title": "Second", **whole_guide},
+            {"id": str(first), "title": "First", **whole_guide},
         ]
 
     async def test_a_pinned_guide_that_has_gone_is_left_out(self, client, database):
@@ -294,14 +295,85 @@ class TestPins:
         status = await _patch(
             client,
             user_id,
-            {"op": "test", "path": "/0", "value": str(first)},
+            {"op": "test", "path": "/0/guideId", "value": str(first)},
             {"op": "remove", "path": "/0"},
         )
 
         assert status == 204
         assert await _pinned_ids(client, user_id) == [str(second)]
         stored = await database[records.USERS].find_one({"_id": uuid.UUID(user_id)})
-        assert stored["pins"] == [second]
+        assert stored["pins"] == [
+            {"documentId": second, "sectionId": None, "heading": None}
+        ]
+
+    async def test_a_section_pinned_by_its_anchor_is_answered_with_its_heading(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide))
+
+        status = await _patch(
+            client, user_id, _add(guide, section="2-two", heading="2 Two")
+        )
+
+        assert status == 204
+        pinned = (await client.get(f"/users/{user_id}")).json()["pinned"]
+        assert [
+            {key: pin[key] for key in ("id", "title", "section", "heading")}
+            for pin in pinned
+        ] == [
+            {
+                "id": str(guide),
+                "title": "Claims",
+                "section": "2-two",
+                "heading": "2 Two",
+            },
+            {"id": str(guide), "title": "Claims", "section": None, "heading": None},
+        ]
+        assert uuid.UUID(pinned[0]["sectionId"]).version == 7
+        assert pinned[1]["sectionId"] is None
+
+    async def test_a_pinned_section_is_unpinned_by_its_id(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="1-one", heading="1 One"))
+        pinned = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        status = await _patch(
+            client,
+            user_id,
+            {"op": "test", "path": "/0/guideId", "value": str(guide)},
+            {"op": "test", "path": "/0/sectionId", "value": pinned[0]["sectionId"]},
+            {"op": "remove", "path": "/0"},
+        )
+
+        assert status == 204
+        assert await _pinned_ids(client, user_id) == []
+
+    async def test_a_section_the_guide_does_not_have_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+
+        assert await _patch(client, user_id, _add(guide, section="9-gone")) == 422
+        assert await _pinned_ids(client, user_id) == []
+
+    async def test_a_section_id_of_another_guide_is_refused(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        other = await _guide(database, "Payments", content_url=content_url)
+        await _patch(client, user_id, _add(other, section="1-one", heading="1 One"))
+        [pinned] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+        operation = _add(guide, "/-", sectionId=pinned["sectionId"])
+
+        assert await _patch(client, user_id, operation) == 422
+        assert await _pinned_ids(client, user_id) == [str(other)]
 
 
 async def _open(client, user_id: str, guide_id) -> int:
@@ -711,6 +783,57 @@ class TestThePinnedList:
         assert [(item["id"], item["position"]) for item in body["items"]] == [
             (str(first), 0),
             (str(second), 1),
+        ]
+
+    async def test_lists_a_pinned_section_with_its_anchor_and_heading_in_its_place(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        sectioned = await _guide(database, "Claims", content_url=content_url)
+        whole = await _guide(database, "Whole")
+        await _patch(
+            client,
+            user_id,
+            _add(whole),
+            _add(sectioned, section="1-one", heading="1 One"),
+        )
+
+        body = await _listed(client, user_id)
+
+        assert [
+            {key: item[key] for key in ("id", "position", "section", "heading")}
+            for item in body["items"]
+        ] == [
+            {
+                "id": str(sectioned),
+                "position": 0,
+                "section": "1-one",
+                "heading": "1 One",
+            },
+            {"id": str(whole), "position": 1, "section": None, "heading": None},
+        ]
+        assert uuid.UUID(body["items"][0]["sectionId"]).version == 7
+        assert body["items"][1]["sectionId"] is None
+
+    async def test_a_guide_pinned_whole_and_by_a_section_is_listed_for_each_but_counted_once(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        crm = await _guide(
+            database, "CRM", {"systems": ["CRM"]}, content_url=content_url
+        )
+        await _patch(
+            client, user_id, _add(crm), _add(crm, section="1-one", heading="1 One")
+        )
+
+        body = await _listed(client, user_id, system="CRM")
+
+        assert [(item["id"], item["section"]) for item in body["items"]] == [
+            (str(crm), "1-one"),
+            (str(crm), None),
+        ]
+        assert [(o["label"], o["count"]) for o in body["counts"]["system"]] == [
+            ("CRM", 1)
         ]
 
     async def test_no_scheme_chooses_the_pinned_guides_specific_to_no_scheme(

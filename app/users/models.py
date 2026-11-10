@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
 from app.guidance import ids as guidance_ids
+from app.guidance import models as guidance_models
 from app.users import ids
 
 # Who signed in, as the identity provider names them: the tenant and the user's
@@ -18,7 +19,7 @@ IDENTITY = "identity"
 TENANT_ID = f"{IDENTITY}.tenantId"
 OBJECT_ID = f"{IDENTITY}.objectId"
 
-# The guides the user has pinned, in their own order: the ids alone.
+# The guides, and sections of guides, the user has pinned, in their own order.
 PINS = "pins"
 
 # The user's latest openings of guides, in the order they reached the database.
@@ -89,6 +90,32 @@ class Opened:
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> Opened:
         return cls(document_id=document["documentId"], opened_at=document["openedAt"])
+
+
+@dataclasses.dataclass(frozen=True)
+class Pin:
+    """A guide the user has pinned, or a section of one, by the section's id, so that
+    it keeps its section when a new version renumbers it; with the section's heading
+    as it read when it was pinned. A whole guide has neither."""
+
+    document_id: guidance_ids.DocumentId
+    section_id: guidance_ids.SectionId | None = None
+    heading: str | None = None
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "documentId": self.document_id,
+            "sectionId": self.section_id,
+            "heading": self.heading,
+        }
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, Any]) -> Pin:
+        return cls(
+            document_id=document["documentId"],
+            section_id=document.get("sectionId"),
+            heading=document.get("heading"),
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,8 +205,21 @@ class GuideSections:
 
 
 @dataclasses.dataclass(frozen=True)
+class ListedPin:
+    """A pin as the Pinned page lists it: its guide as `GET /guides` lists it, the
+    pin, a section's anchor in the guide's latest version (none for a whole guide,
+    or a section it no longer has), and where the pin is among all the user's
+    pins."""
+
+    summary: guidance_models.DocumentSummary
+    pin: Pin
+    anchor: str | None
+    position: int
+
+
+@dataclasses.dataclass(frozen=True)
 class GuideInBrief:
-    """A guide bookmarked to the user's cases, as the side navigation names it: its
+    """A guide the user's pins or cases name, as the side navigation names it: its
     title, and its sections."""
 
     title: str | None
@@ -209,7 +249,7 @@ class User:
     object_id: str
     display_name: str | None
     created_at: dt.datetime
-    pins: tuple[guidance_ids.DocumentId, ...] = ()
+    pins: tuple[Pin, ...] = ()
     recently_opened: tuple[Opened, ...] = ()
     cases: tuple[Case, ...] = ()
 
@@ -219,7 +259,7 @@ class User:
             IDENTITY: {"tenantId": self.tenant_id, "objectId": self.object_id},
             "displayName": self.display_name,
             "createdAt": self.created_at,
-            PINS: list(self.pins),
+            PINS: [pin.to_document() for pin in self.pins],
             RECENTLY_OPENED: [opened.to_document() for opened in self.recently_opened],
             CASES: [case.to_document() for case in self.cases],
         }
@@ -233,7 +273,7 @@ class User:
             object_id=identity["objectId"],
             display_name=document.get("displayName"),
             created_at=document["createdAt"],
-            pins=tuple(document.get(PINS, [])),
+            pins=tuple(Pin.from_document(pin) for pin in document.get(PINS, [])),
             recently_opened=_recently_opened(
                 Opened.from_document(opened)
                 for opened in document.get(RECENTLY_OPENED, [])

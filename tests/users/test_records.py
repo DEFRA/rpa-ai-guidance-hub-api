@@ -172,20 +172,84 @@ class TestPatchingPins:
 
             async def update_one(self, query, update):
                 ChangedUnderEveryWrite.writes += 1
-                await real.update_one(
-                    {"_id": query["_id"]}, {"$push": {"pins": uuid.uuid7()}}
-                )
+                pin = models.Pin(document_id=uuid.uuid7()).to_document()
+                await real.update_one({"_id": query["_id"]}, {"$push": {"pins": pin}})
                 return await real.update_one(query, update)
 
         changing = {records.USERS: ChangedUnderEveryWrite()}
 
         with pytest.raises(records.ListChangingError):
-            await records.patch_pins(changing, user.id, list)
+            await records.patch_pins(changing, user.id, _unchanged)
 
         assert ChangedUnderEveryWrite.writes > 1
 
     async def test_answers_false_for_a_user_there_is_not(self, database):
-        assert not await records.patch_pins(database, uuid.uuid7(), list)
+        assert not await records.patch_pins(database, uuid.uuid7(), _unchanged)
+
+
+async def _unchanged(pins):
+    return pins
+
+
+class TestConvertingPinsKeptAsIds:
+    """Pins were once kept as bare guide ids; each becomes a pin of that whole
+    guide, once, at startup."""
+
+    async def _stored_pins(self, database, user_id):
+        found = await database[records.USERS].find_one({"_id": user_id})
+        return found.get(models.PINS)
+
+    async def _with_pins(self, database, *stored):
+        user, _ = await _sign_in(database, _object_id())
+        await database[records.USERS].update_one(
+            {"_id": user.id}, {"$set": {models.PINS: list(stored)}}
+        )
+        return user
+
+    async def test_guide_ids_become_pins_of_whole_guides_in_their_order(self, database):
+        first, second = uuid.uuid7(), uuid.uuid7()
+        user = await self._with_pins(database, first, second)
+
+        await records.convert_pins_kept_as_ids(database)
+
+        assert await self._stored_pins(database, user.id) == [
+            models.Pin(document_id=first).to_document(),
+            models.Pin(document_id=second).to_document(),
+        ]
+
+    async def test_pins_kept_as_pins_stay_as_they_are(self, database):
+        section = models.Pin(
+            document_id=uuid.uuid7(), section_id=uuid.uuid7(), heading="1 One"
+        ).to_document()
+        user = await self._with_pins(database, section)
+
+        await records.convert_pins_kept_as_ids(database)
+        await records.convert_pins_kept_as_ids(database)
+
+        assert await self._stored_pins(database, user.id) == [section]
+
+    async def test_a_guide_id_among_pins_becomes_a_pin_and_the_rest_stay(
+        self, database
+    ):
+        guide = uuid.uuid7()
+        section = models.Pin(
+            document_id=uuid.uuid7(), section_id=uuid.uuid7(), heading="1 One"
+        ).to_document()
+        user = await self._with_pins(database, section, guide)
+
+        await records.convert_pins_kept_as_ids(database)
+
+        assert await self._stored_pins(database, user.id) == [
+            section,
+            models.Pin(document_id=guide).to_document(),
+        ]
+
+    async def test_a_user_with_no_pins_is_left_with_none(self, database):
+        user, _ = await _sign_in(database, _object_id())
+
+        await records.convert_pins_kept_as_ids(database)
+
+        assert await records.find(database, user.id) == user
 
 
 class TestRecordingAGuideAsOpened:
