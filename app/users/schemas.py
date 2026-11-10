@@ -229,6 +229,14 @@ class RecentlyOpened(pydantic.BaseModel):
     counts: dict[str, list[guidance_schemas.OptionCount]]
 
 
+class BookmarkedGuides(pydantic.BaseModel):
+    """The guides bookmarked to the user's cases, each once, as `GET /guides` lists
+    them, and each filter's values among them with their counts."""
+
+    items: list[guidance_schemas.DocumentSummary]
+    counts: dict[str, list[guidance_schemas.OptionCount]]
+
+
 class _PatchOperation(pydantic.BaseModel):
     """A JSON Patch operation (RFC 6902) on what its JSON Pointer `path` names."""
 

@@ -102,6 +102,32 @@ async def recently_opened(
     return listed, counts
 
 
+async def bookmarked(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    cases: Sequence[models.Case],
+    filters: Mapping[str, Sequence[str | None]],
+) -> tuple[
+    list[guidance_models.DocumentSummary],
+    dict[str, list[guidance_models.OptionCount]],
+]:
+    """The guides bookmarked to the cases, each once, in the order of the cases and,
+    in each, the order the user put them, that the filters let through, as
+    `GET /guides` lists them; and each filter's values among all those guides, with
+    their counts. A guide that no longer exists is left out.
+
+    Raises:
+        guidance_service.UnknownFilterValueError: if a filter value is not in the
+            reference data.
+    """
+    guides = list(
+        dict.fromkeys(
+            bookmark.document_id for case in cases for bookmark in case.bookmarks
+        )
+    )
+    summaries, counts = await _listed(database, guides, filters)
+    return [summaries[guide] for guide in guides if guide in summaries], counts
+
+
 async def _listed(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[guidance_ids.DocumentId],
