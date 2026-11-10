@@ -21,6 +21,8 @@ from app.guidance import service as guidance_service
 from app.users import cases, ids, json_patch, models, pins, records, schemas, service
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import pymongo.asynchronous.database
 
     from app.guidance import ids as guidance_ids
@@ -263,6 +265,68 @@ async def read_recently_opened(
             schemas.RecentlyOpenedSummary.opened(summary, opened_at)
             for summary, opened_at in listed
         ],
+        counts=guidance_schemas.counts_from_model(counts),
+    )
+
+
+@router.get("/{user_id}/bookmarked-guides")
+async def read_bookmarked_guides(
+    user_id: ids.UserId,
+    database: Database,
+    filters: HubFilters,
+    s3_client: S3Client,
+) -> schemas.BookmarkedGuides:
+    """The user's cases in their order, each with the guides bookmarked to it in the
+    user's order, as `GET /guides` lists them, each with its bookmarked sections in
+    the order the guide has them: each section's anchor, heading and first
+    paragraph. The hub's filters narrow each case's guides, and a case they leave
+    empty is left out; the counts are among all the bookmarked guides, each counted
+    once. A guide that no longer exists is left out."""
+    user = await records.find(database, user_id)
+    if user is None:
+        raise _no_user(user_id)
+    return await _bookmarked(database, user.cases, filters, s3_client)
+
+
+@router.get("/{user_id}/cases/{case_key}/guides")
+async def read_case_guides(
+    user_id: ids.UserId,
+    case_key: ids.CaseKey,
+    database: Database,
+    filters: HubFilters,
+    s3_client: S3Client,
+) -> schemas.BookmarkedGuides:
+    """One of the user's cases, by its key, as `GET /users/{id}/bookmarked-guides`
+    lists it, with that case's guides alone and their counts; listed, with no
+    guides, when the filters leave it empty. 404 for a case the user has not got."""
+    user = await records.find(database, user_id)
+    if user is None:
+        raise _no_user(user_id)
+    case = next((case for case in user.cases if case.key == case_key), None)
+    if case is None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND,
+            detail=f"No case {case_key} for user {user_id}",
+        )
+    return await _bookmarked(database, [case], filters, s3_client, keep_empty=True)
+
+
+async def _bookmarked(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    cases: Sequence[models.Case],
+    filters: dict[str, list[str | None]],
+    s3_client: Any,
+    *,
+    keep_empty: bool = False,
+) -> schemas.BookmarkedGuides:
+    try:
+        listed, counts = await service.bookmarked(
+            database, cases, filters, s3_client, keep_empty=keep_empty
+        )
+    except guidance_service.UnknownFilterValueError as unknown:
+        raise _unprocessable(unknown) from unknown
+    return schemas.BookmarkedGuides(
+        cases=[schemas.BookmarkedCase.from_model(case) for case in listed],
         counts=guidance_schemas.counts_from_model(counts),
     )
 

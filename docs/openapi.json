@@ -26,6 +26,172 @@
         "title": "AddOperation",
         "type": "object"
       },
+      "BookmarkedCase": {
+        "description": "A case, by its key, its type and its reference, with the guides bookmarked to\nit in the user's order.",
+        "properties": {
+          "guides": {
+            "items": {
+              "$ref": "#/components/schemas/BookmarkedGuide"
+            },
+            "title": "Guides",
+            "type": "array"
+          },
+          "key": {
+            "format": "uuid",
+            "title": "Key",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "case",
+              "sbi"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "type",
+          "ref",
+          "guides"
+        ],
+        "title": "BookmarkedCase",
+        "type": "object"
+      },
+      "BookmarkedGuide": {
+        "description": "A guide bookmarked to a case, as `GET /guides` lists it, with its sections\nbookmarked to the case in the order the guide has them.",
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latestVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Version"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/BookmarkedSection"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          }
+        },
+        "required": [
+          "id",
+          "metadata",
+          "source",
+          "createdAt",
+          "latestVersion",
+          "sections"
+        ],
+        "title": "BookmarkedGuide",
+        "type": "object"
+      },
+      "BookmarkedGuides": {
+        "description": "The user's cases, each with the guides bookmarked to it, and each filter's\nvalues among those guides, each guide counted once.",
+        "properties": {
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/BookmarkedCase"
+            },
+            "title": "Cases",
+            "type": "array"
+          },
+          "counts": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/OptionCount"
+              },
+              "type": "array"
+            },
+            "title": "Counts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "cases",
+          "counts"
+        ],
+        "title": "BookmarkedGuides",
+        "type": "object"
+      },
+      "BookmarkedSection": {
+        "description": "A section bookmarked to a case, as the Bookmarked guides page shows it: its\nid; its anchor in the guide's latest version, none for a section the guide no\nlonger has; its heading as it read when it was bookmarked; and the first\nparagraph under it now, as plain text, none for a section with no words of its\nown.",
+        "properties": {
+          "firstParagraph": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firstparagraph"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "sectionId": {
+            "format": "uuid",
+            "title": "Sectionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sectionId",
+          "section",
+          "heading",
+          "firstParagraph"
+        ],
+        "title": "BookmarkedSection",
+        "type": "object"
+      },
       "CaseGuideInBrief": {
         "description": "A guide bookmarked to a case, as the side navigation names it, with its\nbookmarked sections in the order the guide has them.",
         "properties": {
@@ -1873,6 +2039,124 @@
         ]
       }
     },
+    "/users/{user_id}/bookmarked-guides": {
+      "get": {
+        "description": "The user's cases in their order, each with the guides bookmarked to it in the\nuser's order, as `GET /guides` lists them, each with its bookmarked sections in\nthe order the guide has them: each section's anchor, heading and first\nparagraph. The hub's filters narrow each case's guides, and a case they leave\nempty is left out; the counts are among all the bookmarked guides, each counted\nonce. A guide that no longer exists is left out.",
+        "operationId": "read_bookmarked_guides_users__user_id__bookmarked_guides_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Audience"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkedGuides"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Bookmarked Guides",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/users/{user_id}/cases": {
       "patch": {
         "description": "Change the user's cases and the sections of guides bookmarked to them by a\nJSON Patch (sent as `application/json-patch+json`) over the whole list of cases,\neach `{key, type, ref, bookmarks}`, each bookmark `{guideId, sectionId, section,\nheading, createdAt}` with its section at its anchor: `add`, `remove`, `move` and\n`test`, at any depth. A section is kept by its id; one added by its anchor alone\n(`section`) is the section the guide's latest version has there. A new case is\ngiven its key. The patch applies whole or not at all; a case left with no\nbookmarks stays.\n\n409 when a `test` fails, as for a page showing cases that have changed since;\n422 for anything else: an operation that cannot apply, a reference that is not\none (a Case ID is a letter then seven digits, an SBI nine digits from 105000000),\nan SBI where SBIs are switched off, a case or a key twice, a section bookmarked\ntwice to one case, a guide there is not, or a section it has not.",
@@ -1946,6 +2230,134 @@
           }
         ],
         "summary": "Patch Cases",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/{user_id}/cases/{case_key}/guides": {
+      "get": {
+        "description": "One of the user's cases, by its key, as `GET /users/{id}/bookmarked-guides`\nlists it, with that case's guides alone and their counts; listed, with no\nguides, when the filters leave it empty. 404 for a case the user has not got.",
+        "operationId": "read_case_guides_users__user_id__cases__case_key__guides_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "case_key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Audience"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkedGuides"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Case Guides",
         "tags": [
           "users"
         ]

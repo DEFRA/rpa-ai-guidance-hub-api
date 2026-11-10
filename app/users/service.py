@@ -10,6 +10,8 @@ from app.guidance import models as guidance_models
 from app.guidance import records as guidance_records
 from app.guidance import section_ids
 from app.guidance import service as guidance_service
+from app.guidance.documents import paragraphs, reader, store
+from app.guidance.parsing import anchors
 from app.users import models
 
 if TYPE_CHECKING:
@@ -100,6 +102,122 @@ async def recently_opened(
         if guide.document_id in summaries
     ]
     return listed, counts
+
+
+async def bookmarked(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    cases: Sequence[models.Case],
+    filters: Mapping[str, Sequence[str | None]],
+    s3_client: Any,
+    *,
+    keep_empty: bool = False,
+) -> tuple[list[models.BookmarkedCase], dict[str, list[guidance_models.OptionCount]]]:
+    """The cases, in their order, each with the guides bookmarked to it that the
+    filters let through, in the user's order, each with its bookmarked sections in
+    the guide's order; and each filter's values among all the cases' guides, each
+    guide counted once. A case the filters leave empty is left out, unless
+    `keep_empty`; a guide that no longer exists is left out.
+
+    Raises:
+        guidance_service.UnknownFilterValueError: if a filter value is not in the
+            reference data.
+    """
+    guides = list(
+        dict.fromkeys(bookmark.document_id for c in cases for bookmark in c.bookmarks)
+    )
+    summaries, counts = await _listed(database, guides, filters)
+    sections, first_paragraphs = await asyncio.gather(
+        guide_sections(database, summaries, s3_client),
+        _first_paragraphs(database, summaries, s3_client),
+    )
+    listed = [
+        models.BookmarkedCase(
+            case=case,
+            guides=tuple(
+                _bookmarked_guides(case, summaries, sections, first_paragraphs)
+            ),
+        )
+        for case in cases
+    ]
+    return [case for case in listed if case.guides or keep_empty], counts
+
+
+def _bookmarked_guides(
+    case: models.Case,
+    summaries: Mapping[guidance_ids.DocumentId, guidance_models.DocumentSummary],
+    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+    first_paragraphs: Mapping[guidance_ids.DocumentId, Mapping[str, str | None]],
+) -> list[models.BookmarkedGuide]:
+    """The case's guides that `summaries` has, in the order first bookmarked, each
+    with its bookmarked sections in the guide's order."""
+    by_guide: dict[guidance_ids.DocumentId, list[models.Bookmark]] = {}
+    for bookmark in case.bookmarks:
+        by_guide.setdefault(bookmark.document_id, []).append(bookmark)
+    return [
+        models.BookmarkedGuide(
+            summary=summaries[guide],
+            sections=_bookmarked_sections(
+                bookmarks,
+                sections.get(guide, models.GuideSections({})),
+                first_paragraphs.get(guide, {}),
+            ),
+        )
+        for guide, bookmarks in by_guide.items()
+        if guide in summaries
+    ]
+
+
+def _bookmarked_sections(
+    bookmarks: Sequence[models.Bookmark],
+    sections: models.GuideSections,
+    first_paragraphs: Mapping[str, str | None],
+) -> tuple[models.BookmarkedSection, ...]:
+    """A guide's bookmarked sections in the order the guide has them; one it no
+    longer has, last."""
+    in_order = sorted(bookmarks, key=lambda b: sections.order_of(b.section_id))
+    placed = [
+        (bookmark, sections.anchor_of(bookmark.section_id)) for bookmark in in_order
+    ]
+    return tuple(
+        models.BookmarkedSection(
+            section_id=bookmark.section_id,
+            anchor=anchor,
+            heading=bookmark.heading,
+            first_paragraph=None if anchor is None else first_paragraphs.get(anchor),
+        )
+        for bookmark, anchor in placed
+    )
+
+
+async def _first_paragraphs(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    guides: Iterable[guidance_ids.DocumentId],
+    s3_client: Any,
+) -> dict[guidance_ids.DocumentId, dict[str, str | None]]:
+    """Each guide's sections by anchor, with the first paragraph under each, as its
+    latest version has them; none for a guide whose content is not there."""
+    latest = await guidance_records.latest_versions_of(database, list(guides))
+    read = await asyncio.gather(
+        *(
+            asyncio.to_thread(_first_paragraphs_at, version.content_url, s3_client)
+            for version in latest.values()
+        )
+    )
+    return dict(zip(latest, read, strict=True))
+
+
+def _first_paragraphs_at(content_url: str, s3_client: Any) -> dict[str, str | None]:
+    """The first paragraph of each section of the content stored at `content_url`,
+    by the section's anchor; none if nothing is stored there."""
+    stored = store.read(content_url, s3_client=s3_client)
+    if stored is None:
+        return {}
+    document = reader.from_markdown(stored.decode("utf-8"))
+    of_section = anchors.of_document(document.sections)
+    return {
+        of_section[id(section)]: paragraphs.first_of(section.content)
+        for section in document.sections
+    }
 
 
 async def _listed(

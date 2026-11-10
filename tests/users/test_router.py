@@ -961,3 +961,235 @@ class TestTheRecentlyOpenedList:
         response = await client.get(f"/users/{uuid.uuid7()}/recently-opened")
 
         assert response.status_code == 404
+
+
+async def _bookmarked(client, user_id: str, **filters) -> dict:
+    return (
+        await client.get(f"/users/{user_id}/bookmarked-guides", params=filters)
+    ).json()
+
+
+async def _case_guides(client, user_id: str, key: str, **filters) -> httpx2.Response:
+    return await client.get(f"/users/{user_id}/cases/{key}/guides", params=filters)
+
+
+def _case(ref, *bookmarks):
+    """A new case with sections bookmarked to it, each `(guide, anchor, heading)`."""
+    return {
+        "op": "add",
+        "path": "/-",
+        "value": {
+            "type": "case",
+            "ref": ref,
+            "bookmarks": [
+                {"guideId": str(guide), "section": section, "heading": heading}
+                for guide, section, heading in bookmarks
+            ],
+        },
+    }
+
+
+def _guide_ids(case: dict) -> list[str]:
+    return [guide["id"] for guide in case["guides"]]
+
+
+class TestTheBookmarkedGuides:
+    async def test_lists_the_users_cases_in_their_order_each_with_its_guides_in_theirs(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        first = await _guide(database, "First", content_url=content_url)
+        second = await _guide(database, "Second", content_url=content_url)
+        await _patch_cases(
+            client,
+            user_id,
+            _case("W1111111", (second, "2-two", "2 Two"), (first, "1-one", "1 One")),
+            _case("W2222222", (first, "2-two", "2 Two")),
+        )
+
+        body = await _bookmarked(client, user_id)
+
+        assert [(case["type"], case["ref"]) for case in body["cases"]] == [
+            ("case", "W1111111"),
+            ("case", "W2222222"),
+        ]
+        assert [_guide_ids(case) for case in body["cases"]] == [
+            [str(second), str(first)],
+            [str(first)],
+        ]
+
+    async def test_each_case_has_its_key_and_each_guide_is_as_the_hub_lists_it(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(
+            client, user_id, _case("W1234567", (guide, "1-one", "1 One"))
+        )
+        [kept] = await _cases(client, user_id)
+
+        [case] = (await _bookmarked(client, user_id))["cases"]
+
+        [listed] = case["guides"]
+        assert case["key"] == kept["key"]
+        assert listed["latestVersion"]["title"] == "Claims"
+        assert listed["latestVersion"]["versionNumber"] == "1.0"
+        assert listed["metadata"]["goal"] == "About Claims"
+
+    async def test_a_guides_sections_come_in_its_order_with_their_first_paragraphs(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(
+            client,
+            user_id,
+            _case("W1234567", (guide, "2-two", "2 Two"), (guide, "1-one", "1 One")),
+        )
+
+        [case] = (await _bookmarked(client, user_id))["cases"]
+
+        [listed] = case["guides"]
+        assert [
+            (s["section"], s["heading"], s["firstParagraph"])
+            for s in listed["sections"]
+        ] == [("1-one", "1 One", "Text one."), ("2-two", "2 Two", "Text two.")]
+
+    async def test_the_hubs_filters_narrow_each_cases_guides_leaving_out_an_empty_case(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        crm = await _guide(
+            database, "CRM", {"systems": ["CRM"]}, content_url=content_url
+        )
+        siti = await _guide(
+            database, "Siti", {"systems": ["Siti Agri"]}, content_url=content_url
+        )
+        await _patch_cases(
+            client,
+            user_id,
+            _case("W1111111", (siti, "1-one", "1 One"), (crm, "1-one", "1 One")),
+            _case("W2222222", (siti, "1-one", "1 One")),
+        )
+
+        body = await _bookmarked(client, user_id, system="CRM")
+
+        assert [(case["ref"], _guide_ids(case)) for case in body["cases"]] == [
+            ("W1111111", [str(crm)])
+        ]
+
+    async def test_counts_each_bookmarked_guide_once_whatever_its_cases(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        crm = await _guide(
+            database, "CRM", {"systems": ["CRM"]}, content_url=content_url
+        )
+        siti = await _guide(
+            database, "Siti", {"systems": ["Siti Agri"]}, content_url=content_url
+        )
+        await _guide(database, "Not bookmarked", {"systems": ["CRM"]})
+        await _patch_cases(
+            client,
+            user_id,
+            _case("W1111111", (siti, "1-one", "1 One"), (crm, "1-one", "1 One")),
+            _case("W2222222", (siti, "2-two", "2 Two")),
+        )
+
+        body = await _bookmarked(client, user_id, system="CRM")
+
+        assert {o["label"]: o["count"] for o in body["counts"]["system"]} == {
+            "CRM": 1,
+            "Siti Agri": 1,
+        }
+
+    async def test_a_guide_that_has_gone_is_left_out(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        kept = await _guide(database, "Kept", content_url=content_url)
+        gone = await _guide(database, "Gone", content_url=content_url)
+        await _patch_cases(
+            client,
+            user_id,
+            _case("W1234567", (gone, "1-one", "1 One"), (kept, "1-one", "1 One")),
+        )
+        await database[guidance_records.DOCUMENTS].delete_one({"_id": gone})
+
+        [case] = (await _bookmarked(client, user_id))["cases"]
+
+        assert _guide_ids(case) == [str(kept)]
+
+    async def test_a_user_with_no_cases_lists_and_counts_nothing(
+        self, client, database
+    ):
+        user_id = await _user(client)
+        await _guide(database, "Not bookmarked", {"systems": ["CRM"]})
+
+        body = await _bookmarked(client, user_id)
+
+        assert body == {
+            "cases": [],
+            "counts": {"scheme": [], "system": [], "audience": []},
+        }
+
+    async def test_one_case_by_its_key_lists_its_guides_alone(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        first = await _guide(database, "First", content_url=content_url)
+        second = await _guide(database, "Second", content_url=content_url)
+        await _patch_cases(
+            client,
+            user_id,
+            _case("W1111111", (first, "1-one", "1 One")),
+            _case("W2222222", (second, "1-one", "1 One")),
+        )
+        [_, wanted] = await _cases(client, user_id)
+
+        response = await _case_guides(client, user_id, wanted["key"])
+
+        assert response.status_code == 200
+        assert [
+            (case["ref"], _guide_ids(case)) for case in response.json()["cases"]
+        ] == [("W2222222", [str(second)])]
+
+    async def test_one_case_the_filters_leave_empty_is_listed_with_no_guides(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        siti = await _guide(
+            database, "Siti", {"systems": ["Siti Agri"]}, content_url=content_url
+        )
+        await _patch_cases(client, user_id, _case("W1234567", (siti, "1-one", "1 One")))
+        [kept] = await _cases(client, user_id)
+
+        response = await _case_guides(client, user_id, kept["key"], system="CRM")
+
+        assert [(case["ref"], case["guides"]) for case in response.json()["cases"]] == [
+            ("W1234567", [])
+        ]
+
+    async def test_a_case_the_user_has_not_got_is_not_found(self, client):
+        user_id = await _user(client)
+
+        response = await _case_guides(client, user_id, str(uuid.uuid4()))
+
+        assert response.status_code == 404
+
+    @pytest.mark.parametrize(
+        "path", ["bookmarked-guides", f"cases/{uuid.uuid4()}/guides"]
+    )
+    async def test_a_user_there_is_not_is_not_found(self, client, path):
+        response = await client.get(f"/users/{uuid.uuid7()}/{path}")
+
+        assert response.status_code == 404
+
+    async def test_a_filter_value_the_hub_does_not_have_is_refused(self, client):
+        user_id = await _user(client)
+
+        response = await client.get(
+            f"/users/{user_id}/bookmarked-guides", params={"system": "Martian"}
+        )
+
+        assert response.status_code == 422
