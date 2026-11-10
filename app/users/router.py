@@ -286,7 +286,7 @@ async def read_bookmarked_guides(
     user = await records.find(database, user_id)
     if user is None:
         raise _no_user(user_id)
-    cases = [c for c in user.cases if case_key in (None, c.key)]
+    cases = [case for case in user.cases if case_key in (None, case.key)]
     if case_key is not None and not cases:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_404_NOT_FOUND,
@@ -297,7 +297,9 @@ async def read_bookmarked_guides(
     except guidance_service.UnknownFilterValueError as unknown:
         raise _unprocessable(unknown) from unknown
     return schemas.BookmarkedGuides(
-        items=[guidance_schemas.DocumentSummary.from_model(s) for s in listed],
+        items=[
+            guidance_schemas.DocumentSummary.from_model(summary) for summary in listed
+        ],
         counts=guidance_schemas.counts_from_model(counts),
     )
 

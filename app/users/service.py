@@ -120,7 +120,9 @@ async def bookmarked(
             reference data.
     """
     guides = list(
-        dict.fromkeys(bookmark.document_id for c in cases for bookmark in c.bookmarks)
+        dict.fromkeys(
+            bookmark.document_id for case in cases for bookmark in case.bookmarks
+        )
     )
     summaries, counts = await _listed(database, guides, filters)
     return [summaries[guide] for guide in guides if guide in summaries], counts
