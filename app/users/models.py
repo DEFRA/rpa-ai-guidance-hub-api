@@ -218,36 +218,6 @@ class ListedPin:
 
 
 @dataclasses.dataclass(frozen=True)
-class BookmarkedSection:
-    """A section bookmarked to a case, as the Bookmarked guides page shows it: its
-    id; its anchor in the guide's latest version, none for a section the guide no
-    longer has; its heading as it read when it was bookmarked; and the first
-    paragraph under it now, none for a section with no words of its own."""
-
-    section_id: guidance_ids.SectionId
-    anchor: str | None
-    heading: str | None
-    first_paragraph: str | None
-
-
-@dataclasses.dataclass(frozen=True)
-class BookmarkedGuide:
-    """A guide bookmarked to a case, as `GET /guides` lists it, with its sections
-    bookmarked to the case in the order the guide has them."""
-
-    summary: guidance_models.DocumentSummary
-    sections: tuple[BookmarkedSection, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class BookmarkedCase:
-    """A case, with the guides bookmarked to it in the user's order."""
-
-    case: Case
-    guides: tuple[BookmarkedGuide, ...]
-
-
-@dataclasses.dataclass(frozen=True)
 class GuideInBrief:
     """A guide the user's pins or cases name, as the side navigation names it: its
     title, and its sections."""

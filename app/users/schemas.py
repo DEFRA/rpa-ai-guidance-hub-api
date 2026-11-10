@@ -229,67 +229,11 @@ class RecentlyOpened(pydantic.BaseModel):
     counts: dict[str, list[guidance_schemas.OptionCount]]
 
 
-class BookmarkedSection(pydantic.BaseModel):
-    """A section bookmarked to a case, as the Bookmarked guides page shows it: its
-    id; its anchor in the guide's latest version, none for a section the guide no
-    longer has; its heading as it read when it was bookmarked; and the first
-    paragraph under it now, as plain text, none for a section with no words of its
-    own."""
-
-    section_id: guidance_ids.SectionId = pydantic.Field(alias="sectionId")
-    section: str | None
-    heading: str | None
-    first_paragraph: str | None = pydantic.Field(alias="firstParagraph")
-
-    @classmethod
-    def from_model(cls, section: models.BookmarkedSection) -> BookmarkedSection:
-        return cls(
-            sectionId=section.section_id,
-            section=section.anchor,
-            heading=section.heading,
-            firstParagraph=section.first_paragraph,
-        )
-
-
-class BookmarkedGuide(guidance_schemas.DocumentSummary):
-    """A guide bookmarked to a case, as `GET /guides` lists it, with its sections
-    bookmarked to the case in the order the guide has them."""
-
-    sections: list[BookmarkedSection]
-
-    @classmethod
-    def bookmarked(cls, guide: models.BookmarkedGuide) -> BookmarkedGuide:
-        listed = guidance_schemas.DocumentSummary.from_model(guide.summary)
-        return cls(
-            **listed.model_dump(by_alias=True),
-            sections=[BookmarkedSection.from_model(s) for s in guide.sections],
-        )
-
-
-class BookmarkedCase(pydantic.BaseModel):
-    """A case, by its key, its type and its reference, with the guides bookmarked to
-    it in the user's order."""
-
-    key: ids.CaseKey
-    type: models.CaseType
-    ref: str
-    guides: list[BookmarkedGuide]
-
-    @classmethod
-    def from_model(cls, listed: models.BookmarkedCase) -> BookmarkedCase:
-        return cls(
-            key=listed.case.key,
-            type=listed.case.type,
-            ref=listed.case.ref,
-            guides=[BookmarkedGuide.bookmarked(guide) for guide in listed.guides],
-        )
-
-
 class BookmarkedGuides(pydantic.BaseModel):
-    """The user's cases, each with the guides bookmarked to it, and each filter's
-    values among those guides, each guide counted once."""
+    """The guides bookmarked to the user's cases, each once, as `GET /guides` lists
+    them, and each filter's values among them with their counts."""
 
-    cases: list[BookmarkedCase]
+    items: list[guidance_schemas.DocumentSummary]
     counts: dict[str, list[guidance_schemas.OptionCount]]
 
 
