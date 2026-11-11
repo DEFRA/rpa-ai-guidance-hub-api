@@ -36,7 +36,11 @@ async def read_preferences(
 
 @router.patch("/{user_id}")
 async def patch_preferences(
-    user_id: users_ids.UserId, patch: schemas.Preferences, database: Database
+    user_id: users_ids.UserId,
+    patch: Annotated[
+        schemas.Preferences, fastapi.Body(media_type="application/merge-patch+json")
+    ],
+    database: Database,
 ) -> schemas.Preferences:
     """Change the user's preferences by a JSON Merge Patch (sent as
     `application/merge-patch+json`) of the preferences alone: a value sets one, null

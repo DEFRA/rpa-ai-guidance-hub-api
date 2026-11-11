@@ -96,6 +96,14 @@ async def _preferences(client, user_id: uuid.UUID) -> dict:
 
 
 class TestChangingPreferences:
+    def test_a_change_is_documented_as_a_json_merge_patch(self):
+        schema = app.entrypoints.fastapi.openapi_schema(auth=True)
+
+        operation = schema["paths"]["/preferences/{user_id}"]["patch"]
+        assert list(operation["requestBody"]["content"]) == [
+            "application/merge-patch+json"
+        ]
+
     async def test_a_merge_patch_sets_preferences_and_answers_them_all(self, client):
         user_id = uuid.uuid7()
         await _prefer(client, user_id, {"guideFormat": "stepper", "contentsWidth": 412})
