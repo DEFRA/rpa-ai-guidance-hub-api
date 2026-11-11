@@ -661,7 +661,7 @@
       },
       "Preferences": {
         "additionalProperties": false,
-        "description": "How the user likes the hub shown, the same wherever they sign in: a guide's\nformat, its page width, the width of its contents pane and whether its\ninformation shows under its title; and whether the side navigation is folded,\nits width, and whether each of its lists (Pinned guidance, Case bookmarks) is\nfolded. A preference not set is null, and the hub shows its default. They are\nkept by these names.",
+        "description": "How the user likes the hub shown, the same wherever they sign in: a guide's\nformat, its page width, the width of its contents pane and whether its\ninformation shows under its title; and whether the side navigation is folded,\nits width, and whether each of its lists (Pinned guidance, Case bookmarks) is\nfolded. A preference not set is null, and the hub shows its default. They are\nkept by these names.\n\nChanged by a JSON Merge Patch (RFC 7396) of these alone: a value sets the\npreference, null takes it back to its default.",
         "properties": {
           "contentsWidth": {
             "anyOf": [
@@ -1819,6 +1819,63 @@
           }
         ],
         "summary": "Read Preferences",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "patch": {
+        "description": "Change the user's preferences by a JSON Merge Patch (sent as\n`application/merge-patch+json`) of the preferences alone: a value sets one, null\ntakes it back to its default, and the rest stay as they are. Answers every\npreference, null for one not set.\n\n422 for a preference there is not, or a value it cannot take; then nothing\nchanges.",
+        "operationId": "patch_preferences_preferences__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Preferences",
         "tags": [
           "preferences"
         ]

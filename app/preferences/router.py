@@ -32,3 +32,20 @@ async def read_preferences(
 ) -> schemas.Preferences:
     """Every one of the user's preferences, null for one they have not set."""
     return schemas.Preferences.from_model(await records.find(database, user_id))
+
+
+@router.patch("/{user_id}")
+async def patch_preferences(
+    user_id: users_ids.UserId, patch: schemas.Preferences, database: Database
+) -> schemas.Preferences:
+    """Change the user's preferences by a JSON Merge Patch (sent as
+    `application/merge-patch+json`) of the preferences alone: a value sets one, null
+    takes it back to its default, and the rest stay as they are. Answers every
+    preference, null for one not set.
+
+    422 for a preference there is not, or a value it cannot take; then nothing
+    changes.
+    """
+    chosen, cleared = patch.changes()
+    kept = await records.merge(database, user_id, chosen, cleared)
+    return schemas.Preferences.from_model(kept)

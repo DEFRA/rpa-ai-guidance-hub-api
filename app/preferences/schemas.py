@@ -18,7 +18,10 @@ class Preferences(pydantic.BaseModel):
     information shows under its title; and whether the side navigation is folded,
     its width, and whether each of its lists (Pinned guidance, Case bookmarks) is
     folded. A preference not set is null, and the hub shows its default. They are
-    kept by these names."""
+    kept by these names.
+
+    Changed by a JSON Merge Patch (RFC 7396) of these alone: a value sets the
+    preference, null takes it back to its default."""
 
     guide_format: Literal["traditional", "stepper"] | None = pydantic.Field(
         default=None, alias="guideFormat"
@@ -55,6 +58,14 @@ class Preferences(pydantic.BaseModel):
         return cls.model_validate(
             {name: value for name, value in kept.items() if cls._takes(name, value)}
         )
+
+    def changes(self) -> tuple[dict[str, Any], list[str]]:
+        """What this patch sets, by name, and the names of those it takes back to
+        their defaults."""
+        given = self.model_dump(by_alias=True, include=self.model_fields_set)
+        chosen = {name: value for name, value in given.items() if value is not None}
+        cleared = [name for name, value in given.items() if value is None]
+        return chosen, cleared
 
     @classmethod
     def _takes(cls, name: str, value: object) -> bool:
