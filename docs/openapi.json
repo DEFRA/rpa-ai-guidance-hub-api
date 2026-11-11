@@ -26,6 +26,34 @@
         "title": "AddOperation",
         "type": "object"
       },
+      "BookmarkedGuides": {
+        "description": "The guides bookmarked to the user's cases, each once, as `GET /guides` lists\nthem, and each filter's values among them with their counts.",
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/OptionCount"
+              },
+              "type": "array"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "counts"
+        ],
+        "title": "BookmarkedGuides",
+        "type": "object"
+      },
       "CaseGuideInBrief": {
         "description": "A guide bookmarked to a case, as the side navigation names it, with its\nbookmarked sections in the order the guide has them.",
         "properties": {
@@ -1868,6 +1896,143 @@
           }
         ],
         "summary": "Read User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/{user_id}/bookmarked-guides": {
+      "get": {
+        "description": "The guides bookmarked to the user's cases, each once, in the order of the\ncases and, in each, the order the user put them, as `GET /guides` lists them,\nwith the same filters and counts; with `case`, those of that case alone. 404 for\na case the user has not got. A guide that no longer exists is left out.",
+        "operationId": "read_bookmarked_guides_users__user_id__bookmarked_guides_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the guides of the case with this key",
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the guides of the case with this key",
+              "title": "Case"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Audience"
+            }
+          },
+          {
+            "description": "The guides specific to no scheme too",
+            "in": "query",
+            "name": "no_scheme",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The guides specific to no scheme too",
+              "title": "No Scheme",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkedGuides"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Bookmarked Guides",
         "tags": [
           "users"
         ]

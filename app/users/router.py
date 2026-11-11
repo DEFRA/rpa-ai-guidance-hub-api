@@ -267,6 +267,43 @@ async def read_recently_opened(
     )
 
 
+@router.get("/{user_id}/bookmarked-guides")
+async def read_bookmarked_guides(
+    user_id: ids.UserId,
+    database: Database,
+    filters: HubFilters,
+    case_key: Annotated[
+        ids.CaseKey | None,
+        fastapi.Query(
+            alias="case", description="Only the guides of the case with this key"
+        ),
+    ] = None,
+) -> schemas.BookmarkedGuides:
+    """The guides bookmarked to the user's cases, each once, in the order of the
+    cases and, in each, the order the user put them, as `GET /guides` lists them,
+    with the same filters and counts; with `case`, those of that case alone. 404 for
+    a case the user has not got. A guide that no longer exists is left out."""
+    user = await records.find(database, user_id)
+    if user is None:
+        raise _no_user(user_id)
+    cases = [case for case in user.cases if case_key in (None, case.key)]
+    if case_key is not None and not cases:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND,
+            detail=f"No case {case_key} for user {user_id}",
+        )
+    try:
+        listed, counts = await service.bookmarked(database, cases, filters)
+    except guidance_service.UnknownFilterValueError as unknown:
+        raise _unprocessable(unknown) from unknown
+    return schemas.BookmarkedGuides(
+        items=[
+            guidance_schemas.DocumentSummary.from_model(summary) for summary in listed
+        ],
+        counts=guidance_schemas.counts_from_model(counts),
+    )
+
+
 async def _answered(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user: models.User,
