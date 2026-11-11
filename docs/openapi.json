@@ -659,6 +659,115 @@
         "title": "PlacedBookmark",
         "type": "object"
       },
+      "Preferences": {
+        "additionalProperties": false,
+        "description": "How the user likes the hub shown, the same wherever they sign in: a guide's\nformat, its page width, the width of its contents pane and whether its\ninformation shows under its title; and whether the side navigation is folded,\nits width, and whether each of its lists (Pinned guidance, Case bookmarks) is\nfolded. A preference not set is null, and the hub shows its default. They are\nkept by these names.",
+        "properties": {
+          "contentsWidth": {
+            "anyOf": [
+              {
+                "maximum": 560.0,
+                "minimum": 240.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contentswidth"
+          },
+          "guideFormat": {
+            "anyOf": [
+              {
+                "enum": [
+                  "traditional",
+                  "stepper"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guideformat"
+          },
+          "guideInformationShown": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guideinformationshown"
+          },
+          "readingWidth": {
+            "anyOf": [
+              {
+                "enum": [
+                  "standard",
+                  "wide",
+                  "full"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readingwidth"
+          },
+          "sideNavBookmarksCollapsed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sidenavbookmarkscollapsed"
+          },
+          "sideNavCollapsed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sidenavcollapsed"
+          },
+          "sideNavPinnedCollapsed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sidenavpinnedcollapsed"
+          },
+          "sideNavWidth": {
+            "anyOf": [
+              {
+                "maximum": 440.0,
+                "minimum": 220.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sidenavwidth"
+          }
+        },
+        "title": "Preferences",
+        "type": "object"
+      },
       "RecentlyOpened": {
         "description": "The guides the user opened most recently, newest first, as `GET /guides`\nlists them, and each filter's values among them with their counts.",
         "properties": {
@@ -1663,6 +1772,55 @@
         "summary": "Read Content",
         "tags": [
           "guides"
+        ]
+      }
+    },
+    "/preferences/{user_id}": {
+      "get": {
+        "description": "Every one of the user's preferences, null for one they have not set.",
+        "operationId": "read_preferences_preferences__user_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Preferences",
+        "tags": [
+          "preferences"
         ]
       }
     },
