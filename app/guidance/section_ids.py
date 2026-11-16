@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from app.common import mongo_timeouts
 from app.guidance import ids, records
 from app.guidance.documents import reader, store
 from app.guidance.parsing import anchors
@@ -36,17 +37,7 @@ async def of_latest(
     """Each guide's sections by anchor, in its order, with their ids, as its latest
     version (`latest`) has them: given now, from the version's stored content, if it
     has none yet. None for a guide whose content is not there, and none kept."""
-    versions = database[records.VERSIONS]
-    kept = {
-        found["_id"]: _by_anchor(found[_SECTION_IDS])
-        async for found in versions.find(
-            {
-                "_id": {"$in": [version.id for version in latest.values()]},
-                _SECTION_IDS: {"$exists": True},
-            },
-            {_SECTION_IDS: 1},
-        )
-    }
+    kept = await _kept(database, [version.id for version in latest.values()])
 
     found: dict[ids.DocumentId, dict[str, ids.SectionId]] = {}
     for guide, version in latest.items():
@@ -56,6 +47,22 @@ async def of_latest(
             given = {} if at is None else await of_version(database, version.id, at)
         found[guide] = given
     return found
+
+
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
+async def _kept(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    version_ids: Sequence[ids.VersionId],
+) -> dict[ids.VersionId, dict[str, ids.SectionId]]:
+    """The section ids already given, by version, for those of `version_ids` that have
+    any. Timed on its own: `of_latest` also waits on S3, which is not Mongo's time."""
+    return {
+        found["_id"]: _by_anchor(found[_SECTION_IDS])
+        async for found in database[records.VERSIONS].find(
+            {"_id": {"$in": list(version_ids)}, _SECTION_IDS: {"$exists": True}},
+            {_SECTION_IDS: 1},
+        )
+    }
 
 
 def _anchors_at(content_url: str, s3_client: Any) -> list[str] | None:
@@ -69,6 +76,7 @@ def _anchors_at(content_url: str, s3_client: Any) -> list[str] | None:
     return [of_section[id(section)] for section in document.sections]
 
 
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def of_version(
     database: pymongo.asynchronous.database.AsyncDatabase,
     version_id: ids.VersionId,

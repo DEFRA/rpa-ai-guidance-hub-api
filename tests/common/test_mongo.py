@@ -29,7 +29,10 @@ async def test_get_mongo_client_initialization(mocker):
 
     assert client == mock_instance
     mock_client_cls.assert_called_once_with(
-        app_config.get_config().mongo_uri, uuidRepresentation="standard"
+        app_config.get_config().mongo_uri,
+        uuidRepresentation="standard",
+        serverSelectionTimeoutMS=mongo.SERVER_SELECTION_TIMEOUT_MS,
+        connectTimeoutMS=mongo.CONNECT_TIMEOUT_MS,
     )
     mock_db.command.assert_awaited_once_with("ping")
 
@@ -59,6 +62,8 @@ async def test_get_mongo_client_with_custom_tls(mocker):
         "mongodb://localhost:27017",
         tlsCAFile="/path/to/cert.pem",
         uuidRepresentation="standard",
+        serverSelectionTimeoutMS=mongo.SERVER_SELECTION_TIMEOUT_MS,
+        connectTimeoutMS=mongo.CONNECT_TIMEOUT_MS,
     )
 
 

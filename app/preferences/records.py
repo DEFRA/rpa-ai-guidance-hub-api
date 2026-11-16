@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 import pymongo
 
+from app.common import mongo_timeouts
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
 PREFERENCES = "preferences"
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: users_ids.UserId,
@@ -28,6 +31,7 @@ async def find(
     return record or {}
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def merge(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: users_ids.UserId,

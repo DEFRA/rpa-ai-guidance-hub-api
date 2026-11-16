@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import pymongo
 import pymongo.errors
 
+from app.common import mongo_timeouts
 from app.guidance import ids as guidance_ids
 from app.users import ids, models
 
@@ -80,6 +81,7 @@ async def convert_pins_kept_as_ids(
     )
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find_or_create(
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
@@ -124,6 +126,7 @@ async def find_or_create(
     return user, user.id == minted
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase, user_id: ids.UserId
 ) -> models.User | None:
@@ -132,6 +135,7 @@ async def find(
     return None if found is None else models.User.from_document(found)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def record_opened(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
@@ -176,6 +180,7 @@ class ListChangingError(RuntimeError):
     it."""
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def patch_pins(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
@@ -192,6 +197,7 @@ async def patch_pins(
     return await _patch_list(database, user_id, models.PINS, made)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def patch_cases(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
