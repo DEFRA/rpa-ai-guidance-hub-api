@@ -128,7 +128,7 @@ async def patch_pins(
         raise _no_user(user_id)
     named = {pin.document_id for pin in user.pins}
     existing_guides = await guidance_records.existing(database, [*named, *added])
-    if not added <= existing_guides:
+    if not added.issubset(existing_guides):
         missing = "A guide to pin does not exist"
         raise _unprocessable(missing)
     gone = named - existing_guides

@@ -23,7 +23,7 @@ import http
 from functools import wraps
 from logging import getLogger
 from os import environ
-from typing import TYPE_CHECKING, Any, NoReturn, TypeVar, cast
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import fastapi
 import fastapi.responses
@@ -52,8 +52,6 @@ FAST: float = _env_seconds("FAST", 2.0)
 STANDARD: float = _env_seconds("STANDARD", 5.0)
 # Aggregations, ``update_many``/``delete_many``, ``bulk_write``, exports.
 HEAVY: float = _env_seconds("HEAVY", 30.0)
-
-F = TypeVar("F", bound="Callable[..., Awaitable[Any]]")
 
 
 class MongoTimeoutError(RuntimeError):
@@ -95,7 +93,7 @@ def _raise_if_timeout(
     raise MongoTimeoutError(message, operation=operation, timeout=timeout) from error
 
 
-def mongo(timeout: float) -> Callable[[F], F]:
+def mongo[F: Callable[..., Awaitable[Any]]](timeout: float) -> Callable[[F], F]:
     """Wrap an async repository method in a ``pymongo.timeout`` of ``timeout`` seconds."""
 
     def decorate(func: F) -> F:

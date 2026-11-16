@@ -17,8 +17,8 @@ def extract_all_certs() -> dict[str, str]:
         if var_name.startswith("TRUSTSTORE_"):
             try:
                 decoded_value = base64.b64decode(var_value)
-            except binascii.Error as err:
-                logger.error("Error decoding value for %s. Skipping. %s", var_name, err)
+            except binascii.Error:
+                logger.exception("Error decoding value for %s. Skipping.", var_name)
                 continue
             with tempfile.NamedTemporaryFile(
                 mode="wb", delete=False, prefix=var_name, suffix=".pem"
@@ -36,8 +36,8 @@ def load_certs_into_context(certs: dict[str, str]) -> ssl.SSLContext:
         try:
             context.load_verify_locations(certs[key])
             logger.info("Added %s to truststore", key)
-        except (ssl.SSLError, OSError) as err:
-            logger.error("Failed to load cert %s: %s", key, err)
+        except OSError:  # ssl.SSLError is an OSError
+            logger.exception("Failed to load cert %s", key)
     return context
 
 

@@ -67,9 +67,9 @@ async def test_get_mongo_client_with_custom_tls(mocker):
     )
 
 
-async def test_get_mongo_client_returns_existing(mocker):
+async def test_get_mongo_client_returns_existing(mocker, monkeypatch):
     existing_client = mocker.Mock()
-    mongo.client = existing_client
+    monkeypatch.setattr(mongo, "client", existing_client)
 
     mock_client_cls = mocker.patch("app.common.mongo.pymongo.AsyncMongoClient")
 

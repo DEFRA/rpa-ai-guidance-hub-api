@@ -45,11 +45,13 @@ async def lifespan(application: fastapi.FastAPI) -> AsyncGenerator[None]:
     await user_records.convert_pins_kept_as_ids(database)
 
     working = _working_the_queue(application, database)
-    yield
-    await working.stop()
-    if client:
-        await client.close()
-        logger.info("MongoDB client closed")
+    try:
+        yield
+    finally:
+        await working.stop()
+        if client:
+            await client.close()
+            logger.info("MongoDB client closed")
 
 
 def _working_the_queue(
