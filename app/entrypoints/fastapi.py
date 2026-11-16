@@ -13,7 +13,7 @@ import uvicorn
 from app import config as app_config
 from app.auth import service as auth_service
 from app.background import consumer, sqs
-from app.common import aws, mongo, s3, tracing
+from app.common import aws, log_utils, mongo, s3, tracing
 from app.guidance import conversion, records, service
 from app.guidance import router as guidance_router
 from app.guidance.documents.staging import router as staging_router
@@ -150,6 +150,7 @@ app.openapi = lambda: openapi_schema(  # type: ignore[method-assign]
 
 
 def main() -> None:  # pragma: no cover
+    log_utils.install_excepthooks()
     config = app_config.get_config()
 
     if config.http_proxy:

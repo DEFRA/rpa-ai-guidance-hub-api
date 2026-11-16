@@ -10,7 +10,7 @@ def test_extra_fields_filter_with_all_context(mocker):
 
     # Set context values
     mock_trace_id.get.return_value = "test-trace-id"
-    mock_request.get.return_value = {"url": "http://test.com", "method": "GET"}
+    mock_request.get.return_value = {"path": "/test", "method": "GET"}
     mock_response.get.return_value = {"status_code": 200}
 
     # Create a log record
@@ -30,7 +30,7 @@ def test_extra_fields_filter_with_all_context(mocker):
     # Assertions
     assert result is True
     assert record.trace == {"id": "test-trace-id"}
-    assert record.url == {"full": "http://test.com"}
+    assert record.url == {"path": "/test"}
     assert record.http == {
         "request": {"method": "GET"},
         "response": {"status_code": 200},
@@ -98,3 +98,52 @@ def test_endpoint_filter_allows_non_matching_path():
     )
 
     assert log_filter.filter(record) is True
+
+
+def _raised() -> tuple[type[BaseException], BaseException, object]:
+    try:
+        msg = "boom"
+        raise ValueError(msg)
+    except ValueError as error:
+        return type(error), error, error.__traceback__
+
+
+def test_uncaught_exception_is_logged_with_traceback(caplog):
+    exc_type, exc_value, tb = _raised()
+
+    with caplog.at_level(logging.CRITICAL):
+        log_utils._log_uncaught(exc_type, exc_value, tb)  # type: ignore[arg-type]
+
+    record = caplog.records[-1]
+
+    assert record.levelno == logging.CRITICAL
+    assert record.exc_info == (exc_type, exc_value, tb)
+    assert record.event["outcome"] == "failure"  # type: ignore[attr-defined]
+
+
+def test_uncaught_thread_exception_is_logged_with_traceback(caplog):
+    import threading
+
+    exc_type, exc_value, tb = _raised()
+
+    args = threading.ExceptHookArgs(
+        (exc_type, exc_value, tb, threading.current_thread())
+    )
+
+    with caplog.at_level(logging.CRITICAL):
+        log_utils._log_uncaught_in_thread(args)
+
+    assert caplog.records[-1].exc_info == (exc_type, exc_value, tb)
+
+
+def test_install_excepthooks_replaces_the_defaults(mocker):
+    import sys
+    import threading
+
+    mocker.patch.object(sys, "excepthook", sys.excepthook)
+    mocker.patch.object(threading, "excepthook", threading.excepthook)
+
+    log_utils.install_excepthooks()
+
+    assert sys.excepthook is log_utils._log_uncaught
+    assert threading.excepthook is log_utils._log_uncaught_in_thread
