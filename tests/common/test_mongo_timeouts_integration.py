@@ -17,7 +17,7 @@ import pymongo
 import pymongo.errors
 import pytest
 import pytest_asyncio
-from testcontainers.community.mongodb import MongoDbContainer
+from testcontainers.community import mongodb
 
 from app.common import mongo_timeouts
 from app.guidance import ids, records
@@ -30,8 +30,8 @@ _STALLED_COMMANDS = ["find", "aggregate", "insert", "update", "findAndModify"]
 
 
 @pytest.fixture(scope="module")
-def stalling_container() -> Iterator[MongoDbContainer]:
-    container = MongoDbContainer("mongo:7.0")
+def stalling_container() -> Iterator[mongodb.MongoDbContainer]:
+    container = mongodb.MongoDbContainer("mongo:7.0")
     container.with_command("mongod --setParameter enableTestCommands=1")
     with container:
         yield container
@@ -39,7 +39,7 @@ def stalling_container() -> Iterator[MongoDbContainer]:
 
 @pytest_asyncio.fixture(scope="module")
 async def client(
-    stalling_container: MongoDbContainer,
+    stalling_container: mongodb.MongoDbContainer,
 ) -> AsyncIterator[pymongo.AsyncMongoClient]:
     connected: pymongo.AsyncMongoClient = pymongo.AsyncMongoClient(
         stalling_container.get_connection_url(), uuidRepresentation="standard"
@@ -54,9 +54,7 @@ def database(client: pymongo.AsyncMongoClient) -> Any:
     return client[f"timeouts-{uuid.uuid4().hex}"]
 
 
-@pytest_asyncio.fixture
-async def stalled(client: pymongo.AsyncMongoClient) -> AsyncIterator[None]:
-    """Hold every reply for `_STALL_SECONDS`, until the test is over."""
+async def _stall(client: pymongo.AsyncMongoClient, seconds: float) -> None:
     await client.admin.command(
         {
             "configureFailPoint": "failCommand",
@@ -64,12 +62,22 @@ async def stalled(client: pymongo.AsyncMongoClient) -> AsyncIterator[None]:
             "data": {
                 "failCommands": _STALLED_COMMANDS,
                 "blockConnection": True,
-                "blockTimeMS": _STALL_SECONDS * 1000,
+                "blockTimeMS": int(seconds * 1000),
             },
         }
     )
-    yield
+
+
+async def _unstall(client: pymongo.AsyncMongoClient) -> None:
     await client.admin.command({"configureFailPoint": "failCommand", "mode": "off"})
+
+
+@pytest_asyncio.fixture
+async def stalled(client: pymongo.AsyncMongoClient) -> AsyncIterator[None]:
+    """Hold every reply for `_STALL_SECONDS`, until the test is over."""
+    await _stall(client, _STALL_SECONDS)
+    yield
+    await _unstall(client)
 
 
 async def _times_out(call: Any) -> tuple[mongo_timeouts.MongoTimeoutError, float]:
@@ -122,19 +130,27 @@ async def test_a_stalled_aggregation_gives_up_at_the_deadline(database):
     assert elapsed < _GIVE_UP_WITHIN
 
 
-@pytest.mark.usefixtures("stalled")
-async def test_the_deadline_covers_all_the_operations_in_the_method(database):
-    """The deadline is for the method, not for each operation in it."""
+async def test_the_deadline_covers_all_the_operations_in_the_method(client, database):
+    """The deadline is for the method, not for each operation in it: each reply is
+    held for less than the deadline, but together they take longer."""
     things = database["things"]
+    completed = 0
 
     @mongo_timeouts.mongo(_SHORT_TIMEOUT)
     async def several() -> None:
+        nonlocal completed
         for _ in range(10):
             await things.find_one({})
+            completed += 1
 
-    _, elapsed = await _times_out(several)
+    await _stall(client, _SHORT_TIMEOUT / 5)
+    try:
+        _, elapsed = await _times_out(several)
+    finally:
+        await _unstall(client)
 
-    assert elapsed < _GIVE_UP_WITHIN
+    assert 0 < completed < 10  # noqa: PLR2004
+    assert _SHORT_TIMEOUT <= elapsed < _GIVE_UP_WITHIN
 
 
 @pytest.mark.usefixtures("stalled")

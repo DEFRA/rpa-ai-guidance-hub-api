@@ -8,8 +8,8 @@ while non-timeout errors are left to propagate unchanged.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from contextlib import nullcontext
 from typing import Any
 
 import pymongo
@@ -37,7 +37,7 @@ def _record_timeout(mocker):
 
     def fake(timeout: float | None) -> Any:
         captured["seconds"] = timeout
-        return nullcontext()
+        return contextlib.nullcontext()
 
     mocker.patch("app.common.mongo_timeouts.pymongo.timeout", side_effect=fake)
     return captured
@@ -127,3 +127,19 @@ def test_the_app_answers_a_timeout_with_the_handler():
 
     handlers = entrypoint.app.exception_handlers
     assert handlers[mongo_timeouts.MongoTimeoutError] is mongo_timeouts.handle
+
+
+@pytest.mark.parametrize("raw", ["inf", "-inf", "nan", "0", "-1", "soon", ""])
+def test_an_unusable_tier_setting_is_refused_by_name(raw, monkeypatch):
+    monkeypatch.setenv("MONGO_FAST_SECONDS", raw)
+
+    with pytest.raises(ValueError, match="MONGO_FAST_SECONDS"):
+        mongo_timeouts._env_seconds("FAST", 2.0)
+
+
+def test_a_tier_setting_is_read_and_the_default_used_when_unset(monkeypatch):
+    monkeypatch.setenv("MONGO_FAST_SECONDS", "1.5")
+    monkeypatch.delenv("MONGO_HEAVY_SECONDS", raising=False)
+
+    assert mongo_timeouts._env_seconds("FAST", 2.0) == 1.5  # noqa: PLR2004
+    assert mongo_timeouts._env_seconds("HEAVY", 30.0) == 30.0  # noqa: PLR2004

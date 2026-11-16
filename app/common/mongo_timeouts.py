@@ -19,10 +19,11 @@ requests.
 
 from __future__ import annotations
 
+import functools
 import http
-from functools import wraps
-from logging import getLogger
-from os import environ
+import logging
+import math
+import os
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import fastapi
@@ -33,16 +34,30 @@ import pymongo.errors
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # The exception type reported for structured (ECS) logging, so logs can be keyed on it.
 EXCEPTION_TYPE = "MongoTimeout"
 
 
 def _env_seconds(name: str, default: float) -> float:
-    """The timeout for a tier, or ``default`` when ``MONGO_{name}_SECONDS`` is unset."""
-    raw = environ.get(f"MONGO_{name}_SECONDS")
-    return default if raw is None else float(raw)
+    """The timeout for a tier, or ``default`` when ``MONGO_{name}_SECONDS`` is unset.
+
+    Raises:
+        ValueError: if it is set to anything but a finite number above 0.
+    """
+    variable = f"MONGO_{name}_SECONDS"
+    raw = os.environ.get(variable)
+    if raw is None:
+        return default
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = math.nan
+    if not math.isfinite(seconds) or seconds <= 0:
+        message = f"{variable} must be a finite number of seconds above 0, not {raw!r}"
+        raise ValueError(message)
+    return seconds
 
 
 # A single document / indexed lookup: ``find_one``, ``insert_one``, ``update_one`` by
@@ -99,7 +114,7 @@ def mongo[F: Callable[..., Awaitable[Any]]](timeout: float) -> Callable[[F], F]:
     def decorate(func: F) -> F:
         operation = func.__qualname__
 
-        @wraps(func)
+        @functools.wraps(func)
         async def timed(*args: Any, **kwargs: Any) -> Any:
             with pymongo.timeout(timeout):
                 try:
