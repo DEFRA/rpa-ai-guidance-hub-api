@@ -22,5 +22,5 @@ def __put_metric(
 def counter(metric_name: str, value: int) -> None:
     try:
         __put_metric(metric_name, value, "Count")  # type: ignore[call-arg]
-    except Exception as e:
-        logger.error("Error calling put_metric: %s", e)
+    except Exception:
+        logger.exception("Error calling put_metric")
