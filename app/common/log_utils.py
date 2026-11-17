@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import logging.config
@@ -43,18 +44,23 @@ class AccessLogQueryFilter(logging.Filter):
     """Drop the query string from uvicorn's access log lines.
 
     uvicorn logs the path with its query string as the third argument of each
-    `uvicorn.access` record; query values must not reach the logs.
+    `uvicorn.access` record; query values must not reach the logs. Returns a
+    stripped copy for the handler to emit, leaving the original record untouched
+    for any other handler.
     """
 
-    def filter(self, record: logging.LogRecord) -> bool:
+    def filter(self, record: logging.LogRecord) -> logging.LogRecord:
         if record.name != "uvicorn.access" or not isinstance(record.args, tuple):
-            return True
+            return record
 
         args = list(record.args)
-        if len(args) > 2 and isinstance(args[2], str):  # noqa: PLR2004
-            args[2] = args[2].split("?", 1)[0]
-            record.args = tuple(args)
-        return True
+        if len(args) <= 2 or not isinstance(args[2], str) or "?" not in args[2]:  # noqa: PLR2004
+            return record
+
+        args[2] = args[2].split("?", 1)[0]
+        stripped = copy.copy(record)
+        stripped.args = tuple(args)
+        return stripped
 
 
 _logger = logging.getLogger(__name__)

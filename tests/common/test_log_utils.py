@@ -277,25 +277,45 @@ def test_access_log_query_filter_drops_the_query_string():
 
     result = log_utils.AccessLogQueryFilter().filter(record)
 
-    assert result is True
-    assert record.getMessage() == '127.0.0.1:5000 - "GET /guidance HTTP/1.1" 200'
+    assert result.getMessage() == '127.0.0.1:5000 - "GET /guidance HTTP/1.1" 200'
 
 
-def test_access_log_query_filter_keeps_a_path_without_a_query():
-    record = _access_record("/guidance")
-
-    log_utils.AccessLogQueryFilter().filter(record)
-
-    assert record.getMessage() == '127.0.0.1:5000 - "GET /guidance HTTP/1.1" 200'
-
-
-def test_access_log_query_filter_ignores_other_loggers():
-    record = _access_record("/guidance?scheme=sfi", name="app")
+def test_access_log_query_filter_leaves_the_original_record_untouched():
+    record = _access_record("/guidance?scheme=sfi")
 
     log_utils.AccessLogQueryFilter().filter(record)
 
     assert record.args is not None
     assert record.args[2] == "/guidance?scheme=sfi"
+
+
+def test_access_log_query_filter_keeps_a_path_without_a_query():
+    record = _access_record("/guidance")
+
+    result = log_utils.AccessLogQueryFilter().filter(record)
+
+    assert result is record
+
+
+def test_access_log_query_filter_ignores_other_loggers():
+    record = _access_record("/guidance?scheme=sfi", name="app")
+
+    result = log_utils.AccessLogQueryFilter().filter(record)
+
+    assert result is record
+    assert record.args is not None
+    assert record.args[2] == "/guidance?scheme=sfi"
+
+
+def test_access_log_query_filter_strips_the_emitted_line(capsys):
+    handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(log_utils.AccessLogQueryFilter())
+
+    handler.handle(_access_record("/guidance?scheme=sfi"))
+
+    assert capsys.readouterr().out == (
+        '127.0.0.1:5000 - "GET /guidance HTTP/1.1" 200\n'
+    )
 
 
 def test_production_logging_config_filters_access_log_queries():
