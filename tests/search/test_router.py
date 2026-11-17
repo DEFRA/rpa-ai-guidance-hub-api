@@ -13,7 +13,7 @@ import pytest
 
 from app import config
 from app.common import mongo
-from app.entrypoints.fastapi import app
+from app.entrypoints import fastapi as entrypoint
 from app.guidance import ids, models, records
 from app.guidance.documents import store
 from app.search import in_hub, router
@@ -26,14 +26,14 @@ async def database(mongo_database):
     await records.ensure_indexes(mongo_database)
     await mongo_database[records.DOCUMENTS].delete_many({})
     await mongo_database[records.VERSIONS].delete_many({})
-    app.dependency_overrides[mongo.get_db] = lambda: mongo_database
+    entrypoint.app.dependency_overrides[mongo.get_db] = lambda: mongo_database
     yield mongo_database
-    app.dependency_overrides.pop(mongo.get_db, None)
+    entrypoint.app.dependency_overrides.pop(mongo.get_db, None)
 
 
 @pytest.fixture
 async def client():
-    transport = httpx2.ASGITransport(app=app)
+    transport = httpx2.ASGITransport(app=entrypoint.app)
     async with httpx2.AsyncClient(
         transport=transport, base_url="http://test"
     ) as http_client:
