@@ -12,6 +12,12 @@ logger = getLogger(__name__)
 client: pymongo.AsyncMongoClient | None = None
 db: pymongo.asynchronous.database.AsyncDatabase | None = None
 
+# Connection-level guard, independent of the per-operation timeouts in
+# `app.common.mongo_timeouts`. These bound *establishing* a connection / *selecting*
+# a server, so a wedged cluster fails fast instead of hanging the request. 3s each.
+SERVER_SELECTION_TIMEOUT_MS = 3000
+CONNECT_TIMEOUT_MS = 3000
+
 
 async def get_mongo_client() -> pymongo.AsyncMongoClient:
     global client
@@ -27,11 +33,16 @@ async def get_mongo_client() -> pymongo.AsyncMongoClient:
                 config.mongo_uri,
                 tlsCAFile=cert,
                 uuidRepresentation="standard",
+                serverSelectionTimeoutMS=SERVER_SELECTION_TIMEOUT_MS,
+                connectTimeoutMS=CONNECT_TIMEOUT_MS,
             )
         else:
             logger.info("Creating MongoDB client")
             client = pymongo.AsyncMongoClient(
-                config.mongo_uri, uuidRepresentation="standard"
+                config.mongo_uri,
+                uuidRepresentation="standard",
+                serverSelectionTimeoutMS=SERVER_SELECTION_TIMEOUT_MS,
+                connectTimeoutMS=CONNECT_TIMEOUT_MS,
             )
 
         logger.info("Testing MongoDB connection to %s", config.mongo_uri)

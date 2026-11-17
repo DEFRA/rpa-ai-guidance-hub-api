@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import pymongo
 import pymongo.errors
 
+from app.common import mongo_timeouts
 from app.guidance import ids as guidance_ids
 from app.users import ids, models
 
@@ -80,6 +81,7 @@ async def convert_pins_kept_as_ids(
     )
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find_or_create(
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
@@ -124,6 +126,7 @@ async def find_or_create(
     return user, user.id == minted
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase, user_id: ids.UserId
 ) -> models.User | None:
@@ -132,6 +135,7 @@ async def find(
     return None if found is None else models.User.from_document(found)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def record_opened(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,
@@ -217,7 +221,8 @@ async def _patch_list[T](
     between, it is all done again on the list as it now is. So two patches at once
     both apply, each to the other's result, and neither is lost.
 
-    Returns False if there is no such user. Whatever `patched` raises is raised.
+    Returns False if there is no such user. Whatever `patched` raises is raised. Only
+    the read and the conditional write are timed; `patched` is not.
 
     Raises:
         ListChangingError: if the list changed under every attempt.
@@ -227,17 +232,30 @@ async def _patch_list[T](
         if read is None:
             return False
 
-        written = await database[USERS].update_one(
-            {"_id": user_id, **_still(field, read)},
-            {"$set": {field: await patched(read)}},
-        )
-        if written.matched_count == 1:
+        # `patched` may wait on S3, so it runs outside the Mongo deadlines.
+        if await _replace_list(database, user_id, field, read, await patched(read)):
             return True
 
     message = f"The {field} of user {user_id} kept changing"
     raise ListChangingError(message)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
+async def _replace_list(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    user_id: ids.UserId,
+    field: str,
+    read: list[Any],
+    made: list[Any],
+) -> bool:
+    """Set one of the user's lists to `made`, if it is still `read`; whether it was."""
+    written = await database[USERS].update_one(
+        {"_id": user_id, **_still(field, read)}, {"$set": {field: made}}
+    )
+    return written.matched_count == 1
+
+
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def _list_of(
     database: pymongo.asynchronous.database.AsyncDatabase,
     user_id: ids.UserId,

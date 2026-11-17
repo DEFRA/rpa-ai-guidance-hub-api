@@ -72,6 +72,9 @@ or malformed, naming the offending variable. Copy `.env.example` to `.env` for l
 | `MONGO_URI` | for Mongo | MongoDB connection string. The API pings Mongo on startup and exits if it is unreachable | |
 | `MONGO_DATABASE` | no | Database name | `rpa-ai-guidance-hub-api` |
 | `MONGO_TRUSTSTORE` | no | Name of the `TRUSTSTORE_*` env var holding the CA cert for Mongo TLS | `TRUSTSTORE_CDP_ROOT_CA` |
+| `MONGO_FAST_SECONDS` | no | Timeout for single-document Mongo lookups and writes. A timeout answers 503 | `2` |
+| `MONGO_STANDARD_SECONDS` | no | Timeout for filtered finds and counts | `5` |
+| `MONGO_HEAVY_SECONDS` | no | Timeout for aggregations and bulk operations | `30` |
 | `FLOCI_ENDPOINT_URL` | local only | Endpoint of the local AWS emulator ([floci](https://github.com/floci-io/floci)) | |
 | `AWS_REGION` | no | AWS region | `eu-west-2` |
 | `HOST` / `PORT` | no | Bind address and port | `127.0.0.1` / `8085` |

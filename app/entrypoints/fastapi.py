@@ -13,12 +13,13 @@ import uvicorn
 from app import config as app_config
 from app.auth import service as auth_service
 from app.background import consumer, sqs
-from app.common import aws, log_utils, mongo, s3, tracing
+from app.common import aws, log_utils, mongo, mongo_timeouts, s3, tracing
 from app.guidance import conversion, records, service
 from app.guidance import router as guidance_router
 from app.guidance.documents.staging import router as staging_router
 from app.guidance.documents.staging import store as staging_store
 from app.health import router as health_router
+from app.preferences import router as preferences_router
 from app.reference import router as reference_router
 from app.review import router as review_router
 from app.users import records as user_records
@@ -44,11 +45,13 @@ async def lifespan(application: fastapi.FastAPI) -> AsyncGenerator[None]:
     await user_records.convert_pins_kept_as_ids(database)
 
     working = _working_the_queue(application, database)
-    yield
-    await working.stop()
-    if client:
-        await client.close()
-        logger.info("MongoDB client closed")
+    try:
+        yield
+    finally:
+        await working.stop()
+        if client:
+            await client.close()
+            logger.info("MongoDB client closed")
 
 
 def _working_the_queue(
@@ -77,6 +80,7 @@ def _working_the_queue(
 
 
 app = fastapi.FastAPI(lifespan=lifespan, title="RPA AI Guidance Hub API")
+app.add_exception_handler(mongo_timeouts.MongoTimeoutError, mongo_timeouts.handle)
 
 app.add_middleware(tracing.TraceIdMiddleware)
 
@@ -112,6 +116,7 @@ protected_routes.include_router(review_router.router)
 protected_routes.include_router(guidance_router.router)
 protected_routes.include_router(staging_router.router)
 protected_routes.include_router(users_router.router)
+protected_routes.include_router(preferences_router.router)
 
 app.include_router(health_router.router)
 app.include_router(staging_router.callback_router)

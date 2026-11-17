@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any
 
 import pymongo.errors
 
+from app.common import mongo_timeouts
 from app.guidance import ids, models
 
 if TYPE_CHECKING:
@@ -107,6 +108,7 @@ async def ensure_indexes(
         await database[DOCUMENTS].create_index(f"{_METADATA}.{key}")
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find_by_upload(
     database: pymongo.asynchronous.database.AsyncDatabase, upload_id: ids.UploadId
 ) -> models.Document | None:
@@ -115,6 +117,7 @@ async def find_by_upload(
     return None if found is None else models.Document.from_document(found)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Document | None:
@@ -127,6 +130,7 @@ class UnknownCursorError(LookupError):
     """Raised when a page is asked for after a document that is not there."""
 
 
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
 async def list_documents(  # noqa: PLR0913 - each is a separate part of the query
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
@@ -159,6 +163,7 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
     return [models.Document.from_document(document) async for document in cursor]
 
 
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
 async def count_values(
     database: pymongo.asynchronous.database.AsyncDatabase,
     *,
@@ -332,6 +337,7 @@ async def _after(
     ]
 
 
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def matching(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],
@@ -349,6 +355,7 @@ async def matching(
     return {document["_id"] async for document in cursor}
 
 
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def find_many(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],
@@ -361,6 +368,7 @@ async def find_many(
     }
 
 
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def existing(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],
@@ -370,6 +378,7 @@ async def existing(
     return {document["_id"] async for document in cursor}
 
 
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
 async def latest_versions_of(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],
@@ -387,6 +396,7 @@ async def latest_versions_of(
     }
 
 
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def versions_of(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> list[models.Version]:
@@ -395,6 +405,7 @@ async def versions_of(
     return [models.Version.from_document(version) async for version in cursor]
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def latest_version(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Version | None:
@@ -408,6 +419,7 @@ async def latest_version(
     return None if found is None else models.Version.from_document(found)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def create(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document: models.Document,
@@ -428,6 +440,7 @@ async def create(
     return models.Document.from_document(stored)
 
 
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def create_version(
     database: pymongo.asynchronous.database.AsyncDatabase,
     version: models.Version,
