@@ -17,8 +17,9 @@ _SHORTEST_PART_OF_A_WORD = 3
 
 
 def term_of(query: str) -> str:
-    """What a query looks for: its words in lower case, one space between."""
-    return " ".join(query.lower().split())
+    """What a query looks for: its words in lower case, one space between, lowered
+    as a text is (`_lower`), so that the same words always match."""
+    return " ".join(_lower(query).split())
 
 
 def matches_in(text: str, term: str) -> list[tuple[int, int]]:
