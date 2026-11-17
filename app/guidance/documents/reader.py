@@ -96,14 +96,29 @@ def _title_of(lines: list[str]) -> str:
     Read positionally rather than by searching for a `#`, because a line of content
     can begin with one and the title is written where it cannot be mistaken.
     """
-    if not lines:
-        return ""
+    matched = _TITLE.match(lines[0]) if lines and _is_title_line(lines[0]) else None
 
-    matched = _TITLE.match(lines[0])
-    if not matched or _heading(lines[0]):
-        return ""
+    return matched.group(1).strip() if matched else ""
 
-    return matched.group(1).strip()
+
+def _is_title_line(line: str) -> bool:
+    """Whether a first line is the title: one `#`, so not a section's heading."""
+    return bool(_TITLE.match(line)) and not _heading(line)
+
+
+def introduction_of(text: str) -> str:
+    """What `text` prints before its first section heading, without its title line.
+
+    The model has no place for it, so a document the parser wrote has none; an editor
+    can save some, and the hub's page shows it as the guide's introduction.
+    """
+    lines = text.split("\n")
+    start = 1 if lines and _is_title_line(lines[0]) else 0
+    end = start
+    while end < len(lines) and not _heading(lines[end]):
+        end += 1
+
+    return "\n".join(lines[start:end]).strip("\n")
 
 
 @dataclass

@@ -189,11 +189,21 @@ class TestAppConfig:
         assert cfg.tracing_header == "x-cdp-request-id"
         assert cfg.enable_metrics is False
         assert cfg.feature_sbi_bookmarks is False
+        assert cfg.feature_search_one_guide == config.SearchImplementation.HUB_INTERNAL
         assert cfg.floci_endpoint_url is None
         # Required, so read back from the env default conftest.py seeds, not a
         # field default - source_docs_s3_bucket has none.
         assert cfg.source_docs_s3_bucket == "rpa-ai-guidance-hub-source-docs"
         assert cfg.http_proxy is None
+
+    def test_reads_where_search_in_one_guide_is_done(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            FEATURE_SEARCH_ONE_GUIDE="search-api",
+            **VALID_REFERENCE_KWARGS,
+        )
+
+        assert cfg.feature_search_one_guide == config.SearchImplementation.SEARCH_API
 
     def test_works_two_messages_at_once_unless_told(self):
         cfg = config.AppConfig(

@@ -22,6 +22,7 @@ from app.health import router as health_router
 from app.preferences import router as preferences_router
 from app.reference import router as reference_router
 from app.review import router as review_router
+from app.search import router as search_router
 from app.users import records as user_records
 from app.users import router as users_router
 
@@ -117,6 +118,7 @@ protected_routes.include_router(guidance_router.router)
 protected_routes.include_router(staging_router.router)
 protected_routes.include_router(users_router.router)
 protected_routes.include_router(preferences_router.router)
+protected_routes.include_router(search_router.router)
 
 app.include_router(health_router.router)
 app.include_router(staging_router.callback_router)
