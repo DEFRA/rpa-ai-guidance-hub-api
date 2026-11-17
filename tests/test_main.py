@@ -94,6 +94,10 @@ def test_root():
 
 def test_main_sets_proxy_envs(mocker, monkeypatch):
     mocker.patch("app.entrypoints.fastapi.uvicorn.run")
+    # Patched on log_utils, which survives the entrypoint reload below, so main()
+    # does not leave its exception hooks installed for the rest of the test run.
+    mocker.patch("app.common.log_utils.install_excepthooks")
+    mocker.patch("app.common.log_utils.configure_logging")
 
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
@@ -122,6 +126,10 @@ def test_main_sets_proxy_envs(mocker, monkeypatch):
 
 def test_main_no_proxy_in_config(mocker, monkeypatch):
     mocker.patch("app.entrypoints.fastapi.uvicorn.run")
+    # Patched on log_utils, which survives the entrypoint reload below, so main()
+    # does not leave its exception hooks installed for the rest of the test run.
+    mocker.patch("app.common.log_utils.install_excepthooks")
+    mocker.patch("app.common.log_utils.configure_logging")
 
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)

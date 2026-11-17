@@ -39,32 +39,64 @@ class EndpointFilter(logging.Filter):
         return record.getMessage().find(self._path) == -1
 
 
+class AccessLogQueryFilter(logging.Filter):
+    """Drop the query string from uvicorn's access log lines.
+
+    uvicorn logs the path with its query string as the third argument of each
+    `uvicorn.access` record; query values must not reach the logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "uvicorn.access" or not isinstance(record.args, tuple):
+            return True
+
+        args = list(record.args)
+        if len(args) > 2 and isinstance(args[2], str):  # noqa: PLR2004
+            args[2] = args[2].split("?", 1)[0]
+            record.args = tuple(args)
+        return True
+
+
 _logger = logging.getLogger(__name__)
 
-# Only `event.*` and `error.*` survive the platform's ingestion; `error.*` is
+# ECS categorisation: `kind`, `category`, `type` and `outcome` take only ECS's
+# allowed values, so our own name for the event goes in `action`. `error.*` is
 # filled in from `exc_info` by the ECS formatter.
+#
+# The hooks log at ERROR, not CRITICAL: CDP normalises only .NET's "Critical" to
+# "error", so a `critical` line would slip past anything filtering on
+# `log.level: error`. `event.action` is what marks these as uncaught.
 _UNCAUGHT_EVENT = {
-    "type": "uncaught_exception",
+    "kind": "event",
     "category": "process",
+    "type": "error",
+    "action": "uncaught_exception",
     "outcome": "failure",
 }
 
 
-def _ensure_logging_configured() -> None:
+def configure_logging() -> None:
     """Apply `LOG_CONFIG` if nothing has configured logging yet.
 
     uvicorn applies the config only once it starts, so a failure before that (such
-    as invalid settings) would otherwise be logged with no handler at all.
+    as invalid settings) would otherwise be logged with no handler at all. If
+    `LOG_CONFIG` cannot be applied, falls back to basic logging rather than raising,
+    because this also runs inside the exception hooks.
     """
     if logging.getLogger().handlers:
         return
 
     path = os.environ.get("LOG_CONFIG")
-    if path:
+    if not path:
+        logging.basicConfig(level=logging.INFO)
+        return
+
+    try:
         with open(path, encoding="utf-8") as config_file:
             logging.config.dictConfig(json.load(config_file))
-    else:
+    except OSError, ValueError:
         logging.basicConfig(level=logging.INFO)
+        _logger.exception("Could not apply LOG_CONFIG %s, using basic logging", path)
 
 
 def _log_uncaught(
@@ -76,9 +108,9 @@ def _log_uncaught(
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    _ensure_logging_configured()
+    configure_logging()
 
-    _logger.critical(
+    _logger.error(
         "Uncaught exception: %s",
         exc_value,
         exc_info=(exc_type, exc_value, exc_traceback),
@@ -90,9 +122,9 @@ def _log_uncaught_in_thread(args: threading.ExceptHookArgs) -> None:
     if args.exc_value is None or issubclass(args.exc_type, SystemExit):
         return
 
-    _ensure_logging_configured()
+    configure_logging()
 
-    _logger.critical(
+    _logger.error(
         "Uncaught exception in thread %s: %s",
         args.thread.name if args.thread else "unknown",
         args.exc_value,

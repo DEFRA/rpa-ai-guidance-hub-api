@@ -156,6 +156,8 @@ app.openapi = lambda: openapi_schema(  # type: ignore[method-assign]
 
 def main() -> None:  # pragma: no cover
     log_utils.install_excepthooks()
+    # Before config is read, so a config failure is logged in the right format.
+    log_utils.configure_logging()
     config = app_config.get_config()
 
     if config.http_proxy:
