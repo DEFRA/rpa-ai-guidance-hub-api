@@ -52,6 +52,21 @@ class TestASectionHeading:
             ("1-claim--payments", "1 Claim payments\nPay.")
         ]
 
+    def test_is_known_as_the_page_knows_it_by_its_words_and_entities_as_written(self):
+        markdown = (
+            "## [Payment](#detail)\n\nPay.\n\n## 1 Terms &amp; conditions\n\nAgree."
+        )
+
+        assert _texts(markdown) == [
+            ("payment", "Payment\nPay."),
+            ("1-terms-amp-conditions", "1 Terms & conditions\nAgree."),
+        ]
+
+    def test_is_never_an_underlined_one_whose_words_read_on_in_the_section(self):
+        assert _texts("## Claims\n\nPay.\n\nLate\n----\n\nPay late.") == [
+            ("claims", "Claims\nPay.\nLate\nPay late.")
+        ]
+
     def test_keeps_every_word_even_where_it_reads_like_a_numbered_list(self):
         assert _texts("## 2024. Rates\n\nPay.") == [("2024-rates", "2024. Rates\nPay.")]
 

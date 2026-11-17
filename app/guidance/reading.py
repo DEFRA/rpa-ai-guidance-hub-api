@@ -56,7 +56,7 @@ def sections_of(markdown: str) -> list[SectionText]:
             continue
         if _starts_section(token):
             lines = []
-            sections.append((_numbered(_written(tokens[at + 1]), seen), lines))
+            sections.append((_numbered(_as_named(tokens[at + 1]), seen), lines))
         line = _readable(token)
         if line:
             lines.append(line)
@@ -88,9 +88,17 @@ def _title_end(tokens: list[md_token.Token]) -> int | None:
 
 
 def _written(token: md_token.Token) -> str:
-    """An inline token's words as written, every space kept, as the hub's anchors and
-    pins read a heading."""
+    """An inline token's words, every space kept."""
     return "".join(_words(child) for child in token.children or []).strip()
+
+
+def _as_named(token: md_token.Token) -> str:
+    """A heading's words as the hub's page names it: a link's words, not where it
+    goes, every space kept, and an entity as written (`&amp;`)."""
+    return "".join(
+        child.markup if child.info == "entity" else _words(child)
+        for child in token.children or []
+    ).strip()
 
 
 def _numbered(heading: str, seen: dict[str, int]) -> str:
@@ -116,7 +124,7 @@ def _readable(token: md_token.Token) -> str:
 def _words(token: md_token.Token) -> str:
     """The words a token shows: none for a mark or a picture, a space for a line
     break."""
-    if token.type in ("text", "code_inline"):
+    if token.type in ("text", "text_special", "code_inline"):
         return token.content
     if token.type in ("softbreak", "hardbreak"):
         return " "
@@ -139,7 +147,13 @@ class _Reader(markdown_it.MarkdownIt):
 
 @functools.cache
 def _reader() -> markdown_it.MarkdownIt:
-    parser = _Reader("commonmark", {"html": True}).enable(["table", "strikethrough"])
+    # Each entity kept a token of its own (`text_join` would merge it into its text),
+    # so that a heading's anchor can have it as written.
+    parser = (
+        _Reader("commonmark", {"html": True})
+        .enable(["table", "strikethrough"])
+        .disable("text_join")
+    )
     parser.inline.ruler.before("link", "colour_span", _colour_span)
     return parser
 
