@@ -276,22 +276,3 @@ class TestCrossReferences:
         once = document.markdown(PREFIX)
 
         assert reader.from_markdown(once).markdown(PREFIX) == once
-
-
-class TestTheIntroduction:
-    """Text before the first section heading. The model has no place for it, so a
-    round trip never makes one; it is Markdown as an editor can save it, and the
-    hub's page shows it as the guide's introduction."""
-
-    def test_is_what_is_printed_between_the_title_and_the_first_section(self):
-        text = "# Claims\n\nRead this first.\n\nThen this.\n\n## 1 Applying\n\nApply."
-
-        assert reader.introduction_of(text) == "Read this first.\n\nThen this."
-
-    def test_starts_at_the_first_line_of_a_document_with_no_title(self):
-        assert reader.introduction_of("Read this first.\n\n## Applying") == (
-            "Read this first."
-        )
-
-    def test_is_empty_when_a_section_comes_first(self):
-        assert reader.introduction_of("# Claims\n\n## 1 Applying\n\nApply.") == ""

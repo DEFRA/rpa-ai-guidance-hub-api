@@ -30,6 +30,27 @@ class TestASection:
         ]
 
 
+class TestASectionHeading:
+    def test_is_never_a_line_in_a_code_block(self):
+        markdown = (
+            "# Claims\n\n```\n## Not a heading\n```\n\n"
+            "## Steps\n\nRun:\n\n```\n## Example\n```\n\nDone."
+        )
+
+        assert _texts(markdown) == [
+            (None, "## Not a heading"),
+            ("steps", "Steps\nRun:\n## Example\nDone."),
+        ]
+
+    def test_is_never_one_in_a_quote_whose_words_read_on_in_the_section(self):
+        markdown = "## Claims\n\nPay.\n\n> ## Note\n>\n> Pay late."
+
+        assert _texts(markdown) == [("claims", "Claims\nPay.\nNote\nPay late.")]
+
+    def test_keeps_every_word_even_where_it_reads_like_a_numbered_list(self):
+        assert _texts("## 2024. Rates\n\nPay.") == [("2024-rates", "2024. Rates\nPay.")]
+
+
 class TestTheIntroduction:
     def test_is_the_text_before_the_first_section_heading_with_no_anchor(self):
         markdown = "# Paying claims\n\nRead this first.\n\n## 1 Paying\n\nPay."
