@@ -26,11 +26,14 @@ class ContentMissingError(Exception):
 def reader(
     database: pymongo.asynchronous.database.AsyncDatabase, s3_client: Any
 ) -> Callable[[ids.DocumentId], Awaitable[in_hub.Guide | None]]:
-    """Reads a guide from the hub's records and store; None for no guide."""
+    """Reads a guide from the hub's records and store; None for no guide, or one whose
+    document is not recorded yet."""
 
     async def read(guide_id: ids.DocumentId) -> in_hub.Guide | None:
+        # The document is recorded last, so a guide without one is not there yet.
+        document = await records.find(database, guide_id)
         version = await records.latest_version(database, guide_id)
-        if version is None:
+        if document is None or version is None:
             return None
 
         content = await concurrency.run_in_threadpool(
@@ -40,8 +43,7 @@ def reader(
             message = f"Guide {guide_id} is recorded but its content is missing"
             raise ContentMissingError(message)
 
-        document = await records.find(database, guide_id)
-        given = None if document is None else document.metadata.get("guideTitle")
+        given = document.metadata.get("guideTitle")
         return in_hub.Guide(
             version.id, version.title or given or "", content.decode("utf-8")
         )

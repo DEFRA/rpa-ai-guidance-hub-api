@@ -111,6 +111,30 @@ class TestSearchingOneGuide:
 
         assert response.status_code == 404
 
+    async def test_of_a_guide_whose_document_is_not_yet_recorded_is_not_found(
+        self, client, database, mocker
+    ):
+        """A conversion records its version and content first and the document last;
+        until then the guide does not exist, as `GET /guides/{id}` says."""
+        document_id = ids.new_document_id()
+        await records.create_version(
+            database,
+            models.Version(
+                id=ids.new_version_id(),
+                document_id=document_id,
+                content_url=f"s3://docs/{document_id}/1/content.md",
+                title="Claims",
+                created_at=dt.datetime.now(tz=dt.UTC),
+            ),
+        )
+        mocker.patch.object(store, "read", return_value=MARKDOWN.encode())
+
+        response = await client.get(
+            f"/guides/{document_id}/search", params={"q": "pay"}
+        )
+
+        assert response.status_code == 404
+
     async def test_of_a_guide_whose_content_has_gone_is_a_bad_gateway(
         self, client, database, mocker
     ):
