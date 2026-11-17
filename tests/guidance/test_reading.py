@@ -47,6 +47,11 @@ class TestASectionHeading:
 
         assert _texts(markdown) == [("claims", "Claims\nPay.\nNote\nPay late.")]
 
+    def test_is_known_by_its_words_as_written_with_their_spaces_as_pins_know_it(self):
+        assert _texts("## 1 Claim  payments\n\nPay.") == [
+            ("1-claim--payments", "1 Claim payments\nPay.")
+        ]
+
     def test_keeps_every_word_even_where_it_reads_like_a_numbered_list(self):
         assert _texts("## 2024. Rates\n\nPay.") == [("2024-rates", "2024. Rates\nPay.")]
 

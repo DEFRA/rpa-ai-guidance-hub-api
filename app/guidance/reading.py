@@ -56,7 +56,7 @@ def sections_of(markdown: str) -> list[SectionText]:
             continue
         if _starts_section(token):
             lines = []
-            sections.append((_numbered(_readable(tokens[at + 1]), seen), lines))
+            sections.append((_numbered(_written(tokens[at + 1]), seen), lines))
         line = _readable(token)
         if line:
             lines.append(line)
@@ -87,6 +87,12 @@ def _title_end(tokens: list[md_token.Token]) -> int | None:
     return next(at for at, token in enumerate(tokens) if token.type == "heading_close")
 
 
+def _written(token: md_token.Token) -> str:
+    """An inline token's words as written, every space kept, as the hub's anchors and
+    pins read a heading."""
+    return "".join(_words(child) for child in token.children or []).strip()
+
+
 def _numbered(heading: str, seen: dict[str, int]) -> str:
     """A heading's anchor: its words as a slug, numbered when it repeats one before."""
     base = anchors.slugify(heading)
@@ -99,7 +105,7 @@ def _readable(token: md_token.Token) -> str:
     """The words a block token shows, one space between them: an inline token's (a
     heading's, a paragraph's, a cell's), or a code block's; none for any other."""
     if token.type == "inline":
-        words = "".join(_words(child) for child in token.children or [])
+        words = _written(token)
     elif token.type in ("fence", "code_block"):
         words = token.content
     else:
