@@ -70,9 +70,10 @@ def _is_space(text: str, at: int) -> bool:
 
 
 def _lower(text: str) -> str:
-    """Text in lower case, character for character: a character whose lower case is
-    longer is kept as it is, so that a match's place is the same in both."""
+    """Text in one case, character for character, so that `ς` and `Σ` are both `σ`:
+    a character whose folded case is longer is kept as it is, so that a match's place
+    is the same in both."""
     return "".join(
-        lowered if len(lowered := character.lower()) == 1 else character
+        folded if len(folded := character.casefold()) == 1 else character
         for character in text
     )

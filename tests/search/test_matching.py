@@ -22,6 +22,9 @@ class TestAQueryInAnyCase:
     def test_finds_words_whose_lower_case_depends_on_the_letters_round_them(self):
         assert matching.matches_in("ΟΣ claims", matching.term_of("ΟΣ")) == [(0, 2)]
 
+    def test_finds_a_final_sigma_in_either_case(self):
+        assert matching.matches_in("ΟΣ claims", matching.term_of("ος")) == [(0, 2)]
+
 
 class TestMatching:
     def test_finds_a_word_anywhere_in_a_word_in_any_case(self):
