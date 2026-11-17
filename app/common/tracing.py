@@ -26,7 +26,7 @@ class TraceIdMiddleware(BaseHTTPMiddleware):
         if req_trace_id:
             ctx_trace_id.set(req_trace_id)
 
-        ctx_request.set({"url": str(request.url), "method": request.method})
+        ctx_request.set({"path": request.url.path, "method": request.method})
 
         response: fastapi.Response = await call_next(request)
         ctx_response.set({"status_code": response.status_code})
