@@ -25,6 +25,12 @@ class TestAQueryInAnyCase:
     def test_finds_a_final_sigma_in_either_case(self):
         assert matching.matches_in("ΟΣ claims", matching.term_of("ος")) == [(0, 2)]
 
+    def test_finds_a_sharp_s_in_either_case(self):
+        assert (
+            matching.matches_in("STRAẞE", matching.term_of("Straße")),
+            matching.matches_in("Straße", matching.term_of("STRAẞE")),
+        ) == ([(0, 6)], [(0, 6)])
+
 
 class TestMatching:
     def test_finds_a_word_anywhere_in_a_word_in_any_case(self):
