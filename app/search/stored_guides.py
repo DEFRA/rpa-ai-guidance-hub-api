@@ -1,5 +1,4 @@
-"""How the hub's own search reads a guide: its latest version as stored, and the title
-the guide's page shows, the version's own or else the one its author gave."""
+"""How the hub's own search reads a guide: its latest version as stored."""
 
 from __future__ import annotations
 
@@ -43,9 +42,6 @@ def reader(
             message = f"Guide {guide_id} is recorded but its content is missing"
             raise ContentMissingError(message)
 
-        given = document.metadata.get("guideTitle")
-        return in_hub.Guide(
-            version.id, version.title or given or "", content.decode("utf-8")
-        )
+        return in_hub.Guide(version.id, content.decode("utf-8"))
 
     return read

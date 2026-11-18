@@ -1,9 +1,9 @@
 """Search in one guide, done in the hub: a stand-in, to be switched for the search
 service when it does the same.
 
-It reads the guide's latest version, and finds the words in its title and in each
-section's text as a reader sees it (`reading`), by the hub's keyword rule
-(`matching`). A guide is read whole each time: it holds no index.
+It reads the guide's latest version, and finds the words in each section's text as a
+reader sees it (`reading`), by the hub's keyword rule (`matching`). A guide is read
+whole each time: it holds no index.
 """
 
 from __future__ import annotations
@@ -22,11 +22,10 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class Guide:
-    """What a search in one guide reads: its latest version, its title as the page
-    shows it, and the version's Markdown."""
+    """What a search in one guide reads: its latest version, and the version's
+    Markdown."""
 
     version_id: ids.VersionId
-    title: str
     markdown: str
 
 
@@ -50,7 +49,6 @@ class InHubGuideSearch:
         )
         return guide_search.GuideMatches(
             version_id=guide.version_id,
-            title=_matches(guide.title, term),
             sections=tuple(section for section in sections if section.matches),
         )
 

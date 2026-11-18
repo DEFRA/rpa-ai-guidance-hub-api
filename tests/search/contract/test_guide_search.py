@@ -27,7 +27,7 @@ class _Searching(Protocol):
 
     search: guide_search.GuideSearch
 
-    async def stored(self, title: str, markdown: str) -> ids.DocumentId: ...
+    async def stored(self, markdown: str) -> ids.DocumentId: ...
 
     def version_of(self, guide_id: ids.DocumentId) -> ids.VersionId: ...
 
@@ -39,9 +39,9 @@ class _InTheHub:
     def __post_init__(self) -> None:
         self.search = in_hub.InHubGuideSearch(self._read)
 
-    async def stored(self, title: str, markdown: str) -> ids.DocumentId:
+    async def stored(self, markdown: str) -> ids.DocumentId:
         guide_id = ids.new_document_id()
-        self.guides[guide_id] = in_hub.Guide(ids.new_version_id(), title, markdown)
+        self.guides[guide_id] = in_hub.Guide(ids.new_version_id(), markdown)
         return guide_id
 
     def version_of(self, guide_id: ids.DocumentId) -> ids.VersionId:
@@ -62,7 +62,7 @@ class TestSearchingAGuide:
         self, searching
     ):
         guide = await searching.stored(
-            "Claims", "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
+            "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
         )
 
         found = await searching.search.in_guide(guide, "pay")
@@ -74,23 +74,9 @@ class TestSearchingAGuide:
             ),
         )
 
-    async def test_finds_the_words_in_the_guides_title_apart_from_its_sections(
-        self, searching
-    ):
-        guide = await searching.stored(
-            "Overpayments and repayments", "# Claims\n\n## Notes\n\nNone here."
-        )
-
-        found = await searching.search.in_guide(guide, "pay")
-
-        assert (found.title, found.sections) == (
-            (Match(4, 7, "pay"), Match(19, 22, "pay")),
-            (),
-        )
-
     async def test_reads_each_section_as_a_reader_sees_it(self, searching):
         markdown = "## Forms\n\nUse the **claim** [form](https://example.com/pay)."
-        guide = await searching.stored("Claims", markdown)
+        guide = await searching.stored(markdown)
 
         in_the_words = await searching.search.in_guide(guide, "claim form")
         in_the_address = await searching.search.in_guide(guide, "pay")
@@ -104,7 +90,7 @@ class TestSearchingAGuide:
         self, searching
     ):
         guide = await searching.stored(
-            "Claims", "## Notes\n\nPay the claim\nin full.\n\nA claim\n\nin time."
+            "## Notes\n\nPay the claim\nin full.\n\nA claim\n\nin time."
         )
 
         found = await searching.search.in_guide(guide, "claim in")
@@ -117,7 +103,6 @@ class TestSearchingAGuide:
         self, searching
     ):
         guide = await searching.stored(
-            "Claims",
             "# Claims\n\nPay first.\n\n## 1 Notes\n\nNone here.\n\n## 2 Late\n\nPay late.",
         )
 
@@ -129,18 +114,18 @@ class TestSearchingAGuide:
         )
 
     async def test_names_the_version_it_searched(self, searching):
-        guide = await searching.stored("Claims", "## Notes\n\nPay.")
+        guide = await searching.stored("## Notes\n\nPay.")
 
         found = await searching.search.in_guide(guide, "pay")
 
         assert found.version_id == searching.version_of(guide)
 
     async def test_finds_nothing_for_no_words(self, searching):
-        guide = await searching.stored("Claims", "## Notes\n\nPay.")
+        guide = await searching.stored("## Notes\n\nPay.")
 
         found = await searching.search.in_guide(guide, "  ")
 
-        assert (found.title, found.sections) == ((), ())
+        assert found.sections == ()
 
     async def test_finds_no_guide_that_is_not_stored(self, searching):
         assert await searching.search.in_guide(ids.new_document_id(), "pay") is None

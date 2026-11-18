@@ -249,20 +249,13 @@
         "type": "object"
       },
       "GuideMatches": {
-        "description": "Where the words are in the version searched: in the guide's title, and in each\nsection holding them, in the guide's order.",
+        "description": "Where the words are in the version searched: in each section holding them, in\nthe guide's order.",
         "properties": {
           "sections": {
             "items": {
               "$ref": "#/components/schemas/SectionMatches"
             },
             "title": "Sections",
-            "type": "array"
-          },
-          "title": {
-            "items": {
-              "$ref": "#/components/schemas/Match"
-            },
-            "title": "Title",
             "type": "array"
           },
           "versionId": {
@@ -273,7 +266,6 @@
         },
         "required": [
           "versionId",
-          "title",
           "sections"
         ],
         "title": "GuideMatches",
@@ -1861,7 +1853,7 @@
     },
     "/guides/{document_id}/search": {
       "get": {
-        "description": "Where the words are in the guide's latest version: in its title, and in each\nsection that holds them.",
+        "description": "Where the words are in the guide's latest version: in each section that holds\nthem.",
         "operationId": "search_one_guide_guides__document_id__search_get",
         "parameters": [
           {

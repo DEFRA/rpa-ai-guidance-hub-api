@@ -45,8 +45,8 @@ async def search_one_guide(
     q: Annotated[str, fastapi.Query(description="The words to find")],
     search: GuideSearch,
 ) -> schemas.GuideMatches:
-    """Where the words are in the guide's latest version: in its title, and in each
-    section that holds them."""
+    """Where the words are in the guide's latest version: in each section that holds
+    them."""
     try:
         found = await search.in_guide(document_id, q)
     except stored_guides.ContentMissingError as missing:

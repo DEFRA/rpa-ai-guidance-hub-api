@@ -30,11 +30,10 @@ class SectionMatches(pydantic.BaseModel):
 
 
 class GuideMatches(pydantic.BaseModel):
-    """Where the words are in the version searched: in the guide's title, and in each
-    section holding them, in the guide's order."""
+    """Where the words are in the version searched: in each section holding them, in
+    the guide's order."""
 
     version_id: ids.VersionId = pydantic.Field(alias="versionId")
-    title: list[Match]
     sections: list[SectionMatches]
 
     model_config = pydantic.ConfigDict(populate_by_name=True)
@@ -43,7 +42,6 @@ class GuideMatches(pydantic.BaseModel):
     def from_model(cls, found: guide_search.GuideMatches) -> GuideMatches:
         return cls(
             versionId=found.version_id,
-            title=[Match.from_model(match) for match in found.title],
             sections=[
                 SectionMatches(
                     anchor=section.anchor,

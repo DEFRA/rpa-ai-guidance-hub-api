@@ -36,11 +36,10 @@ class SectionMatches:
 
 @dataclasses.dataclass(frozen=True)
 class GuideMatches:
-    """The matches in the version searched: in the guide's title, and in each section
-    holding the words, in the guide's order."""
+    """The matches in the version searched: in each section holding the words, in the
+    guide's order."""
 
     version_id: ids.VersionId
-    title: tuple[Match, ...]
     sections: tuple[SectionMatches, ...]
 
 

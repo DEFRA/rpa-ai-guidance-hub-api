@@ -40,9 +40,7 @@ async def client():
         yield http_client
 
 
-async def _seed(
-    database, *, version_title: str | None, guide_title: str
-) -> tuple[ids.DocumentId, ids.VersionId]:
+async def _seed(database) -> tuple[ids.DocumentId, ids.VersionId]:
     document_id = ids.new_document_id()
     version = await records.create_version(
         database,
@@ -50,7 +48,6 @@ async def _seed(
             id=ids.new_version_id(),
             document_id=document_id,
             content_url=f"s3://docs/{document_id}/1/content.md",
-            title=version_title,
             created_at=dt.datetime.now(tz=dt.UTC),
         ),
     )
@@ -60,7 +57,7 @@ async def _seed(
             id=document_id,
             upload_id=ids.UploadId(str(uuid.uuid4())),
             file_id=ids.FileId(str(uuid.uuid4())),
-            metadata={"guideTitle": guide_title},
+            metadata={},
             created_at=dt.datetime.now(tz=dt.UTC),
         ),
     )
@@ -71,9 +68,7 @@ class TestSearchingOneGuide:
     async def test_answers_where_the_words_are_in_its_latest_version(
         self, client, database, mocker
     ):
-        guide, version = await _seed(
-            database, version_title="Overpayments", guide_title="Claims"
-        )
+        guide, version = await _seed(database)
         mocker.patch.object(store, "read", return_value=MARKDOWN.encode())
 
         response = await client.get(f"/guides/{guide}/search", params={"q": "pay"})
@@ -81,7 +76,6 @@ class TestSearchingOneGuide:
         assert response.status_code == 200
         assert response.json() == {
             "versionId": str(version),
-            "title": [{"start": 4, "end": 7, "text": "pay"}],
             "sections": [
                 {
                     "anchor": "1-paying",
@@ -93,16 +87,6 @@ class TestSearchingOneGuide:
                 }
             ],
         }
-
-    async def test_searches_the_title_the_guide_page_shows_when_the_version_has_none(
-        self, client, database, mocker
-    ):
-        guide, _ = await _seed(database, version_title=None, guide_title="Repayments")
-        mocker.patch.object(store, "read", return_value=MARKDOWN.encode())
-
-        response = await client.get(f"/guides/{guide}/search", params={"q": "pay"})
-
-        assert response.json()["title"] == [{"start": 2, "end": 5, "text": "pay"}]
 
     async def test_of_a_guide_that_never_was_is_not_found(self, client):
         response = await client.get(
@@ -123,7 +107,6 @@ class TestSearchingOneGuide:
                 id=ids.new_version_id(),
                 document_id=document_id,
                 content_url=f"s3://docs/{document_id}/1/content.md",
-                title="Claims",
                 created_at=dt.datetime.now(tz=dt.UTC),
             ),
         )
@@ -140,7 +123,7 @@ class TestSearchingOneGuide:
     ):
         """The record points at something that is not there. Not a 404, which would
         say the guide does not exist when it does."""
-        guide, _ = await _seed(database, version_title="Claims", guide_title="Claims")
+        guide, _ = await _seed(database)
         mocker.patch.object(store, "read", return_value=None)
 
         response = await client.get(f"/guides/{guide}/search", params={"q": "pay"})
