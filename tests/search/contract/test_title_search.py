@@ -180,10 +180,17 @@ class TestFindingAGuideByTitle:
 
         assert await finding.search.like(" – ", limit=8) == ()
 
-    async def test_finds_no_title_unlike_every_one(self, finding):
+    @pytest.mark.parametrize(
+        "words",
+        [
+            pytest.param("xyzzy", id="letters no title has"),
+            pytest.param("hedgerow planting", id="words no title has"),
+        ],
+    )
+    async def test_finds_no_title_unlike_every_one(self, finding, words):
         await finding.stored(TITLES)
 
-        assert await finding.search.like("xyzzy", limit=8) == ()
+        assert await finding.search.like(words, limit=8) == ()
 
 
 def _first(found: tuple[GuideTitle, ...]) -> list[tuple[str, ids.DocumentId]]:
