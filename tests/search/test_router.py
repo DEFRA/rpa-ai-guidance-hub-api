@@ -20,7 +20,7 @@ from app.guidance.documents import store
 from app.search import in_hub, router, search_service
 
 MARKDOWN = "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
-BREACHES = "WG Domestic Revenue and Capital Breaches and Reductions"
+BREACHES = "OHF Riverbank and Pond Breaches and Reductions"
 
 # The settings that say where each search is done.
 ONE_GUIDE = "feature_search_one_guide"

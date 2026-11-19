@@ -19,22 +19,26 @@ from app.search import in_hub, title_search
 
 GuideTitle = title_search.GuideTitle
 
-BREACHES = "WG Domestic Revenue and Capital Breaches and Reductions"
+# The guides of an invented scheme, the Otter Habitat Fund (OHF).
+BREACHES = "OHF Riverbank and Pond Breaches and Reductions"
+SURVEY_RULE = "OHF Claim – Riverbank Survey Rule at Approval"
+MAPPER = "2021 Pond Mapper Basic Navigation Guide"
+CASE_REVIEW = "Final Grant Case Review Guide"
 CHECKLIST = (
-    "WG Revenue Claims Final Payment Checklist – Supervisory Checks Fill in this "
+    "OHF Revenue Claims Final Grant Checklist – Supervisory Checks Fill in this "
     "checklist on screen. — Use the note box at the end to explain a check's result."
 )
 TITLES = (
-    "WG MA Claim – Revenue Option Claim Rule at Signoff",
-    "WG MA Claim – Organic Status Error at Signoff",
-    "WG MA Claim - Claim Refresh Signoff Check",
-    "WG Revenue Claims Processing to Final Payment Guide",
-    "Final Payment Case Review Guide",
+    SURVEY_RULE,
+    "OHF Claim – Missing Survey Photo at Approval",
+    "OHF Claim - Claim Refresh Approval Check",
+    "OHF Revenue Claims Processing to Final Grant Guide",
+    CASE_REVIEW,
     BREACHES,
-    "2019 Field Mapper Basic Navigation Guide",
-    "Contact Desk Basic Navigation and Admin",
-    "Final Payment Awaiting Approval QC Proforma",
-    "WG Revenue Claims Supervisory Checks Guidance",
+    MAPPER,
+    "Helpline Desk Basic Navigation and Admin",
+    "Final Grant Awaiting Approval QC Form",
+    "OHF Revenue Claims Supervisory Checks Guidance",
     CHECKLIST,
 )
 
@@ -78,22 +82,18 @@ class TestFindingAGuideByTitle:
             pytest.param("reducions", BREACHES, id="with a typo"),
             pytest.param("reduct", BREACHES, id="by half a word"),
             pytest.param(
-                "signoff claim rule revenue",
-                "WG MA Claim – Revenue Option Claim Rule at Signoff",
+                "approval survey rule riverbank",
+                SURVEY_RULE,
                 id="with its words in another order",
             ),
+            pytest.param("pond mapper navigation", MAPPER, id="by some of its words"),
             pytest.param(
-                "field mapper navigation",
-                "2019 Field Mapper Basic Navigation Guide",
-                id="by some of its words",
-            ),
-            pytest.param(
-                "final payment case",
-                "Final Payment Case Review Guide",
+                "final grant case",
+                CASE_REVIEW,
                 id="by the words that start it, among titles sharing most of them",
             ),
             pytest.param(
-                "WG Revenue Claims Final Payment Checklist - Supervisory Checks",
+                "OHF Revenue Claims Final Grant Checklist - Supervisory Checks",
                 CHECKLIST,
                 id="by the start of a long title",
             ),
