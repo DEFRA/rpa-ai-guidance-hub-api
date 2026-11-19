@@ -16,7 +16,7 @@ from app.common import mongo
 from app.entrypoints import fastapi as entrypoint
 from app.guidance import ids, models, records
 from app.guidance.documents import store
-from app.search import in_hub, router
+from app.search import in_hub, router, search_service
 
 MARKDOWN = "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
 
@@ -139,16 +139,31 @@ class TestChoosingWhereOneGuideIsSearched:
 
         assert isinstance(chosen, in_hub.InHubGuideSearch)
 
-    def test_the_search_api_is_not_built_yet(self, database, mocker):
-        mocker.patch.object(
-            config,
-            "get_config",
-            return_value=config.get_config().model_copy(
-                update={
-                    "feature_search_one_guide": config.SearchImplementation.SEARCH_API
-                }
-            ),
-        )
+    def test_the_search_api_is_chosen_when_the_environment_says_so(
+        self, database, mocker
+    ):
+        _configure(mocker, search_api_base_url="http://search.test")
 
-        with pytest.raises(NotImplementedError, match="search API"):
+        chosen = router.get_guide_search(database, s3_client=None)
+
+        assert isinstance(chosen, search_service.SearchServiceGuideSearch)
+
+    def test_the_search_api_needs_its_address(self, database, mocker):
+        _configure(mocker, search_api_base_url=None)
+
+        with pytest.raises(RuntimeError, match="SEARCH_API_BASE_URL"):
             router.get_guide_search(database, s3_client=None)
+
+
+def _configure(mocker, *, search_api_base_url: str | None) -> None:
+    """Search in one guide goes to the search API, at the address given."""
+    mocker.patch.object(
+        config,
+        "get_config",
+        return_value=config.get_config().model_copy(
+            update={
+                "feature_search_one_guide": config.SearchImplementation.SEARCH_API,
+                "search_api_base_url": search_api_base_url,
+            }
+        ),
+    )
