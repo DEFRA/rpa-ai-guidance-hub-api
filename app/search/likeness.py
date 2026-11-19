@@ -19,7 +19,7 @@ import unicodedata
 
 from rapidfuzz import fuzz
 
-LEAST_ALIKE = 60
+LEAST_ALIKE: int = 60
 
 
 def score(wanted: str, title: str) -> float:

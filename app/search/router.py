@@ -24,14 +24,14 @@ if TYPE_CHECKING:
 
 router = fastapi.APIRouter(prefix="/guides", tags=["search"])
 # Not under /guides, where GET /guides/{document_id} would take "titles" for an id.
-titles_router = fastapi.APIRouter(prefix="/search", tags=["search"])
+titles_router: fastapi.APIRouter = fastapi.APIRouter(prefix="/search", tags=["search"])
 
 Database = Annotated[
     "pymongo.asynchronous.database.AsyncDatabase", fastapi.Depends(mongo.get_db)
 ]
 S3Client = Annotated[Any, fastapi.Depends(s3.get_s3_client)]
 
-_SEARCH_API = config.SearchImplementation.SEARCH_API
+_SEARCH_API: config.SearchImplementation = config.SearchImplementation.SEARCH_API
 
 
 def get_guide_search(
