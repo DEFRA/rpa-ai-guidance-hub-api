@@ -1,9 +1,11 @@
-"""Search in one guide, done in the hub: a stand-in, to be switched for the search
-service when it does the same.
+"""Searches done in the hub: stand-ins, to be switched for the search service when it
+does the same. They hold no index.
 
-It reads the guide's latest version, and finds the words in each section's text as a
-reader sees it (`reading`), by the hub's keyword rule (`matching`). A guide is read
-whole each time: it holds no index.
+Search in one guide reads the guide's latest version, and finds the words in each
+section's text as a reader sees it (`reading`), by the hub's keyword rule (`matching`).
+
+Finding guides by title reads every guide's title, and ranks those like the one given
+by the hub's rule for titles (`likeness`).
 """
 
 from __future__ import annotations
@@ -12,10 +14,10 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from app.guidance import reading
-from app.search import guide_search, matching
+from app.search import guide_search, likeness, matching, title_search
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from app.guidance import ids
 
@@ -51,6 +53,25 @@ class InHubGuideSearch:
             version_id=guide.version_id,
             sections=tuple(section for section in sections if section.matches),
         )
+
+
+class InHubTitleSearch:
+    def __init__(
+        self,
+        read_titles: Callable[[], Awaitable[Sequence[title_search.GuideTitle]]],
+    ) -> None:
+        self._read_titles = read_titles
+
+    async def like(self, title: str, limit: int) -> tuple[title_search.GuideTitle, ...]:
+        scored = [
+            (likeness.score(title, guide.title), guide)
+            for guide in await self._read_titles()
+        ]
+        alike = sorted(
+            ((score, guide) for score, guide in scored if score > 0),
+            key=lambda pair: (-pair[0], pair[1].title),
+        )
+        return tuple(guide for _, guide in alike[:limit])
 
 
 def _matches(text: str, term: str) -> tuple[guide_search.Match, ...]:
