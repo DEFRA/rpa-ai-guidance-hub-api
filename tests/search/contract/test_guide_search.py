@@ -114,14 +114,14 @@ class _InTheSearchService:
         return self.versions[guide_id]
 
     async def _until_searchable(self, guide_id: ids.DocumentId) -> None:
-        tries = int(self.seconds_to_wait / self.seconds_between_tries)
-        for _ in range(tries):
-            if await self.search.in_guide(guide_id, "any") is not None:
-                return
-            await asyncio.sleep(self.seconds_between_tries)
-        pytest.fail(
-            f"The search service did not serve guide {guide_id} in {self.seconds_to_wait} seconds"
-        )
+        try:
+            async with asyncio.timeout(self.seconds_to_wait):
+                while await self.search.in_guide(guide_id, "any") is None:
+                    await asyncio.sleep(self.seconds_between_tries)
+        except TimeoutError:
+            pytest.fail(
+                f"The search service did not serve guide {guide_id} in {self.seconds_to_wait} seconds"
+            )
 
 
 @pytest.fixture(
