@@ -278,6 +278,22 @@ those tests fail rather than skip. Everything else runs offline.
 `AppConfig` is a singleton, so a test that needs different config should mock
 `app.config.get_config` rather than change env vars after import.
 
+#### Search contract tests
+
+`tests/search/contract/` says what each implementation of a search must do, and runs each test once
+for each implementation. Nothing starts the search service for them: they run against it only when
+`SEARCH_SERVICE_FOR_CONTRACT_TESTS` gives the address of one that is running, and skip it
+otherwise. In the local stack (`rpa-ai-guidance-hub-dev`) it is at `http://localhost:8086`:
+
+```bash
+SEARCH_SERVICE_FOR_CONTRACT_TESTS=http://localhost:8086 uv run pytest tests/search/contract
+```
+
+Each test publishes a guide to the search service and waits up to 30 seconds until it can be
+searched, so set the service's `INDEX_REFRESH_INTERVAL_SECONDS` low (1 is enough). A test the
+search service cannot pass yet is in `_InTheSearchService.expected_failures`, with the reason. The
+test fails when the service starts to pass it, so the list stays true.
+
 #### Auth tests
 
 `tests/auth/` exercises the real authentication flow offline: a request goes through
