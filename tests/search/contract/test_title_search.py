@@ -4,18 +4,24 @@ Each test runs once for each implementation the hub can switch to. A guide is fo
 a title like its own: with a typo, half a word, its words in another order, only some
 of them, or more. The guide meant comes first.
 
+Against the search service, see `search_service_under_test`.
+
 All fixture text is invented.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from typing import Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 import pytest
 
 from app.guidance import ids
-from app.search import in_hub, title_search
+from app.search import in_hub, search_service, title_search
+from tests.search.contract import search_service_under_test as under_test
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 GuideTitle = title_search.GuideTitle
 
@@ -48,11 +54,20 @@ class _Finding(Protocol):
 
     search: title_search.TitleSearch
 
+    # The tests it cannot pass yet, by name, each with the reason.
+    expected_failures: ClassVar[dict[str, str]]
+
     async def stored(self, titles: tuple[str, ...]) -> dict[str, ids.DocumentId]: ...
+
+    async def deleted(self) -> None:
+        """Deletes the guides it stored."""
+        ...
 
 
 @dataclasses.dataclass
 class _InTheHub:
+    expected_failures: ClassVar[dict[str, str]] = {}
+
     guides: list[GuideTitle] = dataclasses.field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -68,11 +83,51 @@ class _InTheHub:
     async def _read(self) -> list[GuideTitle]:
         return self.guides
 
+    async def deleted(self) -> None:
+        self.guides.clear()
 
-@pytest.fixture(params=[_InTheHub], ids=["in the hub"])
-def finding(request: pytest.FixtureRequest) -> _Finding:
-    implementation: type[_Finding] = request.param
-    return implementation()
+
+@dataclasses.dataclass
+class _InTheSearchService:
+    """Publishes the guides to the search service, and waits until it can search them."""
+
+    expected_failures: ClassVar[dict[str, str]] = {
+        "test_finds_a_guide_by_more_words_than_its_title_has": (
+            "Every word given must be in the title, so a title given with a year added "
+            "finds nothing"
+        ),
+    }
+
+    published: under_test.Published = dataclasses.field(
+        default_factory=under_test.Published
+    )
+
+    def __post_init__(self) -> None:
+        self.search = search_service.SearchServiceTitleSearch(self.published.address)
+
+    async def stored(self, titles: tuple[str, ...]) -> dict[str, ids.DocumentId]:
+        kept = {
+            title: await self.published.guide(f"## Notes\n\n{title}.", title)
+            for title in titles
+        }
+        await self.published.until_searchable()
+        return kept
+
+    async def deleted(self) -> None:
+        await self.published.deleted()
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(_InTheHub, id="in the hub"),
+        under_test.param(_InTheSearchService),
+    ]
+)
+async def finding(request: pytest.FixtureRequest) -> AsyncIterator[_Finding]:
+    under_test.expect_failures(request, request.param)
+    implementation: _Finding = request.param()
+    yield implementation
+    await implementation.deleted()
 
 
 class TestFindingAGuideByTitle:
@@ -97,7 +152,6 @@ class TestFindingAGuideByTitle:
                 CHECKLIST,
                 id="by the start of a long title",
             ),
-            pytest.param(f"{BREACHES} 2024", BREACHES, id="by more words than it has"),
         ],
     )
     async def test_puts_the_guide_meant_first(self, finding, words, title):
@@ -105,7 +159,14 @@ class TestFindingAGuideByTitle:
 
         found = await finding.search.like(words, limit=8)
 
-        assert (found[0].title, found[0].guide_id) == (title, kept[title])
+        assert _first(found) == [(title, kept[title])]
+
+    async def test_finds_a_guide_by_more_words_than_its_title_has(self, finding):
+        kept = await finding.stored(TITLES)
+
+        found = await finding.search.like(f"{BREACHES} 2024", limit=8)
+
+        assert _first(found) == [(BREACHES, kept[BREACHES])]
 
     async def test_gives_no_more_than_asked_for(self, finding):
         await finding.stored(TITLES)
@@ -123,3 +184,8 @@ class TestFindingAGuideByTitle:
         await finding.stored(TITLES)
 
         assert await finding.search.like("xyzzy", limit=8) == ()
+
+
+def _first(found: tuple[GuideTitle, ...]) -> list[tuple[str, ids.DocumentId]]:
+    """The guide found first, by title then id, or none."""
+    return [(guide.title, guide.guide_id) for guide in found[:1]]

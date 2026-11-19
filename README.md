@@ -289,10 +289,11 @@ otherwise. In the local stack (`rpa-ai-guidance-hub-dev`) it is at `http://local
 SEARCH_SERVICE_FOR_CONTRACT_TESTS=http://localhost:8086 uv run pytest tests/search/contract
 ```
 
-Each test publishes a guide to the search service and waits up to 30 seconds until it can be
-searched, so set the service's `INDEX_REFRESH_INTERVAL_SECONDS` low (1 is enough). A test the
-search service cannot pass yet is in `_InTheSearchService.expected_failures`, with the reason. The
-test fails when the service starts to pass it, so the list stays true.
+Each test publishes its guides to the search service, waits up to 30 seconds until it can search
+them, and deletes them after; so set the service's `INDEX_REFRESH_INTERVAL_SECONDS` low (1 is
+enough). A test the search service cannot pass yet is in the `expected_failures` of the module's
+`_InTheSearchService`, with the reason. The test fails when the service starts to pass it, so the
+list stays true. `tests/search/contract/search_service_under_test.py` holds what the modules share.
 
 #### Auth tests
 
