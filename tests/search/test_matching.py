@@ -67,6 +67,22 @@ class TestMatching:
     def test_takes_a_block_break_as_the_edge_of_a_word(self):
         assert matching.matches_in("pay\ncs", "cs") == [(4, 6)]
 
+    def test_finds_a_code_only_where_no_letter_or_digit_runs_on_from_it(self):
+        assert matching.matches_in("BE3, BE31 and SBE3 (BE3)", "be3") == [
+            (0, 3),
+            (20, 23),
+        ]
+
+    def test_finds_a_section_number_only_where_it_is_whole(self):
+        assert matching.matches_in("See 1.1, not 11.1 or 1.12", "1.1") == [(4, 7)]
+
+    def test_finds_a_phrase_with_a_code_at_either_end_only_where_the_code_is_whole(
+        self,
+    ):
+        assert matching.matches_in(
+            "SBE3 option BE31; BE3 option BE3", "be3 option be3"
+        ) == [(18, 32)]
+
     def test_places_a_match_where_the_text_has_it_after_a_letter_lower_case_is_longer(
         self,
     ):
