@@ -22,6 +22,10 @@ from app.search import in_hub, router, search_service
 MARKDOWN = "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
 BREACHES = "WG Domestic Revenue and Capital Breaches and Reductions"
 
+# The settings that say where each search is done.
+ONE_GUIDE = "feature_search_one_guide"
+ALL_TITLES = "feature_search_all_titles"
+
 
 @pytest.fixture(autouse=True)
 async def database(mongo_database):
@@ -228,27 +232,51 @@ class TestChoosingWhereOneGuideIsSearched:
     def test_the_search_api_is_chosen_when_the_environment_says_so(
         self, database, mocker
     ):
-        _configure(mocker, search_api_base_url="http://search.test")
+        _configure(mocker, ONE_GUIDE, search_api_base_url="http://search.test")
 
         chosen = router.get_guide_search(database, s3_client=None)
 
         assert isinstance(chosen, search_service.SearchServiceGuideSearch)
 
     def test_the_search_api_needs_its_address(self, database, mocker):
-        _configure(mocker, search_api_base_url=None)
+        _configure(mocker, ONE_GUIDE, search_api_base_url=None)
 
         with pytest.raises(RuntimeError, match="SEARCH_API_BASE_URL"):
             router.get_guide_search(database, s3_client=None)
 
 
-def _configure(mocker, *, search_api_base_url: str | None) -> None:
-    """Search in one guide goes to the search API, at the address given."""
+class TestChoosingWhereGuidesAreFoundByTitle:
+    def test_the_hub_internal_search_is_chosen_unless_the_environment_says_otherwise(
+        self, database
+    ):
+        chosen = router.get_title_search(database)
+
+        assert isinstance(chosen, in_hub.InHubTitleSearch)
+
+    def test_the_search_api_is_chosen_when_the_environment_says_so(
+        self, database, mocker
+    ):
+        _configure(mocker, ALL_TITLES, search_api_base_url="http://search.test")
+
+        chosen = router.get_title_search(database)
+
+        assert isinstance(chosen, search_service.SearchServiceTitleSearch)
+
+    def test_the_search_api_needs_its_address(self, database, mocker):
+        _configure(mocker, ALL_TITLES, search_api_base_url=None)
+
+        with pytest.raises(RuntimeError, match="SEARCH_API_BASE_URL"):
+            router.get_title_search(database)
+
+
+def _configure(mocker, feature: str, *, search_api_base_url: str | None) -> None:
+    """The search that `feature` names goes to the search API, at the address given."""
     mocker.patch.object(
         config,
         "get_config",
         return_value=config.get_config().model_copy(
             update={
-                "feature_search_one_guide": config.SearchImplementation.SEARCH_API,
+                feature: config.SearchImplementation.SEARCH_API,
                 "search_api_base_url": search_api_base_url,
             }
         ),

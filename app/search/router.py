@@ -1,6 +1,5 @@
-"""Search in one guide, and finding guides by title, over HTTP. The guide's page asks
-for search in one guide; this API chooses where it is done (`FEATURE_SEARCH_ONE_GUIDE`).
-Finding guides by title is done in the hub."""
+"""Search in one guide, and finding guides by title, over HTTP. This API chooses where
+each is done: `FEATURE_SEARCH_ONE_GUIDE` and `FEATURE_SEARCH_ALL_TITLES`."""
 
 from __future__ import annotations
 
@@ -32,18 +31,26 @@ Database = Annotated[
 ]
 S3Client = Annotated[Any, fastapi.Depends(s3.get_s3_client)]
 
+_SEARCH_API = config.SearchImplementation.SEARCH_API
+
 
 def get_guide_search(
     database: Database, s3_client: S3Client
 ) -> guide_search.GuideSearch:
     """The search in one guide that the environment chooses."""
-    settings = config.get_config()
-    if settings.feature_search_one_guide is not config.SearchImplementation.SEARCH_API:
+    if config.get_config().feature_search_one_guide is not _SEARCH_API:
         return in_hub.InHubGuideSearch(stored_guides.reader(database, s3_client))
-    if settings.search_api_base_url is None:
-        message = "Search in one guide goes to the search API, but SEARCH_API_BASE_URL is not set"
+    return search_service.SearchServiceGuideSearch(
+        _search_api_address("Search in one guide")
+    )
+
+
+def _search_api_address(search: str) -> str:
+    address = config.get_config().search_api_base_url
+    if address is None:
+        message = f"{search} goes to the search API, but SEARCH_API_BASE_URL is not set"
         raise RuntimeError(message)
-    return search_service.SearchServiceGuideSearch(settings.search_api_base_url)
+    return address
 
 
 GuideSearch = Annotated[guide_search.GuideSearch, fastapi.Depends(get_guide_search)]
@@ -73,8 +80,12 @@ async def search_one_guide(
 
 
 def get_title_search(database: Database) -> title_search.TitleSearch:
-    """Finding guides by title, done in the hub."""
-    return in_hub.InHubTitleSearch(stored_guides.titles_reader(database))
+    """Finding guides by title, where the environment chooses."""
+    if config.get_config().feature_search_all_titles is not _SEARCH_API:
+        return in_hub.InHubTitleSearch(stored_guides.titles_reader(database))
+    return search_service.SearchServiceTitleSearch(
+        _search_api_address("Finding guides by title")
+    )
 
 
 TitleSearch = Annotated[title_search.TitleSearch, fastapi.Depends(get_title_search)]

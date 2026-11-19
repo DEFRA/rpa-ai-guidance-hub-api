@@ -190,6 +190,7 @@ class TestAppConfig:
         assert cfg.enable_metrics is False
         assert cfg.feature_sbi_bookmarks is False
         assert cfg.feature_search_one_guide == config.SearchImplementation.HUB_INTERNAL
+        assert cfg.feature_search_all_titles == config.SearchImplementation.HUB_INTERNAL
         assert cfg.floci_endpoint_url is None
         # Required, so read back from the env default conftest.py seeds, not a
         # field default - source_docs_s3_bucket has none.
@@ -204,6 +205,15 @@ class TestAppConfig:
         )
 
         assert cfg.feature_search_one_guide == config.SearchImplementation.SEARCH_API
+
+    def test_reads_where_guides_are_found_by_title(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            FEATURE_SEARCH_ALL_TITLES="search-api",
+            **VALID_REFERENCE_KWARGS,
+        )
+
+        assert cfg.feature_search_all_titles == config.SearchImplementation.SEARCH_API
 
     def test_works_two_messages_at_once_unless_told(self):
         cfg = config.AppConfig(
