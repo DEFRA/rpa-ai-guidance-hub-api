@@ -79,26 +79,36 @@ class Published:
 
     async def until_searchable(self) -> None:
         """Waits until the service serves an index with every guide published."""
+        await self._until(served=True)
+
+    async def deleted(self) -> None:
+        """Deletes every guide, then waits until the service serves none of them: it
+        deletes after it answers, so the next test could find them otherwise."""
+        async with http_client.create_async_client() as client:
+            responses = [
+                await client.delete(
+                    f"{self.address}/documents/{guide_id}/versions/{version_id}"
+                )
+                for guide_id, version_id in self.versions.items()
+            ]
+        for response in responses:
+            response.raise_for_status()
+        await self._until(served=False)
+
+    async def _until(self, *, served: bool) -> None:
         try:
             async with (
                 asyncio.timeout(SECONDS_TO_WAIT),
                 http_client.create_async_client() as client,
             ):
                 for guide_id in self.versions:
-                    while not await _is_indexed(client, self.address, guide_id):
+                    while await _is_indexed(client, self.address, guide_id) != served:
                         await asyncio.sleep(SECONDS_BETWEEN_TRIES)
         except TimeoutError:
+            change = "serve" if served else "stop serving"
             pytest.fail(
-                f"The search service did not serve the guides in {SECONDS_TO_WAIT} seconds"
+                f"The search service did not {change} the guides in {SECONDS_TO_WAIT} seconds"
             )
-
-    async def deleted(self) -> None:
-        async with http_client.create_async_client() as client:
-            for guide_id, version_id in self.versions.items():
-                response = await client.delete(
-                    f"{self.address}/documents/{guide_id}/versions/{version_id}"
-                )
-                response.raise_for_status()
 
 
 async def _is_indexed(
