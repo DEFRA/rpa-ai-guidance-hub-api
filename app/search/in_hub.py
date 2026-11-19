@@ -69,7 +69,7 @@ class InHubTitleSearch:
         ]
         alike = sorted(
             ((score, guide) for score, guide in scored if score > 0),
-            key=lambda pair: (-pair[0], pair[1].title),
+            key=lambda pair: (-pair[0], pair[1].title, str(pair[1].guide_id)),
         )
         return tuple(guide for _, guide in alike[:limit])
 
