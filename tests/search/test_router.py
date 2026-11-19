@@ -1,4 +1,5 @@
-"""Searching one guide over HTTP, against a real MongoDB; the guide's content is stubbed.
+"""Searching one guide, and finding guides by title, over HTTP, against a real MongoDB;
+the guide's content is stubbed.
 
 All fixture text is invented.
 """
@@ -19,6 +20,7 @@ from app.guidance.documents import store
 from app.search import in_hub, router, search_service
 
 MARKDOWN = "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
+BREACHES = "WG Domestic Revenue and Capital Breaches and Reductions"
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +64,38 @@ async def _seed(database) -> tuple[ids.DocumentId, ids.VersionId]:
         ),
     )
     return document_id, version.id
+
+
+async def _titled(
+    database, *titles: str | None, recorded: bool = True
+) -> ids.DocumentId:
+    """A guide with a version for each title, the last the newest; its document is
+    recorded last, as a conversion records it."""
+    document_id = ids.new_document_id()
+    first = dt.datetime.now(tz=dt.UTC)
+    for minutes, title in enumerate(titles):
+        await records.create_version(
+            database,
+            models.Version(
+                id=ids.new_version_id(),
+                document_id=document_id,
+                content_url=f"s3://docs/{document_id}/{minutes}/content.md",
+                created_at=first + dt.timedelta(minutes=minutes),
+                title=title,
+            ),
+        )
+    if recorded:
+        await records.create(
+            database,
+            models.Document(
+                id=document_id,
+                upload_id=ids.UploadId(str(uuid.uuid4())),
+                file_id=ids.FileId(str(uuid.uuid4())),
+                metadata={},
+                created_at=first,
+            ),
+        )
+    return document_id
 
 
 class TestSearchingOneGuide:
@@ -129,6 +163,58 @@ class TestSearchingOneGuide:
         response = await client.get(f"/guides/{guide}/search", params={"q": "pay"})
 
         assert response.status_code == 502
+
+
+class TestFindingGuidesByTitle:
+    async def test_answers_the_guides_with_titles_like_the_words(
+        self, client, database
+    ):
+        meant = await _titled(database, BREACHES)
+        await _titled(database, "Hedgerow Planting")
+
+        response = await client.get("/search/titles", params={"q": "reducions"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "items": [{"guideId": str(meant), "title": BREACHES}]
+        }
+
+    async def test_takes_each_guides_title_from_its_newest_version(
+        self, client, database
+    ):
+        guide = await _titled(database, "Old Reductions Guide", BREACHES)
+
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert response.json()["items"] == [{"guideId": str(guide), "title": BREACHES}]
+
+    async def test_leaves_out_a_guide_whose_document_is_not_yet_recorded(
+        self, client, database
+    ):
+        await _titled(database, BREACHES, recorded=False)
+
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert response.json()["items"] == []
+
+    async def test_leaves_out_a_guide_whose_newest_version_has_no_title(
+        self, client, database
+    ):
+        await _titled(database, BREACHES, None)
+
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert response.json()["items"] == []
+
+    async def test_answers_no_more_guides_than_asked_for(self, client, database):
+        for scheme in ("WG", "HG", "MG"):
+            await _titled(database, f"{scheme} Breaches and Reductions")
+
+        response = await client.get(
+            "/search/titles", params={"q": "reductions", "limit": 2}
+        )
+
+        assert len(response.json()["items"]) == 2  # noqa: PLR2004 - the limit
 
 
 class TestChoosingWhereOneGuideIsSearched:

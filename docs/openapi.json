@@ -271,6 +271,43 @@
         "title": "GuideMatches",
         "type": "object"
       },
+      "GuideTitle": {
+        "description": "A guide, by its id and its latest version's title.",
+        "properties": {
+          "guideId": {
+            "format": "uuid",
+            "title": "Guideid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "guideId",
+          "title"
+        ],
+        "title": "GuideTitle",
+        "type": "object"
+      },
+      "GuideTitles": {
+        "description": "The guides with titles like the words, the likest first.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GuideTitle"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "GuideTitles",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2154,6 +2191,72 @@
           }
         ],
         "summary": "Root"
+      }
+    },
+    "/search/titles": {
+      "get": {
+        "description": "The guides with titles like the words, the likest first: with a typo, half a\nword, the words in another order, or only some of them.",
+        "operationId": "find_guides_by_title_search_titles_get",
+        "parameters": [
+          {
+            "description": "A title, or words like it",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "A title, or words like it",
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many guides to answer at most",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "How many guides to answer at most",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideTitles"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Find Guides By Title",
+        "tags": [
+          "search"
+        ]
       }
     },
     "/users": {

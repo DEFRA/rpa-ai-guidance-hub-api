@@ -1,5 +1,6 @@
-"""Search in one guide, over HTTP. The guide's page asks here; this API chooses where
-the search is done (`FEATURE_SEARCH_ONE_GUIDE`)."""
+"""Search in one guide, and finding guides by title, over HTTP. The guide's page asks
+for search in one guide; this API chooses where it is done (`FEATURE_SEARCH_ONE_GUIDE`).
+Finding guides by title is done in the hub."""
 
 from __future__ import annotations
 
@@ -10,12 +11,21 @@ import fastapi
 from app import config
 from app.common import mongo, s3
 from app.guidance import ids
-from app.search import guide_search, in_hub, schemas, search_service, stored_guides
+from app.search import (
+    guide_search,
+    in_hub,
+    schemas,
+    search_service,
+    stored_guides,
+    title_search,
+)
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
 
 router = fastapi.APIRouter(prefix="/guides", tags=["search"])
+# Not under /guides, where GET /guides/{document_id} would take "titles" for an id.
+titles_router = fastapi.APIRouter(prefix="/search", tags=["search"])
 
 Database = Annotated[
     "pymongo.asynchronous.database.AsyncDatabase", fastapi.Depends(mongo.get_db)
@@ -60,3 +70,29 @@ async def search_one_guide(
             detail=f"No guide {document_id}",
         )
     return schemas.GuideMatches.from_model(found)
+
+
+def get_title_search(database: Database) -> title_search.TitleSearch:
+    """Finding guides by title, done in the hub."""
+    return in_hub.InHubTitleSearch(stored_guides.titles_reader(database))
+
+
+TitleSearch = Annotated[title_search.TitleSearch, fastapi.Depends(get_title_search)]
+
+
+@titles_router.get("/titles")
+async def find_guides_by_title(
+    q: Annotated[
+        str,
+        fastapi.Query(
+            min_length=1, max_length=500, description="A title, or words like it"
+        ),
+    ],
+    search: TitleSearch,
+    limit: Annotated[
+        int, fastapi.Query(ge=1, le=50, description="How many guides to answer at most")
+    ] = 10,
+) -> schemas.GuideTitles:
+    """The guides with titles like the words, the likest first: with a typo, half a
+    word, the words in another order, or only some of them."""
+    return schemas.GuideTitles.from_model(await search.like(q, limit))
