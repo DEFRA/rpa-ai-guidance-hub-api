@@ -117,4 +117,7 @@ async def _is_indexed(
     response = await client.get(
         f"{address}/v1/documents/{guide_id}/matches", params={"q": "any"}
     )
-    return response.status_code != httpx2.codes.NOT_FOUND
+    if response.status_code == httpx2.codes.NOT_FOUND:
+        return False
+    response.raise_for_status()
+    return True
