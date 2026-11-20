@@ -3,8 +3,9 @@ in which its matches are placed.
 
 A section starts at a heading of two or more `#`s that stands on its own, not in a
 quote, a list or a code block, and runs to the next such heading; the hub's pages
-split a guide the same way. It is known by its anchor: its heading's words as a slug
-(`anchors.slugify`), a repeat numbered `-1`, `-2` in order. Its text is its heading's
+split a guide the same way. It is known by its anchor: its heading as the hub's page
+names it (`_as_named`), as a slug (`anchors.slugify`), a repeat numbered `-1`, `-2` in
+order. Its text is its heading's
 words, then the words of each of its blocks (a paragraph, a list item, a table's cell,
 a code block), one block to a line, with one space between words. A link's words are
 kept, and where it goes is not; a picture has no words. The text before the first
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from markdown_it import token as md_token
 
 _COLOURS = (colours.RED, colours.BLUE)
+_COLOUR_MARKS = ("colour_span_open", "colour_span_close")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -93,12 +95,22 @@ def _written(token: md_token.Token) -> str:
 
 
 def _as_named(token: md_token.Token) -> str:
-    """A heading's words as the hub's page names it: a link's words, not where it
-    goes, every space kept, and an entity as written (`&amp;`)."""
-    return "".join(
-        child.markup if child.info == "entity" else _words(child)
-        for child in token.children or []
-    ).strip()
+    """A heading as the hub's page names it. The page's parser knows Markdown's own
+    marks, but not HTML or the dialect's colours. So it keeps a link's words but not
+    where it goes, a picture's words, and every space; and it keeps an entity, a tag
+    and a colour's marks as written (`&amp;`, `<u>`, `[…]{.red}`)."""
+    return "".join(_as_page_reads(child) for child in token.children or []).strip()
+
+
+def _as_page_reads(token: md_token.Token) -> str:
+    """A part of a heading as the hub's page reads it (`_as_named`)."""
+    if token.type == "image":
+        return "".join(_words(child) for child in token.children or [])
+    if token.type == "html_inline":
+        return token.content
+    if token.info == "entity" or token.type in _COLOUR_MARKS:
+        return token.markup
+    return _words(token)
 
 
 def _numbered(heading: str, seen: dict[str, int]) -> str:
@@ -177,9 +189,9 @@ def _colour_span(state: rules_inline.StateInline, silent: bool) -> bool:  # noqa
     maximum = state.posMax
     state.pos += 1
     state.posMax = end
-    state.push("colour_span_open", "span", 1)
+    state.push("colour_span_open", "span", 1).markup = "["
     state.md.inline.tokenize(state)
-    state.push("colour_span_close", "span", -1)
+    state.push("colour_span_close", "span", -1).markup = "]" + colours.marker(colour)
     state.posMax = maximum
     state.pos = end + 1 + len(colours.marker(colour))
     return True
