@@ -96,6 +96,32 @@ class TestAppendixNumbering:
         assert annex.number == expected
 
 
+class TestPlainTextHeadings:
+    """A heading is the plain text Word holds. Read as Markdown, a mark in it would
+    change what the page prints, and so the anchor the page builds from it."""
+
+    @pytest.mark.parametrize("mark", ["\\", "`", "*", "_", "~", "[", "<", "&", "#"])
+    def test_a_mark_that_starts_markdown_is_escaped(self, mark):
+        section = models.MarkdownSection(heading=f"Pay {mark}now{mark}")
+
+        assert section.markdown().startswith(f"## 1 Pay \\{mark}now\\{mark}\n")
+
+    def test_the_number_and_other_punctuation_are_written_as_they_are(self):
+        """So a heading with no marks is written as before, and a reader of the line
+        can still split its number off."""
+        parent = models.MarkdownSection(heading="Eligibility", ordinal=3)
+        child = models.MarkdownSection(
+            heading="Rates (2024): 50%, 'new'.", parent=parent
+        )
+
+        assert child.markdown().startswith("### 3.1 Rates (2024): 50%, 'new'.\n")
+
+    def test_the_title_is_escaped_as_a_heading_is(self):
+        document = models.MarkdownDocument(title="Claims & *rates*")
+
+        assert document.markdown().startswith("# Claims \\& \\*rates\\*\n")
+
+
 class TestCrossReferences:
     """Word writes a cross-reference as a bookmark name; a renderer knows none.
 

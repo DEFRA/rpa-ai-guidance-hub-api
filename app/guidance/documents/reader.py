@@ -35,7 +35,7 @@ import mimetypes
 import re
 from dataclasses import dataclass
 
-from app.guidance.parsing import anchors, models
+from app.guidance.parsing import anchors, models, plain_text
 
 # What a section heading opens with: two or more hashes, because one is the
 # document's title. The level is one less than the depth `markdown` writes, which
@@ -87,7 +87,7 @@ def _heading(line: str) -> tuple[str, str] | None:
     if len(hashes) < _SECTION_HASHES or not printed[:1].isspace():
         return None
 
-    return hashes, printed.strip()
+    return hashes, plain_text.from_markdown(printed.strip())
 
 
 def _title_of(lines: list[str]) -> str:
@@ -103,7 +103,7 @@ def _title_of(lines: list[str]) -> str:
     if not matched or _heading(lines[0]):
         return ""
 
-    return matched.group(1).strip()
+    return plain_text.from_markdown(matched.group(1).strip())
 
 
 @dataclass
