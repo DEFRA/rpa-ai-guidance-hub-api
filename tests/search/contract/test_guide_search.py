@@ -5,32 +5,27 @@ matched as a keyword search, to start with; a different search can change these
 tests. What they must keep is what the guide page needs: each match placed in its
 section's text as a reader sees it (`reading.sections_of`), with the words it covers.
 
-The tests run against the search service only when SEARCH_SERVICE_FOR_CONTRACT_TESTS
-gives the address of one that is running, as the local stack's is at
-http://localhost:8086. A test it cannot pass yet is an expected failure there, with
-the reason: that list is what the search service must do before a search moves to it.
+Against the search service, see `search_service_under_test`.
 
 All fixture text is invented.
 """
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
-import datetime as dt
-import os
-from typing import ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 import pytest
 
-from app.common import http_client
 from app.guidance import ids
 from app.search import guide_search, in_hub, search_service
+from tests.search.contract import search_service_under_test as under_test
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 Match = guide_search.Match
 SectionMatches = guide_search.SectionMatches
-
-SEARCH_SERVICE_ADDRESS = "SEARCH_SERVICE_FOR_CONTRACT_TESTS"
 
 
 class _Searching(Protocol):
@@ -44,6 +39,10 @@ class _Searching(Protocol):
     async def stored(self, markdown: str) -> ids.DocumentId: ...
 
     def version_of(self, guide_id: ids.DocumentId) -> ids.VersionId: ...
+
+    async def deleted(self) -> None:
+        """Deletes the guides it stored."""
+        ...
 
 
 @dataclasses.dataclass
@@ -66,6 +65,9 @@ class _InTheHub:
     async def _read(self, guide_id: ids.DocumentId) -> in_hub.Guide | None:
         return self.guides.get(guide_id)
 
+    async def deleted(self) -> None:
+        self.guides.clear()
+
 
 @dataclasses.dataclass
 class _InTheSearchService:
@@ -78,71 +80,36 @@ class _InTheSearchService:
         ),
     }
 
-    seconds_to_wait: ClassVar[float] = 30
-    seconds_between_tries: ClassVar[float] = 0.25
-
-    address: str = dataclasses.field(
-        default_factory=lambda: os.environ[SEARCH_SERVICE_ADDRESS].rstrip("/")
-    )
-    versions: dict[ids.DocumentId, ids.VersionId] = dataclasses.field(
-        default_factory=dict
+    published: under_test.Published = dataclasses.field(
+        default_factory=under_test.Published
     )
 
     def __post_init__(self) -> None:
-        self.search = search_service.SearchServiceGuideSearch(self.address)
+        self.search = search_service.SearchServiceGuideSearch(self.published.address)
 
     async def stored(self, markdown: str) -> ids.DocumentId:
-        guide_id = ids.new_document_id()
-        version_id = ids.new_version_id()
-        async with http_client.create_async_client() as client:
-            response = await client.put(
-                f"{self.address}/documents/{guide_id}/versions/{version_id}",
-                json={
-                    "sourceType": "guide",
-                    "status": "published",
-                    "occurredAt": dt.datetime.now(dt.UTC).isoformat(),
-                    "content": {"markdown": markdown},
-                    "metadata": {"guideTitle": "Contract test guide"},
-                },
-            )
-        response.raise_for_status()
-        self.versions[guide_id] = version_id
-        await self._until_searchable(guide_id)
+        guide_id = await self.published.guide(markdown, "Contract test guide")
+        await self.published.until_searchable()
         return guide_id
 
     def version_of(self, guide_id: ids.DocumentId) -> ids.VersionId:
-        return self.versions[guide_id]
+        return self.published.versions[guide_id]
 
-    async def _until_searchable(self, guide_id: ids.DocumentId) -> None:
-        try:
-            async with asyncio.timeout(self.seconds_to_wait):
-                while await self.search.in_guide(guide_id, "any") is None:
-                    await asyncio.sleep(self.seconds_between_tries)
-        except TimeoutError:
-            pytest.fail(
-                f"The search service did not serve guide {guide_id} in {self.seconds_to_wait} seconds"
-            )
+    async def deleted(self) -> None:
+        await self.published.deleted()
 
 
 @pytest.fixture(
     params=[
-        _InTheHub,
-        pytest.param(
-            _InTheSearchService,
-            marks=pytest.mark.skipif(
-                SEARCH_SERVICE_ADDRESS not in os.environ,
-                reason=f"{SEARCH_SERVICE_ADDRESS} does not give a search service",
-            ),
-        ),
-    ],
-    ids=["in the hub", "in the search service"],
+        pytest.param(_InTheHub, id="in the hub"),
+        under_test.param(_InTheSearchService),
+    ]
 )
-def searching(request: pytest.FixtureRequest) -> _Searching:
-    implementation: type[_Searching] = request.param
-    reason = implementation.expected_failures.get(request.function.__name__)
-    if reason is not None:
-        request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
-    return implementation()
+async def searching(request: pytest.FixtureRequest) -> AsyncIterator[_Searching]:
+    under_test.expect_failures(request, request.param)
+    implementation: _Searching = request.param()
+    yield implementation
+    await implementation.deleted()
 
 
 class TestSearchingAGuide:

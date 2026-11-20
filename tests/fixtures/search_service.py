@@ -1,8 +1,8 @@
 """The search service's answers, as factories.
 
-Checked against `DocumentMatchesResponse` in the search service's
-`app/search/v1/schemas.py` and `docs/openapi.json`, at `eba1583`: camelCase on the
-wire.
+Checked against `DocumentMatchesResponse` and `TitleSearchResponse` in the search
+service's `app/search/v1/schemas.py` and `docs/openapi.json`, at `eba1583`: camelCase
+on the wire.
 """
 
 from __future__ import annotations
@@ -23,3 +23,20 @@ def section(anchor: str | None, *matches: dict[str, Any]) -> dict[str, Any]:
 def document_matches(version_id: str, *sections: dict[str, Any]) -> dict[str, Any]:
     """`GET /v1/documents/{documentId}/matches`, as `DocumentMatchesResponse`."""
     return {"versionId": version_id, "sections": list(sections)}
+
+
+def title_result(document_id: str, title: str, score: float = 1.0) -> dict[str, Any]:
+    """A guide whose title is like the one searched for, as `TitleResult`."""
+    return {
+        "documentId": document_id,
+        "documentTitle": title,
+        "versionId": "00000000-0000-7000-8000-000000000000",
+        "status": "published",
+        "url": f"https://example.com/guides/{document_id}",
+        "score": score,
+    }
+
+
+def title_search(*results: dict[str, Any]) -> dict[str, Any]:
+    """`GET /v1/search?title=…`, as `TitleSearchResponse`, the likest first."""
+    return {"queryId": "00000000-0000-0000-0000-000000000000", "results": list(results)}

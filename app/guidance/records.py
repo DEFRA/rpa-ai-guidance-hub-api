@@ -71,6 +71,7 @@ VERSIONS = "document_versions"
 _UPLOAD_ID = "source.uploadId"
 
 _METADATA = "metadata"
+_TITLE = "title"
 
 # The document a version belongs to: the many end of the one-to-many. Its name is the
 # model's, which owns how a version is stored.
@@ -394,6 +395,21 @@ async def latest_versions_of(
         group["_id"]: models.Version.from_document(group["newest"])
         async for group in cursor
     }
+
+
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
+async def latest_titles(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> dict[ids.DocumentId, str]:
+    """The title of every document's newest version, where it has one, in a single
+    query."""
+    pipeline: list[dict[str, Any]] = [
+        {_SORT: dict(_NEWEST)},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", _TITLE: {"$first": f"${_TITLE}"}}},
+        {_MATCH: {_TITLE: {"$type": "string"}}},
+    ]
+    cursor = await database[VERSIONS].aggregate(pipeline)
+    return {group["_id"]: group[_TITLE] async for group in cursor}
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)

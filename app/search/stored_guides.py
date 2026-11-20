@@ -1,4 +1,5 @@
-"""How the hub's own search reads a guide: its latest version as stored."""
+"""How the hub's own searches read the guides: a guide's latest version as stored, and
+every guide's title."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from fastapi import concurrency
 
 from app.guidance import records
 from app.guidance.documents import store
-from app.search import in_hub
+from app.search import in_hub, title_search
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -43,5 +44,25 @@ def reader(
             raise ContentMissingError(message)
 
         return in_hub.Guide(version.id, content.decode("utf-8"))
+
+    return read
+
+
+def titles_reader(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> Callable[[], Awaitable[list[title_search.GuideTitle]]]:
+    """Reads every guide's title, its latest version's, from the hub's records. A guide
+    whose document is not recorded yet, or whose latest version has no title, has
+    none."""
+
+    async def read() -> list[title_search.GuideTitle]:
+        titles = await records.latest_titles(database)
+        # The document is recorded last, so a guide without one is not there yet.
+        recorded = await records.existing(database, list(titles))
+        return [
+            title_search.GuideTitle(guide_id, title)
+            for guide_id, title in titles.items()
+            if guide_id in recorded
+        ]
 
     return read

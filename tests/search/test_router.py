@@ -1,4 +1,5 @@
-"""Searching one guide over HTTP, against a real MongoDB; the guide's content is stubbed.
+"""Searching one guide, and finding guides by title, over HTTP, against a real MongoDB;
+the guide's content is stubbed.
 
 All fixture text is invented.
 """
@@ -19,6 +20,11 @@ from app.guidance.documents import store
 from app.search import in_hub, router, search_service
 
 MARKDOWN = "# Claims\n\n## 1 Paying\n\nRepayment, then payment."
+BREACHES = "OHF Riverbank and Pond Breaches and Reductions"
+
+# The settings that say where each search is done.
+ONE_GUIDE = "feature_search_one_guide"
+ALL_TITLES = "feature_search_all_titles"
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +35,29 @@ async def database(mongo_database):
     entrypoint.app.dependency_overrides[mongo.get_db] = lambda: mongo_database
     yield mongo_database
     entrypoint.app.dependency_overrides.pop(mongo.get_db, None)
+
+
+class _FailingSearch:
+    """A search whose search service fails, wherever it is asked."""
+
+    async def in_guide(self, *_args: object) -> None:
+        raise search_service.SearchServiceError(_UNAVAILABLE)
+
+    async def like(self, *_args: object) -> None:
+        raise search_service.SearchServiceError(_UNAVAILABLE)
+
+
+_UNAVAILABLE = "The search service answered 503"
+
+
+@pytest.fixture
+def failing_search():
+    getters = (router.get_guide_search, router.get_title_search)
+    for getter in getters:
+        entrypoint.app.dependency_overrides[getter] = _FailingSearch
+    yield
+    for getter in getters:
+        entrypoint.app.dependency_overrides.pop(getter, None)
 
 
 @pytest.fixture
@@ -62,6 +91,38 @@ async def _seed(database) -> tuple[ids.DocumentId, ids.VersionId]:
         ),
     )
     return document_id, version.id
+
+
+async def _titled(
+    database, *titles: str | None, recorded: bool = True
+) -> ids.DocumentId:
+    """A guide with a version for each title, the last the newest; its document is
+    recorded last, as a conversion records it."""
+    document_id = ids.new_document_id()
+    first = dt.datetime.now(tz=dt.UTC)
+    for minutes, title in enumerate(titles):
+        await records.create_version(
+            database,
+            models.Version(
+                id=ids.new_version_id(),
+                document_id=document_id,
+                content_url=f"s3://docs/{document_id}/{minutes}/content.md",
+                created_at=first + dt.timedelta(minutes=minutes),
+                title=title,
+            ),
+        )
+    if recorded:
+        await records.create(
+            database,
+            models.Document(
+                id=document_id,
+                upload_id=ids.UploadId(str(uuid.uuid4())),
+                file_id=ids.FileId(str(uuid.uuid4())),
+                metadata={},
+                created_at=first,
+            ),
+        )
+    return document_id
 
 
 class TestSearchingOneGuide:
@@ -139,6 +200,78 @@ class TestSearchingOneGuide:
 
         assert response.status_code == 502
 
+    @pytest.mark.usefixtures("failing_search")
+    async def test_is_a_bad_gateway_when_the_search_service_fails(self, client):
+        response = await client.get(
+            f"/guides/{ids.new_document_id()}/search", params={"q": "pay"}
+        )
+
+        assert (response.status_code, response.json()) == (
+            502,
+            {"detail": "The search service is not available"},
+        )
+
+
+class TestFindingGuidesByTitle:
+    async def test_answers_the_guides_with_titles_like_the_words(
+        self, client, database
+    ):
+        meant = await _titled(database, BREACHES)
+        await _titled(database, "Hedgerow Planting")
+
+        response = await client.get("/search/titles", params={"q": "reducions"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "items": [{"guideId": str(meant), "title": BREACHES}]
+        }
+
+    async def test_takes_each_guides_title_from_its_newest_version(
+        self, client, database
+    ):
+        guide = await _titled(database, "Old Reductions Guide", BREACHES)
+
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert response.json()["items"] == [{"guideId": str(guide), "title": BREACHES}]
+
+    async def test_leaves_out_a_guide_whose_document_is_not_yet_recorded(
+        self, client, database
+    ):
+        await _titled(database, BREACHES, recorded=False)
+
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert response.json()["items"] == []
+
+    async def test_leaves_out_a_guide_whose_newest_version_has_no_title(
+        self, client, database
+    ):
+        await _titled(database, BREACHES, None)
+
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert response.json()["items"] == []
+
+    async def test_answers_no_more_guides_than_asked_for(self, client, database):
+        for scheme in ("WG", "HG", "MG"):
+            await _titled(database, f"{scheme} Breaches and Reductions")
+
+        response = await client.get(
+            "/search/titles", params={"q": "reductions", "limit": 2}
+        )
+
+        assert len(response.json()["items"]) == 2  # noqa: PLR2004 - the limit
+
+    @pytest.mark.usefixtures("failing_search")
+    async def test_is_a_bad_gateway_when_the_search_service_fails(self, client):
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert (response.status_code, response.json()) == (
+            502,
+            {"detail": "The search service is not available"},
+        )
+
 
 class TestChoosingWhereOneGuideIsSearched:
     def test_the_hub_internal_search_is_chosen_unless_the_environment_says_otherwise(
@@ -151,7 +284,7 @@ class TestChoosingWhereOneGuideIsSearched:
     def test_the_search_api_is_chosen_at_its_address_when_the_environment_says_so(
         self, database, mocker
     ):
-        _configure(mocker, search_api_base_url="http://search.test")
+        _configure(mocker, ONE_GUIDE, search_api_base_url="http://search.test")
         search_api = mocker.patch.object(search_service, "SearchServiceGuideSearch")
 
         chosen = router.get_guide_search(database, s3_client=None)
@@ -160,20 +293,46 @@ class TestChoosingWhereOneGuideIsSearched:
         search_api.assert_called_once_with("http://search.test")
 
     def test_the_search_api_needs_its_address(self, database, mocker):
-        _configure(mocker, search_api_base_url=None)
+        _configure(mocker, ONE_GUIDE, search_api_base_url=None)
 
         with pytest.raises(RuntimeError, match="SEARCH_API_BASE_URL"):
             router.get_guide_search(database, s3_client=None)
 
 
-def _configure(mocker, *, search_api_base_url: str | None) -> None:
-    """Search in one guide goes to the search API, at the address given."""
+class TestChoosingWhereGuidesAreFoundByTitle:
+    def test_the_hub_internal_search_is_chosen_unless_the_environment_says_otherwise(
+        self, database
+    ):
+        chosen = router.get_title_search(database)
+
+        assert isinstance(chosen, in_hub.InHubTitleSearch)
+
+    def test_the_search_api_is_chosen_at_its_address_when_the_environment_says_so(
+        self, database, mocker
+    ):
+        _configure(mocker, ALL_TITLES, search_api_base_url="http://search.test")
+        search_api = mocker.patch.object(search_service, "SearchServiceTitleSearch")
+
+        chosen = router.get_title_search(database)
+
+        assert chosen is search_api.return_value
+        search_api.assert_called_once_with("http://search.test")
+
+    def test_the_search_api_needs_its_address(self, database, mocker):
+        _configure(mocker, ALL_TITLES, search_api_base_url=None)
+
+        with pytest.raises(RuntimeError, match="SEARCH_API_BASE_URL"):
+            router.get_title_search(database)
+
+
+def _configure(mocker, feature: str, *, search_api_base_url: str | None) -> None:
+    """The search that `feature` names goes to the search API, at the address given."""
     mocker.patch.object(
         config,
         "get_config",
         return_value=config.get_config().model_copy(
             update={
-                "feature_search_one_guide": config.SearchImplementation.SEARCH_API,
+                feature: config.SearchImplementation.SEARCH_API,
                 "search_api_base_url": search_api_base_url,
             }
         ),

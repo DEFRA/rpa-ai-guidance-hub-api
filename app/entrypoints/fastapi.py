@@ -119,6 +119,7 @@ protected_routes.include_router(staging_router.router)
 protected_routes.include_router(users_router.router)
 protected_routes.include_router(preferences_router.router)
 protected_routes.include_router(search_router.router)
+protected_routes.include_router(search_router.titles_router)
 
 app.include_router(health_router.router)
 app.include_router(staging_router.callback_router)
