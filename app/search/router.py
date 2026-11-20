@@ -30,9 +30,6 @@ def get_guide_search(
     settings = config.get_config()
     if settings.feature_search_one_guide is not config.SearchImplementation.SEARCH_API:
         return in_hub.InHubGuideSearch(stored_guides.reader(database, s3_client))
-    if settings.search_api_base_url is None:
-        message = "Search in one guide goes to the search API, but SEARCH_API_BASE_URL is not set"
-        raise RuntimeError(message)
     return search_service.SearchServiceGuideSearch(settings.search_api_base_url)
 
 

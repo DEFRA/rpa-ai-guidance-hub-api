@@ -159,14 +159,8 @@ class TestChoosingWhereOneGuideIsSearched:
         assert chosen is search_api.return_value
         search_api.assert_called_once_with("http://search.test")
 
-    def test_the_search_api_needs_its_address(self, database, mocker):
-        _configure(mocker, search_api_base_url=None)
 
-        with pytest.raises(RuntimeError, match="SEARCH_API_BASE_URL"):
-            router.get_guide_search(database, s3_client=None)
-
-
-def _configure(mocker, *, search_api_base_url: str | None) -> None:
+def _configure(mocker, *, search_api_base_url: str) -> None:
     """Search in one guide goes to the search API, at the address given."""
     mocker.patch.object(
         config,
