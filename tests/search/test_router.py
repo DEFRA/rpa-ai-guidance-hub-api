@@ -307,14 +307,16 @@ class TestChoosingWhereGuidesAreFoundByTitle:
 
         assert isinstance(chosen, in_hub.InHubTitleSearch)
 
-    def test_the_search_api_is_chosen_when_the_environment_says_so(
+    def test_the_search_api_is_chosen_at_its_address_when_the_environment_says_so(
         self, database, mocker
     ):
         _configure(mocker, ALL_TITLES, search_api_base_url="http://search.test")
+        search_api = mocker.patch.object(search_service, "SearchServiceTitleSearch")
 
         chosen = router.get_title_search(database)
 
-        assert isinstance(chosen, search_service.SearchServiceTitleSearch)
+        assert chosen is search_api.return_value
+        search_api.assert_called_once_with("http://search.test")
 
     def test_the_search_api_needs_its_address(self, database, mocker):
         _configure(mocker, ALL_TITLES, search_api_base_url=None)
