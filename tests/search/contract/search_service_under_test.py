@@ -56,7 +56,7 @@ class Published:
     """The guides a test publishes to the search service."""
 
     def __init__(self) -> None:
-        self.address = os.environ[ADDRESS]
+        self.address = os.environ[ADDRESS].rstrip("/")
         self.versions: dict[ids.DocumentId, ids.VersionId] = {}
 
     async def guide(self, markdown: str, title: str) -> ids.DocumentId:
