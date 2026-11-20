@@ -1910,6 +1910,7 @@
             "required": true,
             "schema": {
               "description": "The words to find",
+              "maxLength": 500,
               "title": "Q",
               "type": "string"
             }

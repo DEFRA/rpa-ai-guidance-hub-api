@@ -156,6 +156,15 @@ class TestSearchingOneGuide:
 
         assert response.status_code == 404
 
+    async def test_of_more_characters_than_the_search_service_takes_is_refused(
+        self, client
+    ):
+        response = await client.get(
+            f"/guides/{ids.new_document_id()}/search", params={"q": "p" * 501}
+        )
+
+        assert response.status_code == 422
+
     async def test_of_a_guide_whose_document_is_not_yet_recorded_is_not_found(
         self, client, database, mocker
     ):
@@ -272,14 +281,16 @@ class TestChoosingWhereOneGuideIsSearched:
 
         assert isinstance(chosen, in_hub.InHubGuideSearch)
 
-    def test_the_search_api_is_chosen_when_the_environment_says_so(
+    def test_the_search_api_is_chosen_at_its_address_when_the_environment_says_so(
         self, database, mocker
     ):
         _configure(mocker, ONE_GUIDE, search_api_base_url="http://search.test")
+        search_api = mocker.patch.object(search_service, "SearchServiceGuideSearch")
 
         chosen = router.get_guide_search(database, s3_client=None)
 
-        assert isinstance(chosen, search_service.SearchServiceGuideSearch)
+        assert chosen is search_api.return_value
+        search_api.assert_called_once_with("http://search.test")
 
     def test_the_search_api_needs_its_address(self, database, mocker):
         _configure(mocker, ONE_GUIDE, search_api_base_url=None)
