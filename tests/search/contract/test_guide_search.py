@@ -82,7 +82,7 @@ class _InTheSearchService:
     seconds_between_tries: ClassVar[float] = 0.25
 
     address: str = dataclasses.field(
-        default_factory=lambda: os.environ[SEARCH_SERVICE_ADDRESS]
+        default_factory=lambda: os.environ[SEARCH_SERVICE_ADDRESS].rstrip("/")
     )
     versions: dict[ids.DocumentId, ids.VersionId] = dataclasses.field(
         default_factory=dict
