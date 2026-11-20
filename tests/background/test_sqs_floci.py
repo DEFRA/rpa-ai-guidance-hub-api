@@ -2,7 +2,8 @@
 deleting, keeping a message invisible, dead-lettering, and going back to work when a
 queue with a problem is put right, as the local stack and CDP's queue have them
 (standard, dead-lettered after 3 receives). The visibility timeout is a second here,
-not CDP's 120, so a redelivery takes a second.
+not CDP's 120, so a redelivery takes a second; three for the test of a message worked
+for longer than that.
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ from app.background import consumer, sqs
 VISIBILITY_SECONDS = 1
 MAX_RECEIVES = 3
 
+# Long enough that a pause in floci, under load, still leaves each extension of a
+# message's visibility in time: a second leaves it two-thirds of one.
+LONG_VISIBILITY_SECONDS = 3
+
 
 @pytest.fixture
 def client(floci_endpoint: str) -> Any:
@@ -33,7 +38,7 @@ def client(floci_endpoint: str) -> Any:
     )
 
 
-def _with_dead_letters(client, name: str) -> dict[str, str]:
+def _with_dead_letters(client, name: str, visibility_seconds: int) -> dict[str, str]:
     """The attributes of a queue called `name`, sending to its dead-letter queue."""
     dead_letters = client.create_queue(QueueName=f"{name}-deadletter")["QueueUrl"]
     arn = client.get_queue_attributes(
@@ -42,17 +47,23 @@ def _with_dead_letters(client, name: str) -> dict[str, str]:
     redrive = json.dumps(
         {"deadLetterTargetArn": arn, "maxReceiveCount": str(MAX_RECEIVES)}
     )
-    return {"VisibilityTimeout": str(VISIBILITY_SECONDS), "RedrivePolicy": redrive}
+    return {"VisibilityTimeout": str(visibility_seconds), "RedrivePolicy": redrive}
+
+
+def _new_queue(client, visibility_seconds: int) -> tuple[str, str]:
+    """A queue of its own, and its dead-letter queue: the URLs."""
+    name = f"conversions-{uuid.uuid4().hex[:12]}"
+    url = client.create_queue(
+        QueueName=name,
+        Attributes=_with_dead_letters(client, name, visibility_seconds),
+    )["QueueUrl"]
+    return url, client.get_queue_url(QueueName=f"{name}-deadletter")["QueueUrl"]
 
 
 @pytest.fixture
 def queues(client) -> tuple[str, str]:
     """A queue of its own for each test, and its dead-letter queue: the URLs."""
-    name = f"conversions-{uuid.uuid4().hex[:12]}"
-    url = client.create_queue(
-        QueueName=name, Attributes=_with_dead_letters(client, name)
-    )["QueueUrl"]
-    return url, client.get_queue_url(QueueName=f"{name}-deadletter")["QueueUrl"]
+    return _new_queue(client, VISIBILITY_SECONDS)
 
 
 class Recorder:
@@ -126,14 +137,12 @@ class TestAMessageSent:
 
         assert handler.given == [("a message", False)]
 
-    async def test_worked_longer_than_its_visibility_is_worked_once(
-        self, client, queues
-    ):
+    async def test_worked_longer_than_its_visibility_is_worked_once(self, client):
         """Its visibility is kept up while the handler works, so it is not
         delivered again meanwhile."""
-        url, _ = queues
+        url, _ = _new_queue(client, LONG_VISIBILITY_SECONDS)
         queue = sqs.SqsQueue(client, url, polling_threads=2)
-        handler = Recorder(seconds=3 * VISIBILITY_SECONDS)
+        handler = Recorder(seconds=LONG_VISIBILITY_SECONDS + 1)
         working = _working(queue, handler)
 
         await queue.send("a message")
@@ -182,7 +191,8 @@ class TestAQueueWithAProblem:
         assert handler.given == []
 
         client.set_queue_attributes(
-            QueueUrl=url, Attributes=_with_dead_letters(client, name)
+            QueueUrl=url,
+            Attributes=_with_dead_letters(client, name, VISIBILITY_SECONDS),
         )
         await _until(lambda: working.healthy and _count(client, url) == 0, 15)
         await working.stop()
@@ -191,7 +201,7 @@ class TestAQueueWithAProblem:
 
     async def test_deleted_then_made_again_is_worked_again(self, client):
         name = f"conversions-{uuid.uuid4().hex[:12]}"
-        attributes = _with_dead_letters(client, name)
+        attributes = _with_dead_letters(client, name, VISIBILITY_SECONDS)
         url = client.create_queue(QueueName=name, Attributes=attributes)["QueueUrl"]
         queue = sqs.SqsQueue(client, url, polling_threads=2)
         handler = Recorder()
