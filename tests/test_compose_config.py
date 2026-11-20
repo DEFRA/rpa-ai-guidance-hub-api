@@ -60,3 +60,17 @@ def test_mongo_uri_is_pinned_to_the_mongodb_service():
     assert mongo_uri is not None
     assert "localhost" not in mongo_uri
     assert "mongodb" in mongo_uri
+
+
+def test_search_service_is_reached_by_its_service_name():
+    """Each save is given to search, so this compose runs the search service too, from
+    its published image, and the API reaches it by name. .env holds the host-side
+    address, which inside the container would point the API at itself."""
+    compose = yaml.safe_load(COMPOSE_FILE.read_text())
+
+    assert service_environment().get("SEARCH_API_BASE_URL") == (
+        "http://rpa-ai-guidance-hub-search:8086"
+    )
+    assert compose["services"]["rpa-ai-guidance-hub-search"]["image"].startswith(
+        "defradigital/rpa-ai-guidance-hub-search@sha256:"
+    )
