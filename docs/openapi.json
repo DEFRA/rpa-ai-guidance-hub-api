@@ -248,6 +248,29 @@
         "title": "DocumentSummary",
         "type": "object"
       },
+      "GuideMatches": {
+        "description": "Where the words are in the version searched: in each section holding them, in\nthe guide's order.",
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionMatches"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "versionId",
+          "sections"
+        ],
+        "title": "GuideMatches",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -283,6 +306,30 @@
         "type": "object"
       },
       "JsonValue": {},
+      "Match": {
+        "description": "Where the words match in a text, from `start` up to `end`, and the words there\nas the text has them.",
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "title": "Match",
+        "type": "object"
+      },
       "MoveOperation": {
         "additionalProperties": false,
         "description": "Take out what `from` names, then add it at `path`, which is read in the\ndocument without it.",
@@ -899,6 +946,35 @@
         ],
         "title": "SavingStatus",
         "type": "string"
+      },
+      "SectionMatches": {
+        "description": "A section's matches, in its text as a reader sees it. The section is known by\nits anchor, as pins and bookmarks know it; the introduction has none.",
+        "properties": {
+          "anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/Match"
+            },
+            "title": "Matches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "anchor",
+          "matches"
+        ],
+        "title": "SectionMatches",
+        "type": "object"
       },
       "SignedIn": {
         "description": "Someone who has just signed in, as the UI knows them from their token.",
@@ -1772,6 +1848,67 @@
         "summary": "Read Content",
         "tags": [
           "guides"
+        ]
+      }
+    },
+    "/guides/{document_id}/search": {
+      "get": {
+        "description": "Where the words are in the guide's latest version: in each section that holds\nthem.",
+        "operationId": "search_one_guide_guides__document_id__search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The words to find",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "The words to find",
+              "maxLength": 500,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideMatches"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search One Guide",
+        "tags": [
+          "search"
         ]
       }
     },

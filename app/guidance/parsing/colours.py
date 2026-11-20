@@ -67,7 +67,12 @@ def marked_up(text: str, name: str) -> str:
     a bracket the author typed has to be `\\[` here, or it would close the span early
     and the colour would be dropped by whatever reads it back.
     """
-    return f"[{text}]{{.{name}}}"
+    return f"[{text}]{marker(name)}"
+
+
+def marker(name: str) -> str:
+    """What follows a coloured span's closing bracket and names its colour: `{.red}`."""
+    return f"{{.{name}}}"
 
 
 def _channels(value: str | None) -> tuple[int, int] | None:

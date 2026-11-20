@@ -115,10 +115,13 @@ database, no admin UI. The following environment variables are **required**; lik
 
 | Variable | Description | Example |
 | --- | --- | --- |
-| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `Basic Payment Scheme|BPS,Countryside Stewardship` |
-| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `Caseworker,Customer` |
-| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `Siti Agri,CRM` |
-| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `Process guide` |
+| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `"Sustainable Farming Incentive\|SFI,Countryside Stewardship\|CS"` |
+| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `"Processor,Team leader"` |
+| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `"CRM,SITI Agri"` |
+| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `"Process guide"` |
+
+In `.env`, put each of these values in quotes, as `.env.example` does: `uv run --env-file` stops reading the file at
+the first value with spaces and no quotes.
 
 Each variable's format is a comma-separated list of `label` or `label|short label` entries, in display
 order. Each endpoint returns that list as `[{"label": ..., "shortLabel": ...}, ...]`, omitting

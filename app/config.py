@@ -1,3 +1,4 @@
+import enum
 import logging
 from typing import Annotated
 
@@ -116,6 +117,14 @@ def _parse_reference_options(v: str) -> list[dict[str, str]]:
     return options
 
 
+class SearchImplementation(enum.StrEnum):
+    """Where a search is done: by a stand-in inside this API, or by the search
+    service's API."""
+
+    HUB_INTERNAL = "hub-internal"
+    SEARCH_API = "search-api"
+
+
 class AppConfig(pydantic_settings.BaseSettings):
     model_config = pydantic_settings.SettingsConfigDict()
     python_env: str | None = None
@@ -161,6 +170,14 @@ class AppConfig(pydantic_settings.BaseSettings):
     feature_sbi_bookmarks: bool = pydantic.Field(
         default=False,
         description="Whether a guide can be bookmarked to an SBI, as well as to a Case ID",
+    )
+    feature_search_one_guide: SearchImplementation = pydantic.Field(
+        default=SearchImplementation.HUB_INTERNAL,
+        description="Where search in one guide is done: hub-internal or search-api",
+    )
+    search_api_base_url: str | None = pydantic.Field(
+        default=None,
+        description="The search service's address, for each search a FEATURE_SEARCH_* setting sends there",
     )
     tracing_header: str = "x-cdp-request-id"
     staging_retention_seconds: int = pydantic.Field(
