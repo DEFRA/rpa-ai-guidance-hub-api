@@ -50,6 +50,18 @@ class TestWhatIsPrinted:
 
         assert _round_trip(_document(section)).sections[0].content == ""
 
+    def test_a_heading_comes_back_as_typed_not_as_escaped(self):
+        section = models.MarkdownSection(heading="Pay \\ *now* & <later> #1")
+
+        read = _round_trip(_document(section)).sections[0]
+
+        assert read.heading == "Pay \\ *now* & <later> #1"
+
+    def test_a_title_comes_back_as_typed_not_as_escaped(self):
+        assert _round_trip(_document(title="Claims & *rates*")).title == (
+            "Claims & *rates*"
+        )
+
 
 class TestHierarchy:
     def test_depth_is_read_off_the_hashes(self):
