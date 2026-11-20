@@ -5,7 +5,7 @@ from __future__ import annotations
 import pydantic
 
 from app.guidance import ids
-from app.search import guide_search
+from app.search import guide_search, title_search
 
 
 class Match(pydantic.BaseModel):
@@ -49,4 +49,27 @@ class GuideMatches(pydantic.BaseModel):
                 )
                 for section in found.sections
             ],
+        )
+
+
+class GuideTitle(pydantic.BaseModel):
+    """A guide, by its id and its latest version's title."""
+
+    guide_id: ids.DocumentId = pydantic.Field(alias="guideId")
+    title: str
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+
+class GuideTitles(pydantic.BaseModel):
+    """The guides with titles like the words, the likest first."""
+
+    items: list[GuideTitle]
+
+    @classmethod
+    def from_model(cls, found: tuple[title_search.GuideTitle, ...]) -> GuideTitles:
+        return cls(
+            items=[
+                GuideTitle(guideId=guide.guide_id, title=guide.title) for guide in found
+            ]
         )

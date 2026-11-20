@@ -175,6 +175,10 @@ class AppConfig(pydantic_settings.BaseSettings):
         default=SearchImplementation.HUB_INTERNAL,
         description="Where search in one guide is done: hub-internal or search-api",
     )
+    feature_search_all_titles: SearchImplementation = pydantic.Field(
+        default=SearchImplementation.HUB_INTERNAL,
+        description="Where guides are found by title: hub-internal or search-api",
+    )
     search_api_base_url: str = pydantic.Field(
         ...,
         description="The search service's address, for each search a FEATURE_SEARCH_* setting sends there",

@@ -13,7 +13,6 @@ import json
 import uuid
 
 import boto3
-import httpx2
 import pydantic
 import pytest
 
@@ -190,8 +189,8 @@ class TestConvertingAnUpload:
     ):
         """Search was away when the version was saved: the next delivery gives it the
         version, without converting the upload again, and only then marks the save."""
-        search.failure = httpx2.ConnectError("search away")
-        with pytest.raises(httpx2.ConnectError):
+        search.failure = search_service.SearchServiceError("search away")
+        with pytest.raises(search_service.SearchServiceError):
             await handler(body, last_delivery=False)
         search.failure = None
 
@@ -290,9 +289,9 @@ class TestAnyOtherFailure:
     async def test_includes_search_failing_so_the_save_is_not_marked(
         self, handler, body, job, staging, search
     ):
-        search.failure = httpx2.ConnectError("search away")
+        search.failure = search_service.SearchServiceError("search away")
 
-        with pytest.raises(httpx2.ConnectError):
+        with pytest.raises(search_service.SearchServiceError):
             await handler(body, last_delivery=False)
 
         staged = await staging.get(job.file_id)
