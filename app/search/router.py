@@ -10,7 +10,7 @@ import fastapi
 from app import config
 from app.common import mongo, s3
 from app.guidance import ids
-from app.search import guide_search, in_hub, schemas, stored_guides
+from app.search import guide_search, in_hub, schemas, search_service, stored_guides
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
@@ -27,13 +27,13 @@ def get_guide_search(
     database: Database, s3_client: S3Client
 ) -> guide_search.GuideSearch:
     """The search in one guide that the environment chooses."""
-    if (
-        config.get_config().feature_search_one_guide
-        is config.SearchImplementation.SEARCH_API
-    ):
-        message = "Search in one guide by the search API is not built yet"
-        raise NotImplementedError(message)
-    return in_hub.InHubGuideSearch(stored_guides.reader(database, s3_client))
+    settings = config.get_config()
+    if settings.feature_search_one_guide is not config.SearchImplementation.SEARCH_API:
+        return in_hub.InHubGuideSearch(stored_guides.reader(database, s3_client))
+    if settings.search_api_base_url is None:
+        message = "Search in one guide goes to the search API, but SEARCH_API_BASE_URL is not set"
+        raise RuntimeError(message)
+    return search_service.SearchServiceGuideSearch(settings.search_api_base_url)
 
 
 GuideSearch = Annotated[guide_search.GuideSearch, fastapi.Depends(get_guide_search)]
@@ -42,7 +42,7 @@ GuideSearch = Annotated[guide_search.GuideSearch, fastapi.Depends(get_guide_sear
 @router.get("/{document_id}/search")
 async def search_one_guide(
     document_id: ids.DocumentId,
-    q: Annotated[str, fastapi.Query(description="The words to find")],
+    q: Annotated[str, fastapi.Query(max_length=500, description="The words to find")],
     search: GuideSearch,
 ) -> schemas.GuideMatches:
     """Where the words are in the guide's latest version: in each section that holds

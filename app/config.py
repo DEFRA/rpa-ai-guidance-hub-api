@@ -175,6 +175,10 @@ class AppConfig(pydantic_settings.BaseSettings):
         default=SearchImplementation.HUB_INTERNAL,
         description="Where search in one guide is done: hub-internal or search-api",
     )
+    search_api_base_url: str | None = pydantic.Field(
+        default=None,
+        description="The search service's address, for each search a FEATURE_SEARCH_* setting sends there",
+    )
     tracing_header: str = "x-cdp-request-id"
     staging_retention_seconds: int = pydantic.Field(
         default=14400,  # 4 hours in seconds
