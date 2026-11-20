@@ -49,7 +49,9 @@ def expect_failures(
     """Marks the test an expected failure where the implementation lists it."""
     reason = implementation.expected_failures.get(request.function.__name__)
     if reason is not None:
-        request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
+        request.applymarker(
+            pytest.mark.xfail(reason=reason, strict=True, raises=AssertionError)
+        )
 
 
 class Published:
