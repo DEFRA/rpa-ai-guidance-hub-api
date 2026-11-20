@@ -62,6 +62,18 @@ class TestASectionHeading:
             ("1-terms-amp-conditions", "1 Terms & conditions\nAgree."),
         ]
 
+    def test_is_known_as_the_page_knows_it_by_its_tags_colours_and_pictures_words(self):
+        markdown = (
+            "## [Pay]{.red}\n\nPay.\n\n## <u>Pay</u>\n\nLate.\n\n"
+            "## Charts ![A chart](assets/chart.png)\n\nSee."
+        )
+
+        assert _texts(markdown) == [
+            ("payred", "Pay\nPay."),
+            ("upayu", "Pay\nLate."),
+            ("charts-a-chart", "Charts\nSee."),
+        ]
+
     def test_is_never_an_underlined_one_whose_words_read_on_in_the_section(self):
         assert _texts("## Claims\n\nPay.\n\nLate\n----\n\nPay late.") == [
             ("claims", "Claims\nPay.\nLate\nPay late.")

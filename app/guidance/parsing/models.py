@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from app.guidance.parsing import alignment, anchors
+from app.guidance.parsing import alignment, anchors, plain_text
 
 
 def _letters(ordinal: int) -> str:
@@ -132,7 +132,7 @@ class MarkdownSection:
         where the images live or where a cross-reference points.
         """
         hashes = "#" * (self.level + 1)
-        lines = [f"{hashes} {self.rendered_heading}", ""]
+        lines = [f"{hashes} {plain_text.as_markdown(self.rendered_heading)}", ""]
 
         content = self._resolved_content(image_prefix, anchors or {})
         if content:
@@ -196,7 +196,7 @@ class MarkdownDocument:
         fold asking for children would print each nested section twice, once beneath
         its parent and once in its own right.
         """
-        parts = [f"# {self.title}", ""]
+        parts = [f"# {plain_text.as_markdown(self.title)}", ""]
         parts.extend(
             section.markdown(image_prefix, self.anchors()) for section in self.sections
         )
