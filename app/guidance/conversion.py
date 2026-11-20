@@ -35,6 +35,7 @@ import anyio.from_thread
 import fastapi.concurrency
 import pydantic
 
+from app.common import tracing
 from app.guidance import ids, models, records, schemas, service
 from app.guidance.parsing import errors
 from app.search import search_service
@@ -77,6 +78,9 @@ class ConversionJob(pydantic.BaseModel):
     document_id: ids.DocumentId
     version_id: ids.VersionId
     request: schemas.NewDocument
+    # The request's trace id, so that the work, and what it asks of search, is traced
+    # with it. None for a request that had none.
+    trace_id: str | None = None
 
 
 class ConversionSubmitter(Protocol):
@@ -112,27 +116,37 @@ class ConversionHandler:
 
     async def __call__(self, body: str, *, last_delivery: bool) -> None:
         job = ConversionJob.model_validate_json(body)
+        # Reset after, as the consumer's loop works other jobs in this context.
+        traced = tracing.ctx_trace_id.set(job.trace_id or "")
         try:
-            await self._save(job)
-            await self._give_to_search(job)
+            await self._work(job, last_delivery=last_delivery)
+        finally:
+            tracing.ctx_trace_id.reset(traced)
+
+    async def _work(self, job: ConversionJob, *, last_delivery: bool) -> None:
+        try:
+            document = await self._save(job)
+            await self._give_to_search(job, document)
             await self._staging.promote(job.file_id)
         except _UNFIXABLE as unfixable:
-            logger.warning("Could not convert file %s: %s", job.file_id, unfixable)
+            logger.warning("Could not save file %s: %s", job.file_id, unfixable)
             await self._staging.fail_saving(job.file_id, str(unfixable))
         except Exception as failure:
             if last_delivery:
                 await self._staging.fail_saving(job.file_id, str(failure))
             raise
 
-    async def _save(self, job: ConversionJob) -> None:
-        """Convert the upload and record what it makes, unless an earlier delivery did.
+    async def _save(self, job: ConversionJob) -> models.Document:
+        """Convert the upload and record what it makes, unless an earlier delivery did:
+        the document, as it is recorded.
 
         Converting is done in a worker thread, because parsing and the object store
         calls block.
         """
         upload_id = job.request.source.upload_id
-        if await records.find_by_upload(self._database, upload_id) is not None:
-            return
+        already = await records.find_by_upload(self._database, upload_id)
+        if already is not None:
+            return already
 
         stored = await fastapi.concurrency.run_in_threadpool(
             self._guidance.convert,
@@ -158,20 +172,23 @@ class ConversionHandler:
         await records.create_version(
             self._database, job.request.version_for(stored, now)
         )
-        await records.create(
+        return await records.create(
             self._database, job.request.document_for(stored.document_id, now)
         )
 
-    async def _give_to_search(self, job: ConversionJob) -> None:
-        """Give search the version as it was recorded, with its details as they are
-        answered. Read back, so that a delivery after one that saved the version but
-        could not give it to search gives it all the same."""
+    async def _give_to_search(
+        self, job: ConversionJob, document: models.Document
+    ) -> None:
+        """Give search the version as it was recorded, with the document's details as
+        they are answered: what the hub keeps, not what a later request asked. Read
+        back, so that a delivery after one that saved the version but could not give it
+        to search gives it all the same."""
         [version] = [
             version
-            for version in await records.versions_of(self._database, job.document_id)
+            for version in await records.versions_of(self._database, document.id)
             if version.id == job.version_id
         ]
-        await self._search.index(version, models.details_as_now(job.request.metadata))
+        await self._search.index(version, models.details_as_now(document.metadata))
 
     def _reporting_on(self, file_id: ids.FileId) -> Callable[[int, int], None]:
         """Tells the staging record each step of the save, from the worker thread.

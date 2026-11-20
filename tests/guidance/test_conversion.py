@@ -17,6 +17,7 @@ import pydantic
 import pytest
 
 from app.background import consumer, sqs
+from app.common import tracing
 from app.guidance import conversion, models, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import store as staging_store
@@ -183,6 +184,44 @@ class TestConvertingAnUpload:
         [(version, metadata)] = search.indexed
         assert (version.id, version.title) == (job.version_id, "Claims guide")
         assert metadata["guideTitle"] == "Claims"
+
+    async def test_gives_search_the_details_saved_not_a_later_requests(
+        self, handler, body, job, database, search, converts
+    ):
+        """An earlier delivery saved the document; this job's request may hold other
+        answers, a later submission's, but search is given what the hub keeps."""
+        saved = job.request.model_copy(update={"metadata": {"guideTitle": "As saved"}})
+        await records.create_version(
+            database, saved.version_for(converts.return_value, _NOW)
+        )
+        await records.create(database, saved.document_for(job.document_id, _NOW))
+
+        await handler(body, last_delivery=False)
+
+        [(_, metadata)] = search.indexed
+        assert metadata["guideTitle"] == "As saved"
+
+    @pytest.mark.usefixtures("converts")
+    async def test_gives_search_the_version_under_the_requests_trace_id(
+        self, handler, job, search, mocker
+    ):
+        traced: list[str | None] = []
+        indexing = search.index
+
+        async def index(version, metadata):
+            traced.append(tracing.ctx_trace_id.get(None))
+            await indexing(version, metadata)
+
+        mocker.patch.object(search, "index", side_effect=index)
+        before = tracing.ctx_trace_id.get(None)
+        body = job.model_copy(update={"trace_id": "trace-123"}).model_dump_json(
+            by_alias=True
+        )
+
+        await handler(body, last_delivery=False)
+
+        assert traced == ["trace-123"]
+        assert tracing.ctx_trace_id.get(None) == before
 
     async def test_delivered_again_gives_search_the_version_it_could_not_give(
         self, handler, body, job, staging, search, converts

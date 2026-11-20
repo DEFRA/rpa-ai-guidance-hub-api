@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import json
 import uuid
 from typing import Any
 
@@ -446,6 +447,13 @@ class TestCreatingADocument:
         client.post("/guides", json=_request(createdBy=None))
 
         assert versions.documents[0]["createdBy"] is None
+
+    def test_the_job_carries_the_requests_trace_id(self, client, submitter):
+        client.post(
+            "/guides", json=_request(), headers={"x-cdp-request-id": "trace-123"}
+        )
+
+        assert json.loads(submitter.sent[0])["trace_id"] == "trace-123"
 
 
 class TestFollowingTheSave:

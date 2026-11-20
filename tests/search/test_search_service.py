@@ -114,8 +114,34 @@ class TestIndexingAVersionInTheSearchService:
         indexing = _indexing(lambda _request: httpx2.Response(503))
         version = _version()
 
-        with pytest.raises(search_service.SearchServiceError):
+        with pytest.raises(search_service.SearchServiceError) as raised:
             await indexing.index(version, {"guideTitle": "Paying claims"})
+
+        assert raised.type is search_service.SearchServiceError
+
+    async def test_fails_to_be_tried_again_when_the_search_service_does_not_answer(
+        self,
+    ):
+        def refusing_to_connect(request: httpx2.Request) -> httpx2.Response:
+            message = "connection refused"
+            raise httpx2.ConnectError(message, request=request)
+
+        indexing = _indexing(refusing_to_connect)
+        version = _version()
+
+        with pytest.raises(search_service.SearchServiceError) as raised:
+            await indexing.index(version, {"guideTitle": "Paying claims"})
+
+        assert raised.type is search_service.SearchServiceError
+
+    async def test_keeps_a_refusal_short(self):
+        indexing = _indexing(lambda _request: httpx2.Response(422, text="x" * 1000))
+        version = _version()
+
+        with pytest.raises(search_service.IndexRefusedError) as raised:
+            await indexing.index(version, {"guideTitle": "Paying claims"})
+
+        assert len(str(raised.value)) < 300  # noqa: PLR2004 - not the 1000 sent
 
 
 class TestSearchingAGuideInTheSearchService:

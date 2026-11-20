@@ -49,6 +49,8 @@ services:
       mongodb:
         condition: service_healthy
     environment:
+      # Not development, which the image sets: that runs uvicorn reloading for changes.
+      PYTHON_ENV: production
       PORT: 8086
       HOST: 0.0.0.0
       MONGO_URI: mongodb://mongodb:27017/
@@ -76,6 +78,9 @@ services:
       floci:
         condition: service_healthy
       mongodb:
+        condition: service_started
+      # Each save is given to search, so that it is indexed.
+      rpa-ai-guidance-hub-search:
         condition: service_started
     env_file:
       - ".env"

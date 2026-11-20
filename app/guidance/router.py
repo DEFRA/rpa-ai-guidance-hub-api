@@ -33,7 +33,7 @@ import fastapi
 from fastapi.concurrency import run_in_threadpool
 
 from app import config
-from app.common import mongo, s3
+from app.common import mongo, s3, tracing
 from app.guidance import conversion, ids, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import models as staging_models
@@ -146,6 +146,7 @@ async def create_document(
                 document_id=document_id,
                 version_id=version_id,
                 request=new,
+                trace_id=tracing.ctx_trace_id.get(None),
             ),
         )
 

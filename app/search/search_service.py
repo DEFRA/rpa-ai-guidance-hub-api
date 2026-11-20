@@ -27,6 +27,11 @@ if TYPE_CHECKING:
     from app.guidance import models
 
 
+# How much of a refusal's text is kept: enough to say why, not the whole request
+# echoed back.
+_REFUSAL_TEXT_LIMIT = 200
+
+
 class SearchServiceError(Exception):
     """The search service did not answer, or answered with an error."""
 
@@ -153,7 +158,7 @@ class SearchServiceIndex:
         if response.is_client_error:
             message = (
                 f"The search service refused version {version.id}: "
-                f"{response.status_code} {response.text}"
+                f"{response.status_code} {response.text[:_REFUSAL_TEXT_LIMIT]}"
             )
             raise IndexRefusedError(message)
         _successful(response)

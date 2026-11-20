@@ -74,3 +74,11 @@ def test_search_service_is_reached_by_its_service_name():
     assert compose["services"]["rpa-ai-guidance-hub-search"]["image"].startswith(
         "defradigital/rpa-ai-guidance-hub-search@sha256:"
     )
+
+
+def test_the_api_waits_for_search_which_runs_without_reloading():
+    compose = yaml.safe_load(COMPOSE_FILE.read_text())
+    search = compose["services"]["rpa-ai-guidance-hub-search"]
+
+    assert "rpa-ai-guidance-hub-search" in compose["services"][SERVICE]["depends_on"]
+    assert search["environment"]["PYTHON_ENV"] != "development"
