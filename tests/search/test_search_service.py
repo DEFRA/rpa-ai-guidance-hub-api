@@ -73,11 +73,18 @@ class TestSearchingAGuideInTheSearchService:
 
         assert found is None
 
-    async def test_says_when_the_search_service_fails(self):
-        searching = _searching(lambda _request: httpx2.Response(503))
+    @pytest.mark.parametrize(
+        "status",
+        [
+            pytest.param(503, id="an error"),
+            pytest.param(302, id="a redirect, which the client does not follow"),
+        ],
+    )
+    async def test_says_when_the_search_service_does_not_succeed(self, status):
+        searching = _searching(lambda _request: httpx2.Response(status))
         guide_id = ids.new_document_id()
 
-        with pytest.raises(search_service.SearchServiceError, match="503"):
+        with pytest.raises(search_service.SearchServiceError, match=str(status)):
             await searching.in_guide(guide_id, "pay")
 
     async def test_says_when_the_search_service_does_not_answer(self):
@@ -122,10 +129,17 @@ class TestFindingGuidesByTitleInTheSearchService:
             title_search.GuideTitle(other, "Reductions in Grants"),
         )
 
-    async def test_says_when_the_search_service_fails(self):
-        finding = _finding(lambda _request: httpx2.Response(503))
+    @pytest.mark.parametrize(
+        "status",
+        [
+            pytest.param(503, id="an error"),
+            pytest.param(302, id="a redirect, which the client does not follow"),
+        ],
+    )
+    async def test_says_when_the_search_service_does_not_succeed(self, status):
+        finding = _finding(lambda _request: httpx2.Response(status))
 
-        with pytest.raises(search_service.SearchServiceError, match="503"):
+        with pytest.raises(search_service.SearchServiceError, match=str(status)):
             await finding.like("reductions", limit=8)
 
     async def test_says_when_the_search_service_does_not_answer(self):

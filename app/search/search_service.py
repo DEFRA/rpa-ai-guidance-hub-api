@@ -89,7 +89,7 @@ async def _asked(
 
 
 def _successful(response: httpx2.Response) -> httpx2.Response:
-    if response.is_error:
+    if not response.is_success:
         message = f"The search service answered {response.status_code}"
         raise SearchServiceError(message)
     return response
