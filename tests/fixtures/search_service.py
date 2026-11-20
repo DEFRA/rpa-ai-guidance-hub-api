@@ -1,7 +1,8 @@
 """The search service's answers, as factories.
 
 Checked against `DocumentMatchesResponse` in the search service's
-`app/search/v1/schemas.py` and `docs/openapi.json`, at `eba1583`: camelCase on the
+`app/search/v1/schemas.py` and `docs/openapi.json`, at `eba1583`, and `Accepted` in
+its `app/ingestion/schemas.py` and `docs/openapi.json`, at `f4201e1`: camelCase on the
 wire.
 """
 
@@ -23,3 +24,13 @@ def section(anchor: str | None, *matches: dict[str, Any]) -> dict[str, Any]:
 def document_matches(version_id: str, *sections: dict[str, Any]) -> dict[str, Any]:
     """`GET /v1/documents/{documentId}/matches`, as `DocumentMatchesResponse`."""
     return {"versionId": version_id, "sections": list(sections)}
+
+
+def accepted(document_id: str, version_id: str) -> dict[str, Any]:
+    """`PUT /documents/{documentId}/versions/{versionId}`, as `Accepted`."""
+    return {
+        "documentId": document_id,
+        "versionId": version_id,
+        "status": "published",
+        "operation": "index",
+    }
