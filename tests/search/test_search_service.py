@@ -77,7 +77,14 @@ class TestSearchingAGuideInTheSearchService:
         searching = _searching(lambda _request: httpx2.Response(503))
         guide_id = ids.new_document_id()
 
-        with pytest.raises(httpx2.HTTPStatusError):
+        with pytest.raises(search_service.SearchServiceError, match="503"):
+            await searching.in_guide(guide_id, "pay")
+
+    async def test_says_when_the_search_service_does_not_answer(self):
+        searching = _searching(_refused)
+        guide_id = ids.new_document_id()
+
+        with pytest.raises(search_service.SearchServiceError, match="did not answer"):
             await searching.in_guide(guide_id, "pay")
 
 
@@ -118,5 +125,16 @@ class TestFindingGuidesByTitleInTheSearchService:
     async def test_says_when_the_search_service_fails(self):
         finding = _finding(lambda _request: httpx2.Response(503))
 
-        with pytest.raises(httpx2.HTTPStatusError):
+        with pytest.raises(search_service.SearchServiceError, match="503"):
             await finding.like("reductions", limit=8)
+
+    async def test_says_when_the_search_service_does_not_answer(self):
+        finding = _finding(_refused)
+
+        with pytest.raises(search_service.SearchServiceError, match="did not answer"):
+            await finding.like("reductions", limit=8)
+
+
+def _refused(request: httpx2.Request) -> httpx2.Response:
+    message = "Connection refused"
+    raise httpx2.ConnectError(message, request=request)

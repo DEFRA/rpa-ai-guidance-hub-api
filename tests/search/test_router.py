@@ -37,6 +37,29 @@ async def database(mongo_database):
     entrypoint.app.dependency_overrides.pop(mongo.get_db, None)
 
 
+class _FailingSearch:
+    """A search whose search service fails, wherever it is asked."""
+
+    async def in_guide(self, *_args: object) -> None:
+        raise search_service.SearchServiceError(_UNAVAILABLE)
+
+    async def like(self, *_args: object) -> None:
+        raise search_service.SearchServiceError(_UNAVAILABLE)
+
+
+_UNAVAILABLE = "The search service answered 503"
+
+
+@pytest.fixture
+def failing_search():
+    getters = (router.get_guide_search, router.get_title_search)
+    for getter in getters:
+        entrypoint.app.dependency_overrides[getter] = _FailingSearch
+    yield
+    for getter in getters:
+        entrypoint.app.dependency_overrides.pop(getter, None)
+
+
 @pytest.fixture
 async def client():
     transport = httpx2.ASGITransport(app=entrypoint.app)
@@ -168,6 +191,17 @@ class TestSearchingOneGuide:
 
         assert response.status_code == 502
 
+    @pytest.mark.usefixtures("failing_search")
+    async def test_is_a_bad_gateway_when_the_search_service_fails(self, client):
+        response = await client.get(
+            f"/guides/{ids.new_document_id()}/search", params={"q": "pay"}
+        )
+
+        assert (response.status_code, response.json()) == (
+            502,
+            {"detail": "The search service is not available"},
+        )
+
 
 class TestFindingGuidesByTitle:
     async def test_answers_the_guides_with_titles_like_the_words(
@@ -219,6 +253,15 @@ class TestFindingGuidesByTitle:
         )
 
         assert len(response.json()["items"]) == 2  # noqa: PLR2004 - the limit
+
+    @pytest.mark.usefixtures("failing_search")
+    async def test_is_a_bad_gateway_when_the_search_service_fails(self, client):
+        response = await client.get("/search/titles", params={"q": "reductions"})
+
+        assert (response.status_code, response.json()) == (
+            502,
+            {"detail": "The search service is not available"},
+        )
 
 
 class TestChoosingWhereOneGuideIsSearched:

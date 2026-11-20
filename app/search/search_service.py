@@ -1,7 +1,11 @@
 """Searches done by the search service. Search in one guide: it says where the words
 are in the version of the guide it has indexed (`GET /v1/documents/{documentId}/matches`).
 Finding guides by title: it gives the guides whose titles are like the one given
-(`GET /v1/search?title=`)."""
+(`GET /v1/search?title=`).
+
+When the search service does not answer, or answers with an error, each raises
+`SearchServiceError`.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,10 @@ from app.search import guide_search, title_search
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+class SearchServiceError(Exception):
+    """The search service did not answer, or answered with an error."""
 
 
 class SearchServiceGuideSearch:
@@ -33,15 +41,14 @@ class SearchServiceGuideSearch:
         """Where the words are in the version the search service has indexed; None
         when it has no version of the guide indexed, which it cannot tell apart from
         no guide."""
-        async with self._open_client() as client:
-            response = await client.get(
-                f"{self._base_url}/v1/documents/{guide_id}/matches",
-                params={"q": words},
-            )
+        response = await _asked(
+            self._open_client,
+            f"{self._base_url}/v1/documents/{guide_id}/matches",
+            {"q": words},
+        )
         if response.status_code == httpx2.codes.NOT_FOUND:
             return None
-        response.raise_for_status()
-        return _guide_matches(response.json())
+        return _guide_matches(_successful(response).json())
 
 
 class SearchServiceTitleSearch:
@@ -56,17 +63,36 @@ class SearchServiceTitleSearch:
     async def like(self, title: str, limit: int) -> tuple[title_search.GuideTitle, ...]:
         """The guides whose titles the search service finds like `title`, the likest
         first."""
-        async with self._open_client() as client:
-            response = await client.get(
-                f"{self._base_url}/v1/search", params={"title": title, "limit": limit}
-            )
-        response.raise_for_status()
+        response = await _asked(
+            self._open_client,
+            f"{self._base_url}/v1/search",
+            {"title": title, "limit": limit},
+        )
         return tuple(
             title_search.GuideTitle(
                 ids.DocumentId(uuid.UUID(result["documentId"])), result["documentTitle"]
             )
-            for result in response.json()["results"]
+            for result in _successful(response).json()["results"]
         )
+
+
+async def _asked(
+    open_client: Callable[[], httpx2.AsyncClient], url: str, params: dict[str, Any]
+) -> httpx2.Response:
+    """The search service's answer, whatever its status."""
+    try:
+        async with open_client() as client:
+            return await client.get(url, params=params)
+    except httpx2.HTTPError as error:
+        message = f"The search service did not answer: {error}"
+        raise SearchServiceError(message) from error
+
+
+def _successful(response: httpx2.Response) -> httpx2.Response:
+    if response.is_error:
+        message = f"The search service answered {response.status_code}"
+        raise SearchServiceError(message)
+    return response
 
 
 def _guide_matches(body: dict[str, Any]) -> guide_search.GuideMatches:

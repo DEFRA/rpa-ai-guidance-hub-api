@@ -3,6 +3,7 @@ each is done: `FEATURE_SEARCH_ONE_GUIDE` and `FEATURE_SEARCH_ALL_TITLES`."""
 
 from __future__ import annotations
 
+from logging import getLogger
 from typing import TYPE_CHECKING, Annotated, Any
 
 import fastapi
@@ -21,6 +22,8 @@ from app.search import (
 
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
+
+logger = getLogger(__name__)
 
 router = fastapi.APIRouter(prefix="/guides", tags=["search"])
 # Not under /guides, where GET /guides/{document_id} would take "titles" for an id.
@@ -71,6 +74,8 @@ async def search_one_guide(
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_502_BAD_GATEWAY, detail=str(missing)
         ) from missing
+    except search_service.SearchServiceError as failed:
+        raise _search_service_unavailable(failed) from failed
     if found is None:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_404_NOT_FOUND,
@@ -106,4 +111,19 @@ async def find_guides_by_title(
 ) -> schemas.GuideTitles:
     """The guides with titles like the words, the likest first: with a typo, half a
     word, the words in another order, or only some of them."""
-    return schemas.GuideTitles.from_model(await search.like(q, limit))
+    try:
+        found = await search.like(q, limit)
+    except search_service.SearchServiceError as failed:
+        raise _search_service_unavailable(failed) from failed
+    return schemas.GuideTitles.from_model(found)
+
+
+def _search_service_unavailable(
+    failed: search_service.SearchServiceError,
+) -> fastapi.HTTPException:
+    """A 502: the search service failed, not this API. Its address stays in the log."""
+    logger.warning("%s", failed)
+    return fastapi.HTTPException(
+        status_code=fastapi.status.HTTP_502_BAD_GATEWAY,
+        detail="The search service is not available",
+    )
