@@ -5,9 +5,14 @@ request that starts it does not wait: it sends a `ConversionJob` to the queue an
 answers at once, and the caller follows the save on the file's staging record. The
 consumer gives each message to `ConversionHandler`, which does the work.
 
+**Once the document is committed, search is given the version to index**, and only
+then is the save marked complete, so the message stays until search has it. Search
+answers before it has indexed it: the hub and search agree in the end, not at once.
+
 **Safe to repeat**, as SQS may deliver a message more than once: the ids are reserved
 once, on the staging record, every write creates rather than replaces and keeps what
-is already there, and a document already committed is only marked as saved.
+is already there, a document already committed is not converted again, and search
+keeps only the newest version it is given.
 
 **What becomes of a failure** decides what becomes of the message:
 
@@ -24,17 +29,18 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import anyio.from_thread
 import fastapi.concurrency
 import pydantic
 
-from app.guidance import ids, records, schemas, service
+from app.guidance import ids, models, records, schemas, service
 from app.guidance.parsing import errors
+from app.search import search_service
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     import pymongo.asynchronous.database
 
@@ -43,13 +49,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# What converting an upload raises that retrying cannot fix.
+# What converting an upload, or giving its version to search, raises that retrying
+# cannot fix.
 _UNFIXABLE = (
     service.SourceRefusedError,
     service.SourceMissingError,
     errors.DocumentParseError,
     records.MisfiledVersionError,
+    search_service.IndexRefusedError,
 )
+
+
+class SearchIndex(Protocol):
+    """Where each saved version goes, to be indexed as its guide's latest."""
+
+    async def index(
+        self, version: models.Version, metadata: Mapping[str, Any]
+    ) -> None: ...
 
 
 class ConversionJob(pydantic.BaseModel):
@@ -87,15 +103,18 @@ class ConversionHandler:
         database: pymongo.asynchronous.database.AsyncDatabase,
         staging: staging_store.StagingStore,
         guidance: service.GuidanceService,
+        search: SearchIndex,
     ) -> None:
         self._database = database
         self._staging = staging
         self._guidance = guidance
+        self._search = search
 
     async def __call__(self, body: str, *, last_delivery: bool) -> None:
         job = ConversionJob.model_validate_json(body)
         try:
             await self._save(job)
+            await self._give_to_search(job)
             await self._staging.promote(job.file_id)
         except _UNFIXABLE as unfixable:
             logger.warning("Could not convert file %s: %s", job.file_id, unfixable)
@@ -142,6 +161,17 @@ class ConversionHandler:
         await records.create(
             self._database, job.request.document_for(stored.document_id, now)
         )
+
+    async def _give_to_search(self, job: ConversionJob) -> None:
+        """Give search the version as it was recorded, with its details as they are
+        answered. Read back, so that a delivery after one that saved the version but
+        could not give it to search gives it all the same."""
+        [version] = [
+            version
+            for version in await records.versions_of(self._database, job.document_id)
+            if version.id == job.version_id
+        ]
+        await self._search.index(version, models.details_as_now(job.request.metadata))
 
     def _reporting_on(self, file_id: ids.FileId) -> Callable[[int, int], None]:
         """Tells the staging record each step of the save, from the worker thread.

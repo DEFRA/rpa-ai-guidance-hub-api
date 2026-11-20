@@ -30,6 +30,7 @@ from app.guidance import conversion, models, records, router, service
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
 from app.guidance.parsing.errors import DocumentParseError
+from tests.fakes import search_index as fake_search_index
 from tests.fakes import submitter as fake_submitter
 
 UPLOAD = "854a1f43-aab4-4579-b166-d708c0aad436"
@@ -282,7 +283,10 @@ def submitter(collections, staging):
     """The queue's stand-in, giving each job at once to the handler."""
     fake = fake_submitter.InMemorySubmitter(
         conversion.ConversionHandler(
-            collections, staging, service.GuidanceService(s3_client=None)
+            collections,
+            staging,
+            service.GuidanceService(s3_client=None),
+            fake_search_index.InMemorySearchIndex(),
         )
     )
     app.dependency_overrides[router.get_conversion_submitter] = lambda: fake
