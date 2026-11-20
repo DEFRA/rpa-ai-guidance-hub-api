@@ -86,12 +86,13 @@ class MisfiledVersionError(RuntimeError):
 # `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
 
-# The aggregation stages the queries below use more than once.
+# The aggregation stages and operators the queries below use more than once.
 _MATCH = "$match"
 _SORT = "$sort"
 _IN = "$in"
 _GROUP = "$group"
 _OR = "$or"
+_FIRST = "$first"
 
 
 async def ensure_indexes(
@@ -297,9 +298,7 @@ def _updated_at() -> list[dict[str, Any]]:
         },
         {
             "$set": {
-                _UPDATED_AT: {
-                    "$ifNull": [{"$first": "$newest.createdAt"}, "$createdAt"]
-                },
+                _UPDATED_AT: {"$ifNull": [{_FIRST: "$newest.createdAt"}, "$createdAt"]},
             }
         },
     ]
@@ -388,7 +387,7 @@ async def latest_versions_of(
     pipeline: list[dict[str, Any]] = [
         {_MATCH: {DOCUMENT_ID: {_IN: list(document_ids)}}},
         {_SORT: dict(_NEWEST)},
-        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {_FIRST: "$$ROOT"}}},
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)
     return {
@@ -405,7 +404,7 @@ async def latest_titles(
     query."""
     pipeline: list[dict[str, Any]] = [
         {_SORT: dict(_NEWEST)},
-        {_GROUP: {"_id": f"${DOCUMENT_ID}", _TITLE: {"$first": f"${_TITLE}"}}},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", _TITLE: {_FIRST: f"${_TITLE}"}}},
         {_MATCH: {_TITLE: {"$type": "string"}}},
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)
