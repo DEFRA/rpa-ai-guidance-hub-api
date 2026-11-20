@@ -71,6 +71,7 @@ VERSIONS = "document_versions"
 _UPLOAD_ID = "source.uploadId"
 
 _METADATA = "metadata"
+_TITLE = "title"
 
 # The document a version belongs to: the many end of the one-to-many. Its name is the
 # model's, which owns how a version is stored.
@@ -85,12 +86,13 @@ class MisfiledVersionError(RuntimeError):
 # `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
 
-# The aggregation stages the queries below use more than once.
+# The aggregation stages and operators the queries below use more than once.
 _MATCH = "$match"
 _SORT = "$sort"
 _IN = "$in"
 _GROUP = "$group"
 _OR = "$or"
+_FIRST = "$first"
 
 
 async def ensure_indexes(
@@ -296,9 +298,7 @@ def _updated_at() -> list[dict[str, Any]]:
         },
         {
             "$set": {
-                _UPDATED_AT: {
-                    "$ifNull": [{"$first": "$newest.createdAt"}, "$createdAt"]
-                },
+                _UPDATED_AT: {"$ifNull": [{_FIRST: "$newest.createdAt"}, "$createdAt"]},
             }
         },
     ]
@@ -387,13 +387,28 @@ async def latest_versions_of(
     pipeline: list[dict[str, Any]] = [
         {_MATCH: {DOCUMENT_ID: {_IN: list(document_ids)}}},
         {_SORT: dict(_NEWEST)},
-        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {"$first": "$$ROOT"}}},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {_FIRST: "$$ROOT"}}},
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)
     return {
         group["_id"]: models.Version.from_document(group["newest"])
         async for group in cursor
     }
+
+
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
+async def latest_titles(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> dict[ids.DocumentId, str]:
+    """The title of every document's newest version, where it has one, in a single
+    query."""
+    pipeline: list[dict[str, Any]] = [
+        {_SORT: dict(_NEWEST)},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", _TITLE: {_FIRST: f"${_TITLE}"}}},
+        {_MATCH: {_TITLE: {"$type": "string"}}},
+    ]
+    cursor = await database[VERSIONS].aggregate(pipeline)
+    return {group["_id"]: group[_TITLE] async for group in cursor}
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)
