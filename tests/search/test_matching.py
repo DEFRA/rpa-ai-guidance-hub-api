@@ -83,6 +83,10 @@ class TestMatching:
             "SBE3 option BE31; BE3 option BE3", "be3 option be3"
         ) == [(18, 32)]
 
+    def test_finds_a_code_in_brackets_where_a_letter_runs_on_from_its_brackets(self):
+        """The brackets are the code's edges, so what is beyond them does not count."""
+        assert matching.matches_in("x(BE3)y", "(be3)") == [(1, 6)]
+
     def test_places_a_match_where_the_text_has_it_after_a_letter_lower_case_is_longer(
         self,
     ):
