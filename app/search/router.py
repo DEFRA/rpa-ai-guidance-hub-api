@@ -44,16 +44,8 @@ def get_guide_search(
     if config.get_config().feature_search_one_guide is not _SEARCH_API:
         return in_hub.InHubGuideSearch(stored_guides.reader(database, s3_client))
     return search_service.SearchServiceGuideSearch(
-        _search_api_address("Search in one guide")
+        config.get_config().search_api_base_url
     )
-
-
-def _search_api_address(search: str) -> str:
-    address = config.get_config().search_api_base_url
-    if address is None:
-        message = f"{search} goes to the search API, but SEARCH_API_BASE_URL is not set"
-        raise RuntimeError(message)
-    return address
 
 
 GuideSearch = Annotated[guide_search.GuideSearch, fastapi.Depends(get_guide_search)]
@@ -89,7 +81,7 @@ def get_title_search(database: Database) -> title_search.TitleSearch:
     if config.get_config().feature_search_all_titles is not _SEARCH_API:
         return in_hub.InHubTitleSearch(stored_guides.titles_reader(database))
     return search_service.SearchServiceTitleSearch(
-        _search_api_address("Finding guides by title")
+        config.get_config().search_api_base_url
     )
 
 

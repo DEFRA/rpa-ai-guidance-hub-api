@@ -17,11 +17,14 @@ import pydantic
 import pytest
 
 from app.background import consumer, sqs
+from app.common import tracing
 from app.guidance import conversion, models, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import store as staging_store
 from app.guidance.parsing import errors
 from app.guidance.parsing import models as parsing_models
+from app.search import search_service
+from tests.fakes import search_index as fake_search_index
 from tests.fixtures import word_documents
 
 _NOW = dt.datetime(2026, 11, 6, 12, 0, tzinfo=dt.UTC)
@@ -87,9 +90,14 @@ def converts(mocker, job):
 
 
 @pytest.fixture
-def handler(database, staging) -> conversion.ConversionHandler:
+def search() -> fake_search_index.InMemorySearchIndex:
+    return fake_search_index.InMemorySearchIndex()
+
+
+@pytest.fixture
+def handler(database, staging, search) -> conversion.ConversionHandler:
     return conversion.ConversionHandler(
-        database, staging, service.GuidanceService(s3_client=None)
+        database, staging, service.GuidanceService(s3_client=None), search
     )
 
 
@@ -167,6 +175,70 @@ class TestConvertingAnUpload:
         marking.assert_awaited_once_with(job.file_id)
         converts.assert_called_once()
 
+    @pytest.mark.usefixtures("converts")
+    async def test_gives_search_the_saved_version_with_its_details(
+        self, handler, body, job, search
+    ):
+        await handler(body, last_delivery=False)
+
+        [(version, metadata)] = search.indexed
+        assert (version.id, version.title) == (job.version_id, "Claims guide")
+        assert metadata["guideTitle"] == "Claims"
+
+    async def test_gives_search_the_details_saved_not_a_later_requests(
+        self, handler, body, job, database, search, converts
+    ):
+        """An earlier delivery saved the document; this job's request may hold other
+        answers, a later submission's, but search is given what the hub keeps."""
+        saved = job.request.model_copy(update={"metadata": {"guideTitle": "As saved"}})
+        await records.create_version(
+            database, saved.version_for(converts.return_value, _NOW)
+        )
+        await records.create(database, saved.document_for(job.document_id, _NOW))
+
+        await handler(body, last_delivery=False)
+
+        [(_, metadata)] = search.indexed
+        assert metadata["guideTitle"] == "As saved"
+
+    @pytest.mark.usefixtures("converts")
+    async def test_gives_search_the_version_under_the_requests_trace_id(
+        self, handler, job, search, mocker
+    ):
+        traced: list[str | None] = []
+        indexing = search.index
+
+        async def index(version, metadata):
+            traced.append(tracing.ctx_trace_id.get(None))
+            await indexing(version, metadata)
+
+        mocker.patch.object(search, "index", side_effect=index)
+        before = tracing.ctx_trace_id.get(None)
+        body = job.model_copy(update={"trace_id": "trace-123"}).model_dump_json(
+            by_alias=True
+        )
+
+        await handler(body, last_delivery=False)
+
+        assert traced == ["trace-123"]
+        assert tracing.ctx_trace_id.get(None) == before
+
+    async def test_delivered_again_gives_search_the_version_it_could_not_give(
+        self, handler, body, job, staging, search, converts
+    ):
+        """Search was away when the version was saved: the next delivery gives it the
+        version, without converting the upload again, and only then marks the save."""
+        search.failure = search_service.SearchServiceError("search away")
+        with pytest.raises(search_service.SearchServiceError):
+            await handler(body, last_delivery=False)
+        search.failure = None
+
+        await handler(body, last_delivery=False)
+
+        assert [version.id for version, _ in search.indexed] == [job.version_id]
+        converts.assert_called_once()
+        assert (await staging.get(job.file_id)).saving_status == "complete"
+
 
 class TestAFailureRetryingCannotFix:
     """Recorded, and returned from, so the consumer deletes the message."""
@@ -224,6 +296,18 @@ class TestAFailureRetryingCannotFix:
         assert (await staging.get(job.file_id)).saving_status == "failed"
         assert await records.find(database, job.document_id) is None
 
+    @pytest.mark.usefixtures("converts")
+    async def test_includes_search_refusing_the_version(
+        self, handler, body, job, staging, search
+    ):
+        search.failure = search_service.IndexRefusedError("422 no guide title")
+
+        await handler(body, last_delivery=False)
+
+        staged = await staging.get(job.file_id)
+        assert staged.saving_status == "failed"
+        assert staged.save_error == "422 no guide title"
+
 
 class TestAnyOtherFailure:
     """Raised, so the consumer leaves the message for SQS to deliver again."""
@@ -239,6 +323,19 @@ class TestAnyOtherFailure:
         staged = await staging.get(job.file_id)
         assert staged.saving_status == "in_progress"
         assert staged.save_error is None
+
+    @pytest.mark.usefixtures("converts")
+    async def test_includes_search_failing_so_the_save_is_not_marked(
+        self, handler, body, job, staging, search
+    ):
+        search.failure = search_service.SearchServiceError("search away")
+
+        with pytest.raises(search_service.SearchServiceError):
+            await handler(body, last_delivery=False)
+
+        staged = await staging.get(job.file_id)
+        assert staged.saving_status == "in_progress"
+        assert staged.promoted_at is None
 
     async def test_on_its_last_delivery_is_recorded_too(
         self, handler, body, job, staging, converts
