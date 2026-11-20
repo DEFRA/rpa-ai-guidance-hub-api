@@ -23,10 +23,10 @@ import string
 # Each character that can start Markdown in a heading line: an escape, code, emphasis,
 # strikethrough, a link or picture, HTML or an autolink, an entity, and a `#` that
 # can close the heading.
-_STARTS_MARKDOWN = frozenset("\\`*_~[<&#")
+_STARTS_MARKDOWN: frozenset[str] = frozenset("\\`*_~[<&#")
 
 # CommonMark lets a backslash escape any ASCII punctuation character.
-_ESCAPE = re.compile(rf"\\([{re.escape(string.punctuation)}])")
+_ESCAPE: re.Pattern[str] = re.compile(rf"\\([{re.escape(string.punctuation)}])")
 
 
 def as_markdown(text: str) -> str:
