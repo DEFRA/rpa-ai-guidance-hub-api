@@ -3,7 +3,7 @@ each is done: `FEATURE_SEARCH_ONE_GUIDE` and `FEATURE_SEARCH_ALL_TITLES`."""
 
 from __future__ import annotations
 
-from logging import getLogger
+import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 import fastapi
@@ -23,7 +23,7 @@ from app.search import (
 if TYPE_CHECKING:
     import pymongo.asynchronous.database
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 router = fastapi.APIRouter(prefix="/guides", tags=["search"])
 # Not under /guides, where GET /guides/{document_id} would take "titles" for an id.
