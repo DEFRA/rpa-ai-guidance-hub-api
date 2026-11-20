@@ -13,7 +13,7 @@ services:
       - cdp-tenant
 
   redis:
-    image: redis@sha256:3ce533b2b057f74b235d1d8697ae08b1b6ff0a5e16827ea6a377b6365693c7ed # 7.2.3-alpine3.18
+    image: redis@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53 # 7.2.3-alpine3.18
     ports:
       - '6379:6379'
     networks:
