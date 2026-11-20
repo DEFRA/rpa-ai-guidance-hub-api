@@ -26,3 +26,12 @@ class TestFindingGuidesByTitleInTheHub:
         found = await in_hub.InHubTitleSearch(read).like("pond survey", limit=8)
 
         assert [guide.guide_id for guide in found] == [first, second]
+
+    async def test_finds_no_untitled_guide_for_no_words(self):
+        """With no words on either side, there is nothing to compare, not a perfect
+        likeness."""
+
+        async def read() -> list[title_search.GuideTitle]:
+            return [title_search.GuideTitle(ids.new_document_id(), "")]
+
+        assert await in_hub.InHubTitleSearch(read).like(" – ", limit=8) == ()

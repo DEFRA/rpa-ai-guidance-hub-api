@@ -26,6 +26,9 @@ def score(wanted: str, title: str) -> float:
     """How like `title` is to `wanted`, from 0 to 100; 0 for not alike."""
     wanted = _normalised(wanted)
     title = _normalised(title)
+    if not (wanted and title):
+        # RapidFuzz scores two empty strings 100: nothing compared is not alike.
+        return 0.0
     mean = (
         fuzz.partial_token_sort_ratio(wanted, title) + fuzz.partial_ratio(wanted, title)
     ) / 2
