@@ -95,6 +95,15 @@ class TestSearchingOneGuide:
 
         assert response.status_code == 404
 
+    async def test_of_more_characters_than_the_search_service_takes_is_refused(
+        self, client
+    ):
+        response = await client.get(
+            f"/guides/{ids.new_document_id()}/search", params={"q": "p" * 501}
+        )
+
+        assert response.status_code == 422
+
     async def test_of_a_guide_whose_document_is_not_yet_recorded_is_not_found(
         self, client, database, mocker
     ):

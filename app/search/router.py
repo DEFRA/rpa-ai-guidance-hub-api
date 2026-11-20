@@ -42,7 +42,7 @@ GuideSearch = Annotated[guide_search.GuideSearch, fastapi.Depends(get_guide_sear
 @router.get("/{document_id}/search")
 async def search_one_guide(
     document_id: ids.DocumentId,
-    q: Annotated[str, fastapi.Query(description="The words to find")],
+    q: Annotated[str, fastapi.Query(max_length=500, description="The words to find")],
     search: GuideSearch,
 ) -> schemas.GuideMatches:
     """Where the words are in the guide's latest version: in each section that holds
