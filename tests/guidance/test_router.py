@@ -61,9 +61,8 @@ AUTHOR = {"id": "dev-user-123", "displayName": "Dev User"}
 NEXT_UPLOAD = "6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24"
 NEXT_FILE = "7a2e9c41-5d3b-4f60-8e1a-2c4b6d8f0a13"
 NEXT_VERSION = uuid.UUID("0199b8a3-0a2d-7c41-9e3b-5d7f1a3c5e79")
-# Reserved for the second upload as for any upload, and not used: its version is the
-# document's.
-UNUSED_DOCUMENT = uuid.UUID("0199b8a3-0a2e-7d52-8f4c-6e8a2b4d6f80")
+# A document other than the one the first upload made.
+OTHER_DOCUMENT = uuid.UUID("0199b8a3-0a2e-7d52-8f4c-6e8a2b4d6f80")
 NEXT_CONTENT = f"s3://rpa-ai-guidance-hub-docs/{DOCUMENT}/{NEXT_VERSION}/content.md"
 
 
@@ -175,11 +174,13 @@ def collections():
 
 class FakeStaging:
     """Staged files by id. Reserving gives every file the same pair of ids, the ones
-    the stubbed conversion answers with."""
+    the stubbed conversion answers with, unless a case says otherwise."""
 
     def __init__(self) -> None:
         self.staged: dict[str, staging_models.StagedDocument] = {}
         self.progress: list[tuple[int, int]] = []
+        # The document id a reservation mints, where it is not given one.
+        self.minted = DOCUMENT
 
     def stage(
         self,
@@ -206,12 +207,20 @@ class FakeStaging:
     async def get(self, file_id: str) -> staging_models.StagedDocument | None:
         return self.staged.get(file_id)
 
-    async def reserve_ids(self, file_id: str) -> staging_models.StagedDocument | None:
+    async def reserve_ids(
+        self, file_id: str, document_id: uuid.UUID | None = None
+    ) -> staging_models.StagedDocument | None:
+        """Reserves `document_id`, else the one it mints, and the version id the file
+        was staged with, else the stubbed conversion's."""
         staged = self.staged.get(file_id)
         if staged is None or staged.parsing_status != "complete":
             return None
         if staged.document_id is None:
-            self._update(file_id, document_id=DOCUMENT, version_id=VERSION)
+            self._update(
+                file_id,
+                document_id=document_id or self.minted,
+                version_id=staged.version_id or VERSION,
+            )
         return self.staged[file_id]
 
     async def start_saving(self, file_id: str) -> bool:
@@ -900,10 +909,10 @@ class TestAddingAVersionToADocument:
         """
         client.post("/guides", json=_request())
         mocker.patch.object(conversion.section_ids, "of_new_version", return_value=None)
+        staging.minted = OTHER_DOCUMENT
         staging.stage(
             file_id=NEXT_FILE,
             path=f"{NEXT_UPLOAD}/{NEXT_FILE}",
-            document_id=UNUSED_DOCUMENT,
             version_id=NEXT_VERSION,
         )
         converts.return_value = models.StoredDocument(
@@ -934,6 +943,33 @@ class TestAddingAVersionToADocument:
         assert response.status_code == 202
         assert response.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
         assert response.json()["savingStatus"] == "in_progress"
+
+    def test_its_progress_names_the_document(self, client, document, submitter):
+        """The staging record says which document the file is saved into, while it is
+        saved and after."""
+        submitter.handler = None
+
+        response = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert response.json()["documentId"] == str(document)
+        progress = client.get(f"/guides/staging/{NEXT_FILE}")
+        assert progress.json()["documentId"] == str(document)
+
+    def test_an_upload_being_made_into_another_document_is_a_conflict(
+        self, client, document, staging, submitter
+    ):
+        """Submitted as a new guide first, say, then as a version of this one."""
+        staging.stage(
+            file_id=NEXT_FILE,
+            path=f"{NEXT_UPLOAD}/{NEXT_FILE}",
+            document_id=OTHER_DOCUMENT,
+            version_id=NEXT_VERSION,
+        )
+
+        response = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert response.status_code == 409
+        assert len(submitter.sent) == 1
 
     def test_the_upload_is_converted_into_the_document(
         self, client, document, converts
@@ -967,7 +1003,7 @@ class TestAddingAVersionToADocument:
 
     @pytest.mark.usefixtures("document")
     def test_a_document_that_never_was_is_not_found(self, client, submitter):
-        response = client.post(f"/guides/{UNUSED_DOCUMENT}/versions", json=self._next())
+        response = client.post(f"/guides/{OTHER_DOCUMENT}/versions", json=self._next())
 
         assert response.status_code == 404
         assert len(submitter.sent) == 1

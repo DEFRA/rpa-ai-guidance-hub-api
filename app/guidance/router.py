@@ -163,6 +163,10 @@ async def create_document(
         fastapi.status.HTTP_404_NOT_FOUND: {
             "description": "No such document, or no such staged file",
         },
+        fastapi.status.HTTP_409_CONFLICT: {
+            "description": "The file has not parsed, or is being made into another "
+            "document",
+        },
         fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "The conversion could not be started; try again",
         },
@@ -180,7 +184,9 @@ async def create_version(  # noqa: PLR0913 - the document, the request, what ser
     to follow it, as `POST /guides` does. The version is the document's newest once it
     is saved, and so live at once.
 
-    The upload's ids are reserved as for any upload, and only its version id is used.
+    The upload's ids are reserved under the document's own id, so the file's staging
+    record names the document it is saved into. An upload whose ids are reserved
+    under another document, being made into a guide of its own say, is a conflict.
     Submitting the same upload again never starts a second save: once its version is
     recorded and the save marked complete, the document is answered (200).
     """
@@ -190,7 +196,13 @@ async def create_version(  # noqa: PLR0913 - the document, the request, what ser
             detail=f"No guide {document_id}",
         )
 
-    staged, _, version_id = await _reserved(staging, new.source)
+    staged, reserved_for, version_id = await _reserved(staging, new.source, document_id)
+    if reserved_for != document_id:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail=f"File {new.source.file_id} is being made into {reserved_for}",
+        )
+
     already = await records.find_version(database, document_id, version_id)
     if already is not None and await _finished(staging, staged.file_id):
         response.status_code = fastapi.status.HTTP_200_OK
@@ -339,9 +351,12 @@ async def _finished(staging: staging_store.StagingStore, file_id: ids.FileId) ->
 
 
 async def _reserved(
-    staging: staging_store.StagingStore, source: schemas.Source
+    staging: staging_store.StagingStore,
+    source: schemas.Source,
+    document_id: ids.DocumentId | None = None,
 ) -> tuple[staging_models.StagedDocument, ids.DocumentId, ids.VersionId]:
-    """The upload's staging record, and the document and version ids reserved on it.
+    """The upload's staging record, and the document and version ids reserved on it:
+    `document_id`, for a new version of it, unless others were reserved before.
 
     Answers the caller's mistakes as their status codes: a file that was never
     staged (or whose record has expired), a file that is not part of the upload
@@ -369,7 +384,7 @@ async def _reserved(
             detail=f"File {source.file_id} is {staged.parsing_status}, not parsed",
         )
 
-    reserved = await staging.reserve_ids(source.file_id)
+    reserved = await staging.reserve_ids(source.file_id, document_id)
     if reserved is None or reserved.document_id is None or reserved.version_id is None:
         # Expired between reading it and reserving on it.
         raise fastapi.HTTPException(

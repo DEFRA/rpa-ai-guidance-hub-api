@@ -34,7 +34,7 @@ class StagingStore(Protocol):
     ) -> staging_models.StagedDocument | None: ...
 
     async def reserve_ids(
-        self, file_id: ids.FileId
+        self, file_id: ids.FileId, document_id: ids.DocumentId | None = None
     ) -> staging_models.StagedDocument | None: ...
 
     async def promote(self, file_id: ids.FileId) -> None: ...
@@ -124,12 +124,14 @@ class MongoStagingStore:
 
     @mongo_timeouts.mongo(mongo_timeouts.FAST)
     async def reserve_ids(
-        self, file_id: ids.FileId
+        self, file_id: ids.FileId, document_id: ids.DocumentId | None = None
     ) -> staging_models.StagedDocument | None:
-        """Reserve the ids a document made from this file is stored under.
+        """Reserve the ids a document made from this file is stored under:
+        `document_id` for a new version of a document there already, else a new one,
+        and a new version id.
 
-        The first call for a parsed file mints them; every later call, including one
-        racing it, gets the same pair back. Set only where none are set yet, in one
+        The first call for a parsed file reserves them; every later call, including one
+        racing it, gets the same pair back, whatever `document_id` it names. Set only where none are set yet, in one
         update, so whichever request lands first decides and the rest read its ids:
         that is what lets a retried or repeated submission finish one document
         rather than start another.
@@ -146,7 +148,7 @@ class MongoStagingStore:
             },
             {
                 "$set": {
-                    "document_id": ids.new_document_id(),
+                    "document_id": document_id or ids.new_document_id(),
                     "version_id": ids.new_version_id(),
                     "updated_at": datetime.now(UTC),
                 }

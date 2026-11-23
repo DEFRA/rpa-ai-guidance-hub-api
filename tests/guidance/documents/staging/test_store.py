@@ -171,6 +171,27 @@ class TestReserveIds:
         assert isinstance(raw["version_id"], uuid.UUID)
         assert (raw["document_id"].version, raw["version_id"].version) == (7, 7)
 
+    async def test_for_a_new_version_reserves_its_documents_id(self, staging_store):
+        """A new version of a document there already is stored under that document."""
+        file_id = f"reserve-{uuid.uuid4()}"
+        await self._parsed(staging_store, file_id)
+        document = uuid.uuid7()
+
+        staged = await staging_store.reserve_ids(file_id, document)
+
+        assert staged.document_id == document
+
+    async def test_reserved_for_one_document_it_stays_reserved_for_it(
+        self, staging_store
+    ):
+        file_id = f"reserve-{uuid.uuid4()}"
+        await self._parsed(staging_store, file_id)
+        first = await staging_store.reserve_ids(file_id)
+
+        again = await staging_store.reserve_ids(file_id, uuid.uuid7())
+
+        assert again.document_id == first.document_id
+
     async def test_reserving_again_gives_the_same_ids(self, staging_store):
         file_id = f"reserve-{uuid.uuid4()}"
         await self._parsed(staging_store, file_id)
