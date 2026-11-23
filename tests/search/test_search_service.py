@@ -101,6 +101,20 @@ class TestIndexingAVersionInTheSearchService:
             "Paying claims"
         )
 
+    async def test_leaves_out_a_detail_with_no_value(self):
+        """The search service refuses a list of schemes, systems or audiences that is
+        null, and reads one that is absent as empty: a guide saved with `schemes: null`
+        is indexed, not refused for good."""
+        asked: list[httpx2.Request] = []
+
+        await _indexing(_accepting(asked)).index(
+            _version(), {"guideTitle": "Paying claims", "schemes": None, "owner": None}
+        )
+
+        assert json.loads(asked[0].content)["metadata"] == {
+            "guideTitle": "Paying claims"
+        }
+
     async def test_is_refused_for_good_when_the_search_service_refuses_the_version(
         self,
     ):

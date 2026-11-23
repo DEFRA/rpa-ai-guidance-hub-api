@@ -168,9 +168,12 @@ def _index_request(
     version: models.Version, metadata: Mapping[str, Any]
 ) -> dict[str, Any]:
     """The version as the search service indexes it. Its title is the version's, else
-    the journey's, as the guide's page shows it. Mongo keeps the time in UTC without
-    its zone, which the search service requires."""
+    the journey's, as the guide's page shows it. A detail with no value is left out:
+    the search service refuses a list that is null, and reads one that is absent as
+    empty. Mongo keeps the time in UTC without its zone, which the search service
+    requires."""
     saved_at = version.created_at.replace(tzinfo=version.created_at.tzinfo or dt.UTC)
+    given = {name: value for name, value in metadata.items() if value is not None}
     return {
         "sourceType": "guide",
         "status": "published",
@@ -178,7 +181,7 @@ def _index_request(
         "versionNumber": version.version_number,
         "contentUrl": version.content_url,
         "metadata": {
-            **metadata,
+            **given,
             "guideTitle": version.title or metadata.get("guideTitle"),
         },
     }
