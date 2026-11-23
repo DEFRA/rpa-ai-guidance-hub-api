@@ -119,7 +119,7 @@ async def of_new_version(
     headings = dict(
         zip(
             _anchors_of(after_sections),
-            (section.heading for section in after_sections),
+            (section.rendered_heading for section in after_sections),
             strict=True,
         )
     )

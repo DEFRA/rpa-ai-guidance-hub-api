@@ -291,19 +291,19 @@ class TestConvertingAnUploadIntoANewVersion:
 
     @pytest.fixture
     def contents(self, mocker, job, next_job):
-        """What each version stored: the second renumbers the first's sections, and
-        puts a new one before them."""
+        """What each version stored, as the hub writes it: the second renumbers the
+        first's sections, and puts a new one before them."""
         stored = {
             f"s3://docs/{job.document_id}/{job.version_id}/content.md": (
                 "# Claims guide\n\n"
-                "## 1. Apply for the payment\n\nSend the form.\n\n"
-                "## 2. Get paid\n\nWe pay you.\n"
+                "## 1 Apply for the payment\n\nSend the form.\n\n"
+                "## 2 Get paid\n\nWe pay you.\n"
             ),
             f"s3://docs/{job.document_id}/{next_job.version_id}/content.md": (
                 "# Claims guide\n\n"
-                "## 1. Check you can apply\n\nRead the rules.\n\n"
-                "## 2. Apply for the payment\n\nSend the form.\n\n"
-                "## 3. Get paid\n\nWe pay you.\n"
+                "## 1 Check you can apply\n\nRead the rules.\n\n"
+                "## 2 Apply for the payment\n\nSend the form.\n\n"
+                "## 3 Get paid\n\nWe pay you.\n"
             ),
         }
         return mocker.patch.object(
@@ -341,7 +341,7 @@ class TestConvertingAnUploadIntoANewVersion:
 
         after = await section_ids.of_version(database, next_job.version_id, [])
         headings = await section_ids.headings_of(database, [next_job.version_id])
-        assert headings[next_job.version_id][after["3-get-paid"]] == "3. Get paid"
+        assert headings[next_job.version_id][after["3-get-paid"]] == "3 Get paid"
 
     @pytest.mark.usefixtures("contents")
     async def test_saves_it_as_the_documents_newest_version(
