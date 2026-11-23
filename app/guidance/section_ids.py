@@ -5,7 +5,9 @@ number and words, stays its address.
 A version's sections are given their ids the first time they are asked for, and
 kept with the version from then on; when two ask at once, both read back whichever
 was kept first. Every version is given them this way, however old: from its stored
-content (`of_latest`), which is read only until they are kept.
+content (`of_latest`), which is read only until they are kept. A new version's
+sections are given the ids of the same sections in the version before
+(`carried_over`), so what points into a section follows it.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from app.common import mongo_timeouts
-from app.guidance import ids, records
+from app.guidance import ids, records, section_matching
 from app.guidance.documents import reader, store
 from app.guidance.parsing import anchors
 
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
     import pymongo.asynchronous.database
 
     from app.guidance import models
+    from app.guidance.parsing import models as parsing_models
 
 # Where a version record keeps its sections' ids, in order: `{anchor, id}` each.
 _SECTION_IDS = "sectionIds"
@@ -94,6 +97,27 @@ async def of_version(
         )
         found = await versions.find_one({"_id": version_id}, {_SECTION_IDS: 1})
     return {} if found is None else _by_anchor(found[_SECTION_IDS])
+
+
+def carried_over(
+    before: Sequence[parsing_models.MarkdownSection],
+    before_ids: Mapping[str, ids.SectionId],
+    after: Sequence[parsing_models.MarkdownSection],
+) -> dict[str, ids.SectionId]:
+    """Each section of a new version (`after`) by its anchor, in its order, with the
+    id of the same section of the version before (`before`, whose ids by anchor are
+    `before_ids`); a new id for a new section."""
+    before_anchors = anchors.of_document(list(before))
+    after_anchors = anchors.of_document(list(after))
+    earlier = section_matching.earlier_sections(before, after)
+    return {
+        after_anchors[id(section)]: (
+            ids.new_section_id()
+            if at is None
+            else before_ids[before_anchors[id(before[at])]]
+        )
+        for section, at in zip(after, earlier, strict=True)
+    }
 
 
 def _by_anchor(kept: Sequence[Mapping[str, Any]]) -> dict[str, ids.SectionId]:

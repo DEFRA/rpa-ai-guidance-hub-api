@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from app.guidance import ids, models, records, section_ids
+from app.guidance.documents import reader
 
 ANCHORS = ["guide", "1-claims", "1-1-pay"]
 
@@ -166,3 +167,42 @@ class TestSectionIdsOfLatestVersions:
         kept = await mongo_database[records.VERSIONS].find_one({"_id": version.id})
         assert given == {version.document_id: {}}
         assert "sectionIds" not in kept
+
+
+BEFORE = "## 1 Claims\n\nHow to claim.\n\n## 2 Checks\n\nWhat to check.\n"
+
+
+class TestTheSectionIdsOfANewVersion:
+    """Carried over from the version before, section by section."""
+
+    def test_are_those_of_the_same_sections_before_by_the_new_anchors_in_order(self):
+        before = reader.from_markdown(BEFORE).sections
+        before_ids = {
+            "1-claims": ids.new_section_id(),
+            "2-checks": ids.new_section_id(),
+        }
+        after = reader.from_markdown(
+            "## 1 Checks\n\nWhat to check.\n\n## 2 Claims\n\nHow to claim.\n"
+        ).sections
+
+        carried = section_ids.carried_over(before, before_ids, after)
+
+        assert carried == {
+            "1-checks": before_ids["2-checks"],
+            "2-claims": before_ids["1-claims"],
+        }
+
+    def test_are_new_for_a_new_section(self):
+        before = reader.from_markdown(BEFORE).sections
+        before_ids = {
+            "1-claims": ids.new_section_id(),
+            "2-checks": ids.new_section_id(),
+        }
+        after = reader.from_markdown(
+            BEFORE + "\n## 3 Appeals\n\nHow to appeal.\n"
+        ).sections
+
+        carried = section_ids.carried_over(before, before_ids, after)
+
+        assert list(carried) == ["1-claims", "2-checks", "3-appeals"]
+        assert carried["3-appeals"] not in before_ids.values()
