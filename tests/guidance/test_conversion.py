@@ -334,6 +334,16 @@ class TestConvertingAnUploadIntoANewVersion:
         assert after["1-check-you-can-apply"] not in before.values()
 
     @pytest.mark.usefixtures("contents")
+    async def test_keeps_each_sections_heading_beside_its_id(
+        self, handler, next_job, database
+    ):
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        after = await section_ids.of_version(database, next_job.version_id, [])
+        headings = await section_ids.headings_of(database, [next_job.version_id])
+        assert headings[next_job.version_id][after["3-get-paid"]] == "3. Get paid"
+
+    @pytest.mark.usefixtures("contents")
     async def test_saves_it_as_the_documents_newest_version(
         self, handler, job, next_job, database
     ):

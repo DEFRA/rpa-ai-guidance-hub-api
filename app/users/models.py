@@ -182,9 +182,13 @@ class Case:
 @dataclasses.dataclass(frozen=True)
 class GuideSections:
     """A guide's sections as its latest version has them: each anchor with the id it
-    was given, in the guide's order."""
+    was given, in the guide's order, and each heading by id where the version keeps
+    them (every version after a guide's first)."""
 
     by_anchor: Mapping[str, guidance_ids.SectionId]
+    headings: Mapping[guidance_ids.SectionId, str] = dataclasses.field(
+        default_factory=dict
+    )
 
     def id_at(self, anchor: str) -> guidance_ids.SectionId | None:
         return self.by_anchor.get(anchor)
@@ -194,6 +198,14 @@ class GuideSections:
 
     def anchor_of(self, section_id: guidance_ids.SectionId) -> str | None:
         return next((a for a, s in self.by_anchor.items() if s == section_id), None)
+
+    def heading_of(
+        self, section_id: guidance_ids.SectionId, kept: str | None
+    ) -> str | None:
+        """The section's heading as the latest version has it, where it keeps them;
+        else `kept`, as a pin or bookmark kept it, which is the same for a guide's
+        first version, as a heading changes only with a new version."""
+        return self.headings.get(section_id, kept)
 
     def order_of(self, section_id: guidance_ids.SectionId) -> int:
         """Where the section comes in the guide; one it does not have, after all of
@@ -215,6 +227,9 @@ class ListedPin:
     pin: Pin
     anchor: str | None
     position: int
+    # The section's heading as the guide's latest version has it, else as the pin
+    # kept it; none for a whole guide.
+    heading: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)

@@ -193,7 +193,7 @@ class ConversionHandler:
             self._database, job.document_id, stored.content, self._s3
         )
         return await records.create_version(
-            self._database, dataclasses.replace(made, section_ids=given)
+            self._database, dataclasses.replace(made, sections=given)
         )
 
     async def _give_to_search(

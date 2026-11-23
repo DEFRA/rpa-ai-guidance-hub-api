@@ -524,7 +524,7 @@
         "type": "object"
       },
       "PinInBrief": {
-        "description": "A guide the user has pinned, or a section of one, as the side navigation shows\nit: the guide's id and title, and for a section, its id, its anchor and its\nheading as it read when it was pinned.",
+        "description": "A guide the user has pinned, or a section of one, as the side navigation shows\nit: the guide's id and title, and for a section, its id, its anchor and its\nheading as the guide's latest version has them (the heading as it read when it\nwas pinned, where that version does not say).",
         "properties": {
           "heading": {
             "anyOf": [
@@ -616,7 +616,7 @@
         "type": "object"
       },
       "PinnedSummary": {
-        "description": "A pin as the Pinned page lists it: its guide as `GET /guides` lists it, with\nthe pin's position among all the user's pins, which a patch of the pins takes,\nwhatever the filters show; and for a section, its id, its anchor in the guide's\nlatest version and its heading as it read when it was pinned.",
+        "description": "A pin as the Pinned page lists it: its guide as `GET /guides` lists it, with\nthe pin's position among all the user's pins, which a patch of the pins takes,\nwhatever the filters show; and for a section, its id, and its anchor and heading in\nthe guide's latest version (the heading as it read when it was pinned, where that\nversion does not say).",
         "properties": {
           "createdAt": {
             "format": "date-time",
@@ -700,7 +700,7 @@
         "type": "object"
       },
       "PlacedBookmark": {
-        "description": "A section bookmarked to a case, as the side navigation shows it: its id, its\nanchor and heading, and where the bookmark is among the case's, from 0, which is\nwhat a patch that moves or removes it names it by.",
+        "description": "A section bookmarked to a case, as the side navigation shows it: its id, its\nanchor and heading as the guide's latest version has them (the heading as it read\nwhen it was bookmarked, where that version does not say), and where the bookmark\nis among the case's, from 0, which is what a patch that moves or removes it names\nit by.",
         "properties": {
           "heading": {
             "anyOf": [

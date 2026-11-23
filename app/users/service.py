@@ -56,10 +56,22 @@ async def pinned(
             pin=pin,
             anchor=_anchor(pin, sections),
             position=position,
+            heading=_heading(pin, sections),
         )
         for position, pin in shown
     ]
     return listed, counts
+
+
+def _heading(
+    pin: models.Pin,
+    sections: Mapping[guidance_ids.DocumentId, models.GuideSections],
+) -> str | None:
+    """A pinned section's heading as its guide's latest version has it, else as the
+    pin kept it; none for a whole guide."""
+    if pin.section_id is None or pin.document_id not in sections:
+        return pin.heading
+    return sections[pin.document_id].heading_of(pin.section_id, pin.heading)
 
 
 def _anchor(
@@ -182,15 +194,19 @@ async def guides_in_brief(
     sectioned |= {b.document_id for case in user.cases for b in case.bookmarks}
     documents = await guidance_records.find_many(database, list(pinned | sectioned))
     latest = await guidance_records.latest_versions_of(database, list(documents))
-    given = await section_ids.of_latest(
-        database,
-        {guide: version for guide, version in latest.items() if guide in sectioned},
-        s3_client,
+    with_sections = {
+        guide: version for guide, version in latest.items() if guide in sectioned
+    }
+    given = await section_ids.of_latest(database, with_sections, s3_client)
+    headings = await section_ids.headings_of(
+        database, [version.id for version in with_sections.values()]
     )
     return {
         guide: models.GuideInBrief(
             title=_title(document, latest.get(guide)),
-            sections=models.GuideSections(given.get(guide, {})),
+            sections=models.GuideSections(
+                given.get(guide, {}), _headings_of(guide, with_sections, headings)
+            ),
         )
         for guide, document in documents.items()
     }
@@ -208,9 +224,24 @@ async def guide_sections(
     existing = await guidance_records.existing(database, list(guides))
     latest = await guidance_records.latest_versions_of(database, list(existing))
     given = await section_ids.of_latest(database, latest, s3_client)
+    headings = await section_ids.headings_of(
+        database, [version.id for version in latest.values()]
+    )
     return {
-        guide: models.GuideSections(by_anchor) for guide, by_anchor in given.items()
+        guide: models.GuideSections(by_anchor, _headings_of(guide, latest, headings))
+        for guide, by_anchor in given.items()
     }
+
+
+def _headings_of(
+    guide: guidance_ids.DocumentId,
+    latest: Mapping[guidance_ids.DocumentId, guidance_models.Version],
+    headings: Mapping[guidance_ids.VersionId, Mapping[guidance_ids.SectionId, str]],
+) -> Mapping[guidance_ids.SectionId, str]:
+    """The headings `guide`'s latest version keeps, by section id; none if it keeps
+    none."""
+    version = latest.get(guide)
+    return {} if version is None else headings.get(version.id, {})
 
 
 def _title(

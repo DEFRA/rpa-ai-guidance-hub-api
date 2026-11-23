@@ -21,7 +21,8 @@ from app.guidance import ids
 # The document a version belongs to: the many end of the one-to-many.
 DOCUMENT_ID = "documentId"
 
-# Where a version keeps its sections' ids, in its order: `{anchor, id}` each.
+# Where a version keeps its sections' ids, in its order: `{anchor, id, heading}` each,
+# the heading kept by a version written with them (every one after a guide's first).
 SECTION_IDS = "sectionIds"
 
 FILTERABLE_METADATA = ("schemes", "systems", "audience", "guidanceType")
@@ -86,6 +87,15 @@ class Document:
 
 
 @dataclasses.dataclass(frozen=True)
+class GivenSection:
+    """A section of a version as the version keeps it: the id it was given, and its
+    heading as the version has it."""
+
+    id: ids.SectionId
+    heading: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class Version:
     """One conversion of a document: where its Markdown went, and who made it.
 
@@ -102,9 +112,9 @@ class Version:
     version_number: str | None = None
     created_by_id: str | None = None
     created_by_display_name: str | None = None
-    # Each section's id by its anchor, in its order; None until they are given - see
-    # `section_ids`.
-    section_ids: Mapping[str, ids.SectionId] | None = None
+    # Each section by its anchor, in its order, with its id and heading; None until
+    # they are given - see `section_ids`.
+    sections: Mapping[str, GivenSection] | None = None
 
     def to_document(self) -> dict[str, Any]:
         created_by = (
@@ -114,11 +124,11 @@ class Version:
         )
         given = (
             {}
-            if self.section_ids is None
+            if self.sections is None
             else {
                 SECTION_IDS: [
-                    {"anchor": anchor, "id": section_id}
-                    for anchor, section_id in self.section_ids.items()
+                    {"anchor": anchor, "id": section.id, "heading": section.heading}
+                    for anchor, section in self.sections.items()
                 ]
             }
         )
@@ -145,11 +155,13 @@ class Version:
             created_by_id=created_by.get("id"),
             created_by_display_name=created_by.get("displayName"),
             created_at=document["createdAt"],
-            section_ids=(
+            sections=(
                 None
                 if SECTION_IDS not in document
                 else {
-                    section["anchor"]: ids.SectionId(section["id"])
+                    section["anchor"]: GivenSection(
+                        ids.SectionId(section["id"]), section.get("heading")
+                    )
                     for section in document[SECTION_IDS]
                 }
             ),

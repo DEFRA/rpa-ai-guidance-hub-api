@@ -1138,3 +1138,79 @@ class TestTheBookmarkedGuides:
         response = await _bookmarked(client, user_id, system="Martian")
 
         assert response.status_code == 422
+
+
+async def _renumbered(database, guide: guidance_ids.DocumentId) -> None:
+    """A later version of `guide`, as a conversion writes one, with its sections'
+    ids and headings: a new second section, so the first version's second is now
+    its third, "3 Two and more"."""
+    first = await database[guidance_records.VERSIONS].find_one({"documentId": guide})
+    given = {each["anchor"]: each["id"] for each in first["sectionIds"]}
+    await guidance_records.create_version(
+        database,
+        guidance_models.Version(
+            id=guidance_ids.new_version_id(),
+            document_id=guide,
+            content_url=f"s3://docs/{guide}/v2/content.md",
+            title="Claims",
+            version_number="2.0",
+            created_at=dt.datetime.now(tz=dt.UTC),
+            sections={
+                "1-one": guidance_models.GivenSection(given["1-one"], "1 One"),
+                "2-new": guidance_models.GivenSection(
+                    guidance_ids.new_section_id(), "2 New"
+                ),
+                "3-two-and-more": guidance_models.GivenSection(
+                    given["2-two"], "3 Two and more"
+                ),
+            },
+        ),
+    )
+
+
+class TestASectionRenumberedInALaterVersion:
+    """A pin or a bookmark keeps its section's id, so it follows the section into a
+    later version, and is answered with the heading the section has there."""
+
+    async def test_a_pinned_section_has_its_heading_now_in_the_side_navigation(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _renumbered(database, guide)
+
+        [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        assert (pin["section"], pin["heading"]) == ("3-two-and-more", "3 Two and more")
+
+    async def test_a_pinned_section_has_its_heading_now_in_the_pinned_list(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _renumbered(database, guide)
+
+        [item] = (await _listed(client, user_id))["items"]
+
+        assert (item["section"], item["heading"]) == (
+            "3-two-and-more",
+            "3 Two and more",
+        )
+
+    async def test_a_bookmarked_section_has_its_heading_now_in_the_side_navigation(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide))
+        await _renumbered(database, guide)
+
+        [case] = await _cases(client, user_id)
+        [bookmark] = case["guides"][0]["bookmarks"]
+
+        assert (bookmark["section"], bookmark["heading"]) == (
+            "3-two-and-more",
+            "3 Two and more",
+        )

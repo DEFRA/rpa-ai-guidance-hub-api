@@ -8,6 +8,11 @@ was kept first. Every version is given them this way, however old: from its stor
 content (`of_latest`), which is read only until they are kept. A new version's
 sections are given the ids of the same sections in the version before
 (`of_new_version`), written with the version, so what points into a section follows it.
+
+A heading changes only with a new version, so a new version keeps each section's
+heading beside its id (`headings_of`), for what points into a section to name it as it
+reads now. A guide's first version keeps none: its headings are as each pin and
+bookmark kept them.
 """
 
 from __future__ import annotations
@@ -94,12 +99,12 @@ async def of_new_version(
     document_id: ids.DocumentId,
     content_url: str,
     s3_client: Any,
-) -> dict[str, ids.SectionId] | None:
+) -> dict[str, models.GivenSection] | None:
     """Each section of a new version of `document_id`, stored at `content_url` and not
-    yet recorded, by its anchor in its order, with the id of the same section in the
-    guide's latest version, or a new id (`carried_over`). None for a guide's first
-    version, or where either content is not there: its sections are given ids when
-    they are first asked for, as any version's are."""
+    yet recorded, by its anchor in its order, with its heading and the id of the same
+    section in the guide's latest version, or a new id (`carried_over`). None for a
+    guide's first version, or where either content is not there: its sections are
+    given ids when they are first asked for, as any version's are."""
     before = await records.latest_version(database, document_id)
     if before is None:
         return None
@@ -110,7 +115,38 @@ async def of_new_version(
     if before_sections is None or after_sections is None:
         return None
     before_ids = await of_version(database, before.id, _anchors_of(before_sections))
-    return carried_over(before_sections, before_ids, after_sections)
+    carried = carried_over(before_sections, before_ids, after_sections)
+    headings = dict(
+        zip(
+            _anchors_of(after_sections),
+            (section.heading for section in after_sections),
+            strict=True,
+        )
+    )
+    return {
+        anchor: models.GivenSection(section_id, headings[anchor])
+        for anchor, section_id in carried.items()
+    }
+
+
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
+async def headings_of(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    version_ids: Sequence[ids.VersionId],
+) -> dict[ids.VersionId, dict[ids.SectionId, str]]:
+    """Each section's heading by its id, by version, for those of `version_ids` that
+    keep them: each version after a guide's first."""
+    found: dict[ids.VersionId, dict[ids.SectionId, str]] = {}
+    async for version in database[records.VERSIONS].find(
+        {"_id": {"$in": list(version_ids)}, f"{_SECTION_IDS}.heading": {"$ne": None}},
+        {_SECTION_IDS: 1},
+    ):
+        found[version["_id"]] = {
+            ids.SectionId(section["id"]): section["heading"]
+            for section in version[_SECTION_IDS]
+            if section.get("heading") is not None
+        }
+    return found
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)
