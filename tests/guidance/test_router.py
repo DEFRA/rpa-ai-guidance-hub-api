@@ -496,6 +496,24 @@ class TestSubmittingTheSameJourneyTwice:
         assert second.status_code == 200
         assert second.json()["id"] == str(DOCUMENT)
 
+    def test_with_another_file_of_the_upload_it_answers_the_document(
+        self, client, staging, submitter
+    ):
+        """Finished is the save of the file the document was made from, not of the
+        file this request names: no second job is started for the same upload."""
+        client.post("/guides", json=_request())
+        other = "0c0ffee0-47d0-4104-9944-5e23421ef437"
+        staging.stage(file_id=other, path=f"{UPLOAD}/{other}")
+
+        second = client.post(
+            "/guides",
+            json=_request(source={"uploadId": UPLOAD, "fileId": other}),
+        )
+
+        assert second.status_code == 200
+        assert second.json()["id"] == str(DOCUMENT)
+        assert len(submitter.sent) == 1
+
     def test_once_its_staging_record_has_expired_it_answers_the_document(
         self, client, staging
     ):

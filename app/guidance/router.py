@@ -129,7 +129,7 @@ async def create_document(
     caller does not follow a save that will never come.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
-    if already is not None and await _finished(staging, new.source.file_id):
+    if already is not None and await _finished(staging, already.file_id):
         response.status_code = fastapi.status.HTTP_200_OK
         return await _answered(database, already.id)
 
