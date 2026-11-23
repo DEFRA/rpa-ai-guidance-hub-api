@@ -83,6 +83,11 @@ class MisfiledVersionError(RuntimeError):
     """Raised when a version id is already taken by a version of another document."""
 
 
+class OvertakenVersionError(RuntimeError):
+    """Raised when another version of the document follows the one this version was
+    matched with: it was matched with a version that is no longer the latest."""
+
+
 # Newest first, by when a version was made. A version id is time-ordered too, but
 # `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
@@ -107,6 +112,13 @@ async def ensure_indexes(
     """
     await database[DOCUMENTS].create_index(_UPLOAD_ID, unique=True)
     await database[VERSIONS].create_index([(DOCUMENT_ID, 1), *_NEWEST])
+    # One version follows each: a version matched with one that another follows was
+    # overtaken while it was made.
+    await database[VERSIONS].create_index(
+        [(DOCUMENT_ID, 1), (models.FOLLOWS, 1)],
+        unique=True,
+        partialFilterExpression={models.FOLLOWS: {"$exists": True}},
+    )
     for key in models.FILTERABLE_METADATA:
         await database[DOCUMENTS].create_index(f"{_METADATA}.{key}")
 
@@ -498,14 +510,23 @@ async def create_version(
     earlier attempt wrote it, and that record is answered as it stands - unless it
     belongs to another document, which no attempt at this one could have done.
 
+    One version follows each: a version that follows one another version already
+    follows was matched with a version that is no longer the latest, and is raised.
+
     Raises:
         MisfiledVersionError: if the version id is taken by another document's
             version.
+        OvertakenVersionError: if another version follows the one this follows.
     """
-    stored = models.Version.from_document(
-        await _created(database[VERSIONS], version.to_document())
-    )
-    return _filed(stored, version.document_id)
+    try:
+        created = await _created(database[VERSIONS], version.to_document())
+    except pymongo.errors.DuplicateKeyError as clash:
+        message = (
+            f"Version {version.id} follows {version.follows}, which another version of "
+            f"document {version.document_id} follows already"
+        )
+        raise OvertakenVersionError(message) from clash
+    return _filed(models.Version.from_document(created), version.document_id)
 
 
 def _filed(version: models.Version, document_id: ids.DocumentId) -> models.Version:

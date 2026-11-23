@@ -96,18 +96,15 @@ def _anchors_of(sections: Sequence[parsing_models.MarkdownSection]) -> list[str]
 
 async def of_new_version(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    document_id: ids.DocumentId,
+    before: models.Version,
     content_url: str,
     s3_client: Any,
 ) -> dict[str, models.GivenSection] | None:
-    """Each section of a new version of `document_id`, stored at `content_url` and not
-    yet recorded, by its anchor in its order, with its heading and the id of the same
-    section in the guide's latest version, or a new id (`carried_over`). None for a
-    guide's first version, or where either content is not there: its sections are
-    given ids when they are first asked for, as any version's are."""
-    before = await records.latest_version(database, document_id)
-    if before is None:
-        return None
+    """Each section of a new version, stored at `content_url` and not yet recorded, by
+    its anchor in its order, with its heading and the id of the same section in the
+    version `before` it (`carried_over`), or a new id. None where either content is not
+    there: its sections are given ids when they are first asked for, as any version's
+    are."""
     before_sections = await asyncio.to_thread(
         _sections_at, before.content_url, s3_client
     )

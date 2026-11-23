@@ -12,7 +12,10 @@ answers before it has indexed it: the hub and search agree in the end, not at on
 **A job names the document its version is of:** a new one, whose record, written after
 the version, commits it; or one there already, a guide's later version, which its own
 record commits. A later version is written with its sections' ids: those of the same
-sections in the version before, so what points into a section follows it.
+sections in the guide's latest version, so what points into a section follows it. It
+names that version too, and only one version may follow each: of two saved at once,
+the second to be written was matched with a version that is no longer the latest, so
+it is refused and its message delivered again, to be matched with the one before it.
 
 **Safe to repeat**, as SQS may deliver a message more than once: the ids are reserved
 once, on the staging record, every write creates rather than replaces and keeps what
@@ -189,12 +192,16 @@ class ConversionHandler:
         )
 
         made = job.request.version_for(stored, dt.datetime.now(tz=dt.UTC))
-        given = await section_ids.of_new_version(
-            self._database, job.document_id, stored.content, self._s3
-        )
-        return await records.create_version(
-            self._database, dataclasses.replace(made, sections=given)
-        )
+        before = await records.latest_version(self._database, job.document_id)
+        if before is not None:
+            made = dataclasses.replace(
+                made,
+                sections=await section_ids.of_new_version(
+                    self._database, before, stored.content, self._s3
+                ),
+                follows=before.id,
+            )
+        return await records.create_version(self._database, made)
 
     async def _give_to_search(
         self, job: ConversionJob, document: models.Document

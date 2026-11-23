@@ -21,6 +21,9 @@ from app.guidance import ids
 # The document a version belongs to: the many end of the one-to-many.
 DOCUMENT_ID = "documentId"
 
+# The version a later version was matched with, when it was made: the guide's latest.
+FOLLOWS = "follows"
+
 # Where a version keeps its sections' ids, in its order: `{anchor, id, heading}` each,
 # the heading kept by a version written with them (every one after a guide's first).
 SECTION_IDS = "sectionIds"
@@ -115,6 +118,8 @@ class Version:
     # Each section by its anchor, in its order, with its id and heading; None until
     # they are given - see `section_ids`.
     sections: Mapping[str, GivenSection] | None = None
+    # The version this one's sections were matched with: None for a guide's first.
+    follows: ids.VersionId | None = None
 
     def to_document(self) -> dict[str, Any]:
         created_by = (
@@ -141,6 +146,7 @@ class Version:
             "createdBy": created_by,
             "createdAt": self.created_at,
             **given,
+            **({} if self.follows is None else {FOLLOWS: self.follows}),
         }
 
     @classmethod
@@ -165,6 +171,7 @@ class Version:
                     for section in document[SECTION_IDS]
                 }
             ),
+            follows=document.get(FOLLOWS),
         )
 
 

@@ -7,6 +7,7 @@ work to keep rather than a fault to raise.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import uuid
 
@@ -98,6 +99,24 @@ class TestCreatingAVersion:
 
         with pytest.raises(records.MisfiledVersionError):
             await records.create_version(database, misfiled)
+
+    async def test_a_second_version_following_the_same_one_is_refused(self, database):
+        """Each was matched with the version it follows, so the second to be written
+        would carry the ids of a version that is no longer the latest."""
+        document_id, first = str(uuid.uuid4()), str(uuid.uuid4())
+        await records.create_version(database, _version(first, document_id, "s3://d/1"))
+        await records.create_version(
+            database,
+            dataclasses.replace(
+                _version(str(uuid.uuid4()), document_id, "s3://d/2"), follows=first
+            ),
+        )
+        overtaken = dataclasses.replace(
+            _version(str(uuid.uuid4()), document_id, "s3://d/3"), follows=first
+        )
+
+        with pytest.raises(records.OvertakenVersionError):
+            await records.create_version(database, overtaken)
 
 
 class TestHowIdsAreStored:

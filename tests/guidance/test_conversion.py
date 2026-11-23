@@ -11,6 +11,7 @@ import asyncio
 import datetime as dt
 import json
 import uuid
+from unittest import mock
 
 import boto3
 import pydantic
@@ -244,6 +245,55 @@ class TestConvertingAnUpload:
         assert (await staging.get(job.file_id)).saving_status == "complete"
 
 
+_FIRST_CONTENT = (
+    "# Claims guide\n\n"
+    "## 1 Apply for the payment\n\nSend the form.\n\n"
+    "## 2 Get paid\n\nWe pay you.\n"
+)
+_LATER_CONTENT = (
+    "# Claims guide\n\n"
+    "## 1 Check you can apply\n\nRead the rules.\n\n"
+    "## 2 Apply for the payment\n\nSend the form.\n\n"
+    "## 3 Get paid\n\nWe pay you.\n"
+)
+
+
+async def _new_version_job(
+    staging, job: conversion.ConversionJob, version_number: str
+) -> conversion.ConversionJob:
+    """Another upload's job, naming `job`'s document: a new version of its guide."""
+    upload, file_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await staging.claim(file_id, f"{upload}/{file_id}")
+    await staging.mark_complete(
+        file_id, parsing_models.MinimalDocumentInfo(title="Claims guide")
+    )
+    reserved = await staging.reserve_ids(file_id, job.document_id)
+    await staging.start_saving(file_id)
+    source = schemas.Source.model_validate({"uploadId": upload, "fileId": file_id})
+    return job.model_copy(
+        update={
+            "file_id": file_id,
+            "source_url": f"s3://rpa-ai-guidance-hub-source-docs/{upload}/{file_id}",
+            "version_id": reserved.version_id,
+            "request": job.request.model_copy(
+                update={"source": source, "version_number": version_number}
+            ),
+        }
+    )
+
+
+def _stored(job: conversion.ConversionJob) -> models.StoredDocument:
+    """Where `job`'s conversion stored its version."""
+    return models.StoredDocument(
+        document_id=job.document_id,
+        version_id=job.version_id,
+        content=f"s3://docs/{job.document_id}/{job.version_id}/content.md",
+        title="Claims guide",
+        sections=3,
+        images=2,
+    )
+
+
 class TestConvertingAnUploadIntoANewVersion:
     """A job naming a document that is there already: a new version of a guide, which
     its own record commits."""
@@ -262,55 +312,46 @@ class TestConvertingAnUploadIntoANewVersion:
         converts,
     ) -> conversion.ConversionJob:
         """A second upload's job, naming the first one's document."""
-        upload, file_id = str(uuid.uuid4()), str(uuid.uuid4())
-        await staging.claim(file_id, f"{upload}/{file_id}")
-        await staging.mark_complete(
-            file_id, parsing_models.MinimalDocumentInfo(title="Claims guide")
-        )
-        reserved = await staging.reserve_ids(file_id)
-        await staging.start_saving(file_id)
-        converts.return_value = models.StoredDocument(
-            document_id=job.document_id,
-            version_id=reserved.version_id,
-            content=f"s3://docs/{job.document_id}/{reserved.version_id}/content.md",
-            title="Claims guide",
-            sections=3,
-            images=2,
-        )
-        source = schemas.Source.model_validate({"uploadId": upload, "fileId": file_id})
-        return job.model_copy(
-            update={
-                "file_id": file_id,
-                "source_url": f"s3://rpa-ai-guidance-hub-source-docs/{upload}/{file_id}",
-                "version_id": reserved.version_id,
-                "request": job.request.model_copy(
-                    update={"source": source, "version_number": "2.0"}
-                ),
-            }
-        )
+        next_job = await _new_version_job(staging, job, "2.0")
+        converts.return_value = _stored(next_job)
+        return next_job
 
     @pytest.fixture
-    def contents(self, mocker, job, next_job):
-        """What each version stored, as the hub writes it: the second renumbers the
-        first's sections, and puts a new one before them."""
-        stored = {
-            f"s3://docs/{job.document_id}/{job.version_id}/content.md": (
-                "# Claims guide\n\n"
-                "## 1 Apply for the payment\n\nSend the form.\n\n"
-                "## 2 Get paid\n\nWe pay you.\n"
-            ),
-            f"s3://docs/{job.document_id}/{next_job.version_id}/content.md": (
-                "# Claims guide\n\n"
-                "## 1 Check you can apply\n\nRead the rules.\n\n"
-                "## 2 Apply for the payment\n\nSend the form.\n\n"
-                "## 3 Get paid\n\nWe pay you.\n"
-            ),
-        }
+    def contents(self, mocker, job):
+        """What each version stored, as the hub writes it: every one after the first
+        renumbers the first's sections, and puts a new one before them."""
+        first = f"s3://docs/{job.document_id}/{job.version_id}/content.md"
         return mocker.patch.object(
             section_ids.store,
             "read",
-            side_effect=lambda url, s3_client=None: stored[url].encode(),  # noqa: ARG005
+            side_effect=lambda url, s3_client=None: (  # noqa: ARG005
+                _FIRST_CONTENT if url == first else _LATER_CONTENT
+            ).encode(),
         )
+
+    @pytest.mark.usefixtures("contents")
+    async def test_one_overtaken_while_matched_is_matched_again_when_delivered_again(
+        self, handler, job, next_job, staging, converts, database
+    ):
+        """Two new versions saved at once: both are matched with the first version, and
+        the second to be written is refused, to be matched with the one that overtook
+        it on its next delivery. A section new to both then has one id."""
+        third_job = await _new_version_job(staging, job, "3.0")
+        first = await records.latest_version(database, job.document_id)
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+        converts.return_value = _stored(third_job)
+        third_body = third_job.model_dump_json(by_alias=True)
+        with (
+            mock.patch.object(records, "latest_version", return_value=first),
+            pytest.raises(records.OvertakenVersionError),
+        ):
+            await handler(third_body, last_delivery=False)
+
+        await handler(third_body, last_delivery=False)
+
+        second = await section_ids.of_version(database, next_job.version_id, [])
+        third = await section_ids.of_version(database, third_job.version_id, [])
+        assert third["1-check-you-can-apply"] == second["1-check-you-can-apply"]
 
     @pytest.mark.usefixtures("contents")
     async def test_its_sections_keep_the_ids_they_had_before(
