@@ -66,6 +66,7 @@ _UNFIXABLE = (
     service.SourceMissingError,
     errors.DocumentParseError,
     records.MisfiledVersionError,
+    section_ids.ContentMissingError,
     search_service.IndexRefusedError,
 )
 

@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 _SECTION_IDS = models.SECTION_IDS
 
 
+class ContentMissingError(RuntimeError):
+    """Raised when a version's content is not where its record says it is."""
+
+
 async def of_latest(
     database: pymongo.asynchronous.database.AsyncDatabase,
     latest: Mapping[ids.DocumentId, models.Version],
@@ -99,18 +103,26 @@ async def of_new_version(
     before: models.Version,
     content_url: str,
     s3_client: Any,
-) -> dict[str, models.GivenSection] | None:
+) -> dict[str, models.GivenSection]:
     """Each section of a new version, stored at `content_url` and not yet recorded, by
     its anchor in its order, with its heading and the id of the same section in the
-    version `before` it (`carried_over`), or a new id. None where either content is not
-    there: its sections are given ids when they are first asked for, as any version's
-    are."""
+    version `before` it (`carried_over`), or a new id.
+
+    Raises:
+        ContentMissingError: if either content is not there: the new version's
+            sections could not keep their ids, and nothing could give them back once
+            the version is recorded.
+    """
     before_sections = await asyncio.to_thread(
         _sections_at, before.content_url, s3_client
     )
     after_sections = await asyncio.to_thread(_sections_at, content_url, s3_client)
     if before_sections is None or after_sections is None:
-        return None
+        missing = before.content_url if before_sections is None else content_url
+        message = (
+            f"No content at {missing}, so the sections' ids cannot be carried over"
+        )
+        raise ContentMissingError(message)
     before_ids = await of_version(database, before.id, _anchors_of(before_sections))
     carried = carried_over(before_sections, before_ids, after_sections)
     headings = dict(

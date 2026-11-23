@@ -329,6 +329,26 @@ class TestConvertingAnUploadIntoANewVersion:
             ).encode(),
         )
 
+    async def test_fails_when_the_content_of_the_version_it_follows_is_not_there(
+        self, handler, job, next_job, staging, database, mocker
+    ):
+        """Its sections could not keep their ids, and no later delivery could give them
+        back, as a recorded version is not converted again: so it is not recorded."""
+        first = f"s3://docs/{job.document_id}/{job.version_id}/content.md"
+        mocker.patch.object(
+            section_ids.store,
+            "read",
+            side_effect=lambda url, s3_client=None: (  # noqa: ARG005
+                None if url == first else _LATER_CONTENT.encode()
+            ),
+        )
+
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        assert (await staging.get(next_job.file_id)).saving_status == "failed"
+        versions = await records.versions_of(database, job.document_id)
+        assert [version.id for version in versions] == [job.version_id]
+
     @pytest.mark.usefixtures("contents")
     async def test_is_newer_than_the_version_it_follows_whatever_the_time(
         self, handler, job, next_job, database

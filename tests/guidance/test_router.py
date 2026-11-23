@@ -908,7 +908,7 @@ class TestAddingAVersionToADocument:
         content and a real database: see the conversion's cases.
         """
         client.post("/guides", json=_request())
-        mocker.patch.object(conversion.section_ids, "of_new_version", return_value=None)
+        mocker.patch.object(conversion.section_ids, "of_new_version", return_value={})
         staging.minted = OTHER_DOCUMENT
         staging.stage(
             file_id=NEXT_FILE,
