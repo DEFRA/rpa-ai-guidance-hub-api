@@ -330,6 +330,23 @@ class TestConvertingAnUploadIntoANewVersion:
         )
 
     @pytest.mark.usefixtures("contents")
+    async def test_is_newer_than_the_version_it_follows_whatever_the_time(
+        self, handler, job, next_job, database
+    ):
+        """A version saved between this one's conversion and its save can hold a later
+        time than now; the version that follows it must still be the newest, or every
+        later version of the guide would be matched with the one before it."""
+        later = dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=1)
+        await database[records.VERSIONS].update_one(
+            {"_id": job.version_id}, {"$set": {"createdAt": later}}
+        )
+
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        latest = await records.latest_version(database, job.document_id)
+        assert latest.id == next_job.version_id
+
+    @pytest.mark.usefixtures("contents")
     async def test_one_overtaken_while_matched_is_matched_again_when_delivered_again(
         self, handler, job, next_job, staging, converts, database
     ):

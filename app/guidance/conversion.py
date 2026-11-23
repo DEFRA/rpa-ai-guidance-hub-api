@@ -70,6 +70,22 @@ _UNFIXABLE = (
 )
 
 
+# The finest time Mongo keeps.
+_TICK = dt.timedelta(milliseconds=1)
+
+
+def _saved_at(before: models.Version | None) -> dt.datetime:
+    """The time a version is saved at: now, but always after the version it follows,
+    to Mongo's millisecond, as the newest by time is the guide's latest. A version saved
+    since this one's conversion began can hold a later time than now."""
+    now = dt.datetime.now(tz=dt.UTC)
+    if before is None:
+        return now
+    # Mongo gives a time back in UTC without its zone.
+    followed = before.created_at.replace(tzinfo=before.created_at.tzinfo or dt.UTC)
+    return max(now, followed + _TICK)
+
+
 class SearchIndex(Protocol):
     """Where each saved version goes, to be indexed as its guide's latest."""
 
@@ -191,8 +207,8 @@ class ConversionHandler:
             stored.images,
         )
 
-        made = job.request.version_for(stored, dt.datetime.now(tz=dt.UTC))
         before = await records.latest_version(self._database, job.document_id)
+        made = job.request.version_for(stored, _saved_at(before))
         if before is not None:
             made = dataclasses.replace(
                 made,
