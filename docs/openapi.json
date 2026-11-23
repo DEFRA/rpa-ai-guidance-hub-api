@@ -1949,6 +1949,89 @@
         ]
       }
     },
+    "/guides/{document_id}/versions": {
+      "post": {
+        "description": "Start converting an upload into a new version of a document, and answer where\nto follow it, as `POST /guides` does. The version is the document's newest once it\nis saved, and so live at once.\n\nThe upload's ids are reserved as for any upload, and only its version id is used.\nSubmitting the same upload again never starts a second save: once its version is\nrecorded and the save marked complete, the document is answered (200).",
+        "operationId": "create_version_guides__document_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDocument"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "The upload was made into a version already: its document"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StagedDocumentResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Document"
+                    }
+                  ],
+                  "title": "Response Create Version Guides  Document Id  Versions Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such document, or no such staged file"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "The conversion could not be started; try again"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Version",
+        "tags": [
+          "guides"
+        ]
+      }
+    },
     "/preferences/{user_id}": {
       "get": {
         "description": "Every one of the user's preferences, null for one they have not set.",

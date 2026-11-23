@@ -9,10 +9,14 @@ consumer gives each message to `ConversionHandler`, which does the work.
 then is the save marked complete, so the message stays until search has it. Search
 answers before it has indexed it: the hub and search agree in the end, not at once.
 
+**A job names the document its version is of:** a new one, whose record, written after
+the version, commits it; or one there already, a guide's later version, which its own
+record commits.
+
 **Safe to repeat**, as SQS may deliver a message more than once: the ids are reserved
 once, on the staging record, every write creates rather than replaces and keeps what
-is already there, a document already committed is not converted again, and search
-keeps only the newest version it is given.
+is already there, a version already recorded is not converted again, and search keeps
+only the newest version it is given.
 
 **What becomes of a failure** decides what becomes of the message:
 
@@ -137,17 +141,30 @@ class ConversionHandler:
             raise
 
     async def _save(self, job: ConversionJob) -> models.Document:
-        """Convert the upload and record what it makes, unless an earlier delivery did:
-        the document, as it is recorded.
+        """Convert the upload and record its version, unless an earlier delivery did,
+        then its document, unless that is there already: the document, as it is
+        recorded.
+
+        Bottom up. The version is recorded only once its content is wholly stored, and
+        the document last: until it exists nothing can reach the version, and once it
+        does everything beneath it is there.
+        """
+        version = await records.find_version(
+            self._database, job.document_id, job.version_id
+        )
+        if version is None:
+            version = await self._converted(job)
+        return await records.create(
+            self._database,
+            job.request.document_for(job.document_id, version.created_at),
+        )
+
+    async def _converted(self, job: ConversionJob) -> models.Version:
+        """Convert the upload, and record the version it makes.
 
         Converting is done in a worker thread, because parsing and the object store
         calls block.
         """
-        upload_id = job.request.source.upload_id
-        already = await records.find_by_upload(self._database, upload_id)
-        if already is not None:
-            return already
-
         stored = await fastapi.concurrency.run_in_threadpool(
             self._guidance.convert,
             job.source_url,
@@ -164,16 +181,8 @@ class ConversionHandler:
             stored.images,
         )
 
-        # Bottom up. The version is recorded only once its content is wholly stored,
-        # and the document last, because writing it is what commits the document:
-        # until it exists nothing can reach the version, and once it does everything
-        # beneath it is there.
-        now = dt.datetime.now(tz=dt.UTC)
-        await records.create_version(
-            self._database, job.request.version_for(stored, now)
-        )
-        return await records.create(
-            self._database, job.request.document_for(stored.document_id, now)
+        return await records.create_version(
+            self._database, job.request.version_for(stored, dt.datetime.now(tz=dt.UTC))
         )
 
     async def _give_to_search(

@@ -57,6 +57,15 @@ METADATA = {
 # Who was signed in, which is not who owns the document - see `records`.
 AUTHOR = {"id": "dev-user-123", "displayName": "Dev User"}
 
+# A second upload: a new version of the document the first one made.
+NEXT_UPLOAD = "6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24"
+NEXT_FILE = "7a2e9c41-5d3b-4f60-8e1a-2c4b6d8f0a13"
+NEXT_VERSION = uuid.UUID("0199b8a3-0a2d-7c41-9e3b-5d7f1a3c5e79")
+# Reserved for the second upload as for any upload, and not used: its version is the
+# document's.
+UNUSED_DOCUMENT = uuid.UUID("0199b8a3-0a2e-7d52-8f4c-6e8a2b4d6f80")
+NEXT_CONTENT = f"s3://rpa-ai-guidance-hub-docs/{DOCUMENT}/{NEXT_VERSION}/content.md"
+
 
 def _request(**overrides: Any) -> dict[str, Any]:
     body = {
@@ -875,3 +884,101 @@ class TestReadingADocumentBack:
         response = client.get(f"/guides/{DOCUMENT}/content")
 
         assert response.status_code == 502
+
+
+class TestAddingAVersionToADocument:
+    """An upload that updates a guide is saved as its document's newest version, and
+    followed as a new document's save is."""
+
+    @pytest.fixture
+    def document(self, client, staging, converts):
+        """A document made from the first upload, and the second upload staged."""
+        client.post("/guides", json=_request())
+        staging.stage(
+            file_id=NEXT_FILE,
+            path=f"{NEXT_UPLOAD}/{NEXT_FILE}",
+            document_id=UNUSED_DOCUMENT,
+            version_id=NEXT_VERSION,
+        )
+        converts.return_value = models.StoredDocument(
+            document_id=DOCUMENT,
+            version_id=NEXT_VERSION,
+            content=NEXT_CONTENT,
+            title=COVER_TITLE,
+            sections=24,
+            images=45,
+        )
+        return DOCUMENT
+
+    @staticmethod
+    def _next(**overrides: Any) -> dict[str, Any]:
+        return _request(
+            source={"uploadId": NEXT_UPLOAD, "fileId": NEXT_FILE},
+            versionNumber="2.0",
+            **overrides,
+        )
+
+    def test_it_is_accepted_at_once_pointing_at_its_progress(
+        self, client, document, submitter
+    ):
+        submitter.handler = None
+
+        response = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert response.status_code == 202
+        assert response.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
+        assert response.json()["savingStatus"] == "in_progress"
+
+    def test_the_upload_is_converted_into_the_document(
+        self, client, document, converts
+    ):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert converts.call_args.kwargs["document_id"] == document
+        assert converts.call_args.kwargs["version_id"] == NEXT_VERSION
+
+    def test_once_saved_it_is_the_documents_newest_version(self, client, document):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        versions = client.get(f"/guides/{document}").json()["versions"]
+
+        assert [version["id"] for version in versions] == [
+            str(NEXT_VERSION),
+            str(VERSION),
+        ]
+        assert versions[0]["versionNumber"] == "2.0"
+
+    def test_no_second_document_is_recorded(self, client, document, documents):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert [record["_id"] for record in documents.documents] == [document]
+        assert _at(documents.documents[0], "source.uploadId") == UPLOAD
+
+    def test_search_is_given_the_new_version(self, client, document, search):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert [version.id for version, _ in search.indexed] == [VERSION, NEXT_VERSION]
+
+    @pytest.mark.usefixtures("document")
+    def test_a_document_that_never_was_is_not_found(self, client, submitter):
+        response = client.post(f"/guides/{UNUSED_DOCUMENT}/versions", json=self._next())
+
+        assert response.status_code == 404
+        assert len(submitter.sent) == 1
+
+    def test_submitted_again_it_answers_the_document(self, client, document):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        second = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert second.status_code == 200
+        assert second.json()["id"] == str(document)
+
+    def test_submitted_again_it_saves_no_second_version(
+        self, client, document, versions, converts
+    ):
+        client.post(f"/guides/{document}/versions", json=self._next())
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert len(versions.documents) == 2
+        assert converts.call_count == 2

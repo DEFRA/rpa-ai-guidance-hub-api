@@ -240,6 +240,76 @@ class TestConvertingAnUpload:
         assert (await staging.get(job.file_id)).saving_status == "complete"
 
 
+class TestConvertingAnUploadIntoANewVersion:
+    """A job naming a document that is there already: a new version of a guide, which
+    its own record commits."""
+
+    @pytest.fixture
+    async def saved(self, handler, body, converts):  # noqa: ARG002 - for its effect
+        """The document, made by the first job."""
+        await handler(body, last_delivery=False)
+
+    @pytest.fixture
+    async def next_job(self, staging, job, converts) -> conversion.ConversionJob:
+        """A second upload's job, naming the first one's document."""
+        upload, file_id = str(uuid.uuid4()), str(uuid.uuid4())
+        await staging.claim(file_id, f"{upload}/{file_id}")
+        await staging.mark_complete(
+            file_id, parsing_models.MinimalDocumentInfo(title="Claims guide")
+        )
+        reserved = await staging.reserve_ids(file_id)
+        await staging.start_saving(file_id)
+        converts.return_value = models.StoredDocument(
+            document_id=job.document_id,
+            version_id=reserved.version_id,
+            content=f"s3://docs/{job.document_id}/{reserved.version_id}/content.md",
+            title="Claims guide",
+            sections=3,
+            images=2,
+        )
+        source = schemas.Source.model_validate({"uploadId": upload, "fileId": file_id})
+        return job.model_copy(
+            update={
+                "file_id": file_id,
+                "source_url": f"s3://rpa-ai-guidance-hub-source-docs/{upload}/{file_id}",
+                "version_id": reserved.version_id,
+                "request": job.request.model_copy(
+                    update={"source": source, "version_number": "2.0"}
+                ),
+            }
+        )
+
+    @pytest.mark.usefixtures("saved")
+    async def test_saves_it_as_the_documents_newest_version(
+        self, handler, job, next_job, database
+    ):
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        versions = await records.versions_of(database, job.document_id)
+        assert [version.id for version in versions] == [
+            next_job.version_id,
+            job.version_id,
+        ]
+
+    @pytest.mark.usefixtures("saved")
+    async def test_keeps_the_documents_record_as_it_was(
+        self, handler, job, next_job, database
+    ):
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        document = await records.find(database, job.document_id)
+        assert document.upload_id == job.request.source.upload_id
+
+    @pytest.mark.usefixtures("saved")
+    async def test_delivered_again_converts_it_once(self, handler, next_job, converts):
+        body = next_job.model_dump_json(by_alias=True)
+
+        await handler(body, last_delivery=False)
+        await handler(body, last_delivery=False)
+
+        assert converts.call_count == 2  # the document's first version, and this one
+
+
 class TestAFailureRetryingCannotFix:
     """Recorded, and returned from, so the consumer deletes the message."""
 

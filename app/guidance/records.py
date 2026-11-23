@@ -3,9 +3,9 @@
 Two collections, because two different things change at two different rates.
 
 `documents` holds what a document *is* to the people using it - the title an author
-typed, who it is for, who owns it - and where it came from. The upload is the
-document's own: one .docx became one document, and every version after the first is
-an edit of that rather than another upload of it.
+typed, who it is for, who owns it - and where it came from. The upload is the one its
+first version came from: one .docx became one document. A later version is another
+upload, made into a version of that document rather than into a document of its own.
 
 `document_versions` holds what one conversion produced: where its Markdown went, and
 who was signed in when it was made. One document has many, and the newest is only the
@@ -44,9 +44,10 @@ provider, with a display name kept beside it so a listing can name them without 
 directory lookup. Conflating the two would make the answer to "who is responsible for
 this?" depend on who last pressed a button.
 
-`uploadId` is unique across versions, and that is the whole of how one upload is
-converted once. The journey that produces a version can be submitted twice - a
-refresh, a back button, a retried request - and each of those means the same version
+`uploadId` is unique across documents, and that is how the upload a document came from
+is converted once; a later version's upload is converted once by the version id its
+staging record reserves. The journey that produces a version can be submitted twice -
+a refresh, a back button, a retried request - and each of those means the same version
 rather than another one.
 """
 
@@ -126,6 +127,26 @@ async def find(
     """One document by its id, without its versions."""
     found = await database[DOCUMENTS].find_one({"_id": document_id})
     return None if found is None else models.Document.from_document(found)
+
+
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
+async def find_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    version_id: ids.VersionId,
+) -> models.Version | None:
+    """A version of `document_id` by its id, if it is recorded.
+
+    Raises:
+        MisfiledVersionError: if the version id is taken by another document's
+            version.
+    """
+    found = await database[VERSIONS].find_one({"_id": version_id})
+    return (
+        None
+        if found is None
+        else _filed(models.Version.from_document(found), document_id)
+    )
 
 
 class UnknownCursorError(LookupError):
@@ -448,8 +469,8 @@ async def create(
     for the journey rather than for the store behind it.
 
     Writing it is what commits the document, so it goes last, after its first
-    version. If it is already there, an earlier attempt committed it, and that
-    record is answered as it stands.
+    version. If it is already there, an earlier attempt committed it, or it is the
+    document a later version is added to, and that record is answered as it stands.
     """
     stored = await _created(database[DOCUMENTS], document.to_document())
     return models.Document.from_document(stored)
@@ -484,13 +505,19 @@ async def create_version(
     stored = models.Version.from_document(
         await _created(database[VERSIONS], version.to_document())
     )
-    if stored.document_id != version.document_id:
+    return _filed(stored, version.document_id)
+
+
+def _filed(version: models.Version, document_id: ids.DocumentId) -> models.Version:
+    """`version`, if it is a version of `document_id`; else raises
+    `MisfiledVersionError`."""
+    if version.document_id != document_id:
         message = (
-            f"Version {version.id} belongs to document {stored.document_id}, "
-            f"not {version.document_id}"
+            f"Version {version.id} belongs to document {version.document_id}, "
+            f"not {document_id}"
         )
         raise MisfiledVersionError(message)
-    return stored
+    return version
 
 
 async def _created(collection: Any, record: dict[str, Any]) -> dict[str, Any]:
