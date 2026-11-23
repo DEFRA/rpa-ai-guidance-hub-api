@@ -627,6 +627,26 @@ class TestWhenTheSaveFails:
         assert staging.staged[FILE].saving_status == "complete"
         assert converts.call_count == 1
 
+    def test_a_failed_save_sent_again_with_another_file_of_its_upload_is_finished(
+        self, client, staging, search
+    ):
+        """The journey sends one file per upload. A caller that sends another file of
+        the same upload, while the first one's save is unfinished, finishes that save
+        under the first file's ids, rather than start one the document cannot take."""
+        search.failure = search_service.IndexRefusedError("422 no guide title")
+        client.post("/guides", json=_request())
+        search.failure = None
+        other = "0c0ffee0-47d0-4104-9944-5e23421ef437"
+        staging.stage(file_id=other, path=f"{UPLOAD}/{other}")
+
+        response = client.post(
+            "/guides", json=_request(source={"uploadId": UPLOAD, "fileId": other})
+        )
+
+        assert response.headers["Location"] == f"/guides/staging/{FILE}"
+        assert staging.staged[FILE].saving_status == "complete"
+        assert [version.id for version, _ in search.indexed] == [VERSION]
+
 
 class TestWhenTheSaveCannotBeStarted:
     """The job never reached the queue, so nothing will ever do the work: the caller

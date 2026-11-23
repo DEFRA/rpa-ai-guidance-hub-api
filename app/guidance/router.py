@@ -123,15 +123,21 @@ async def create_document(
     and a save that failed, or has had no update for a while, is started again under
     the ids its first attempt reserved. A save is finished once it is marked
     complete, not once its document is committed: search is given the version
-    between the two, so a save that failed there is started again too.
+    between the two, so a save that failed there is started again too, for the file
+    the document was made from, whichever file of the upload is named.
 
     A job that cannot be sent is recorded as a failed save and answered 503, so the
     caller does not follow a save that will never come.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
-    if already is not None and await _finished(staging, already.file_id):
-        response.status_code = fastapi.status.HTTP_200_OK
-        return await _answered(database, already.id)
+    if already is not None:
+        if await _finished(staging, already.file_id):
+            response.status_code = fastapi.status.HTTP_200_OK
+            return await _answered(database, already.id)
+        # Its save is finished under the ids the file it was made from reserved,
+        # whichever file of the upload this request names.
+        source = new.source.model_copy(update={"file_id": already.file_id})
+        new = new.model_copy(update={"source": source})
 
     staged, document_id, version_id = await _reserved(staging, new.source)
 
