@@ -18,7 +18,7 @@ import pytest
 
 from app.background import consumer, sqs
 from app.common import tracing
-from app.guidance import conversion, models, records, schemas, service
+from app.guidance import conversion, models, records, schemas, section_ids, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import store as staging_store
 from app.guidance.parsing import errors
@@ -97,7 +97,11 @@ def search() -> fake_search_index.InMemorySearchIndex:
 @pytest.fixture
 def handler(database, staging, search) -> conversion.ConversionHandler:
     return conversion.ConversionHandler(
-        database, staging, service.GuidanceService(s3_client=None), search
+        database,
+        staging,
+        service.GuidanceService(s3_client=None),
+        search,
+        s3_client=None,
     )
 
 
@@ -250,7 +254,13 @@ class TestConvertingAnUploadIntoANewVersion:
         await handler(body, last_delivery=False)
 
     @pytest.fixture
-    async def next_job(self, staging, job, converts) -> conversion.ConversionJob:
+    async def next_job(
+        self,
+        saved,  # noqa: ARG002 - the first job has to have run with its own conversion
+        staging,
+        job,
+        converts,
+    ) -> conversion.ConversionJob:
         """A second upload's job, naming the first one's document."""
         upload, file_id = str(uuid.uuid4()), str(uuid.uuid4())
         await staging.claim(file_id, f"{upload}/{file_id}")
@@ -279,7 +289,51 @@ class TestConvertingAnUploadIntoANewVersion:
             }
         )
 
-    @pytest.mark.usefixtures("saved")
+    @pytest.fixture
+    def contents(self, mocker, job, next_job):
+        """What each version stored: the second renumbers the first's sections, and
+        puts a new one before them."""
+        stored = {
+            f"s3://docs/{job.document_id}/{job.version_id}/content.md": (
+                "# Claims guide\n\n"
+                "## 1. Apply for the payment\n\nSend the form.\n\n"
+                "## 2. Get paid\n\nWe pay you.\n"
+            ),
+            f"s3://docs/{job.document_id}/{next_job.version_id}/content.md": (
+                "# Claims guide\n\n"
+                "## 1. Check you can apply\n\nRead the rules.\n\n"
+                "## 2. Apply for the payment\n\nSend the form.\n\n"
+                "## 3. Get paid\n\nWe pay you.\n"
+            ),
+        }
+        return mocker.patch.object(
+            section_ids.store,
+            "read",
+            side_effect=lambda url, s3_client=None: stored[url].encode(),  # noqa: ARG005
+        )
+
+    @pytest.mark.usefixtures("contents")
+    async def test_its_sections_keep_the_ids_they_had_before(
+        self, handler, job, next_job, database
+    ):
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        before = await section_ids.of_version(database, job.version_id, [])
+        after = await section_ids.of_version(database, next_job.version_id, [])
+        assert after["2-apply-for-the-payment"] == before["1-apply-for-the-payment"]
+        assert after["3-get-paid"] == before["2-get-paid"]
+
+    @pytest.mark.usefixtures("contents")
+    async def test_a_section_new_to_it_has_a_new_id(
+        self, handler, job, next_job, database
+    ):
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        before = await section_ids.of_version(database, job.version_id, [])
+        after = await section_ids.of_version(database, next_job.version_id, [])
+        assert after["1-check-you-can-apply"] not in before.values()
+
+    @pytest.mark.usefixtures("contents")
     async def test_saves_it_as_the_documents_newest_version(
         self, handler, job, next_job, database
     ):
@@ -291,7 +345,7 @@ class TestConvertingAnUploadIntoANewVersion:
             job.version_id,
         ]
 
-    @pytest.mark.usefixtures("saved")
+    @pytest.mark.usefixtures("contents")
     async def test_keeps_the_documents_record_as_it_was(
         self, handler, job, next_job, database
     ):
@@ -300,7 +354,7 @@ class TestConvertingAnUploadIntoANewVersion:
         document = await records.find(database, job.document_id)
         assert document.upload_id == job.request.source.upload_id
 
-    @pytest.mark.usefixtures("saved")
+    @pytest.mark.usefixtures("contents")
     async def test_delivered_again_converts_it_once(self, handler, next_job, converts):
         body = next_job.model_dump_json(by_alias=True)
 

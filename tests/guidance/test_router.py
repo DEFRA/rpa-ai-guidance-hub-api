@@ -303,6 +303,7 @@ def submitter(collections, staging, search):
             staging,
             service.GuidanceService(s3_client=None),
             search,
+            s3_client=None,
         )
     )
     app.dependency_overrides[router.get_conversion_submitter] = lambda: fake
@@ -891,9 +892,14 @@ class TestAddingAVersionToADocument:
     followed as a new document's save is."""
 
     @pytest.fixture
-    def document(self, client, staging, converts):
-        """A document made from the first upload, and the second upload staged."""
+    def document(self, client, staging, converts, mocker):
+        """A document made from the first upload, and the second upload staged.
+
+        Its sections' ids are not what these cases are about, and need the versions'
+        content and a real database: see the conversion's cases.
+        """
         client.post("/guides", json=_request())
+        mocker.patch.object(conversion.section_ids, "of_new_version", return_value=None)
         staging.stage(
             file_id=NEXT_FILE,
             path=f"{NEXT_UPLOAD}/{NEXT_FILE}",

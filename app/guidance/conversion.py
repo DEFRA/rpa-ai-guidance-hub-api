@@ -11,7 +11,8 @@ answers before it has indexed it: the hub and search agree in the end, not at on
 
 **A job names the document its version is of:** a new one, whose record, written after
 the version, commits it; or one there already, a guide's later version, which its own
-record commits.
+record commits. A later version is written with its sections' ids: those of the same
+sections in the version before, so what points into a section follows it.
 
 **Safe to repeat**, as SQS may deliver a message more than once: the ids are reserved
 once, on the staging record, every write creates rather than replaces and keeps what
@@ -31,6 +32,7 @@ only the newest version it is given.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
@@ -40,7 +42,7 @@ import fastapi.concurrency
 import pydantic
 
 from app.common import tracing
-from app.guidance import ids, models, records, schemas, service
+from app.guidance import ids, models, records, schemas, section_ids, service
 from app.guidance.parsing import errors
 from app.search import search_service
 
@@ -112,11 +114,15 @@ class ConversionHandler:
         staging: staging_store.StagingStore,
         guidance: service.GuidanceService,
         search: SearchIndex,
+        *,
+        s3_client: Any,
     ) -> None:
         self._database = database
         self._staging = staging
         self._guidance = guidance
         self._search = search
+        # Where the version before's content is read from, to carry its sections' ids.
+        self._s3 = s3_client
 
     async def __call__(self, body: str, *, last_delivery: bool) -> None:
         job = ConversionJob.model_validate_json(body)
@@ -160,7 +166,8 @@ class ConversionHandler:
         )
 
     async def _converted(self, job: ConversionJob) -> models.Version:
-        """Convert the upload, and record the version it makes.
+        """Convert the upload, and record the version it makes, with its sections' ids
+        where there is a version before to carry them from.
 
         Converting is done in a worker thread, because parsing and the object store
         calls block.
@@ -181,8 +188,12 @@ class ConversionHandler:
             stored.images,
         )
 
+        made = job.request.version_for(stored, dt.datetime.now(tz=dt.UTC))
+        given = await section_ids.of_new_version(
+            self._database, job.document_id, stored.content, self._s3
+        )
         return await records.create_version(
-            self._database, job.request.version_for(stored, dt.datetime.now(tz=dt.UTC))
+            self._database, dataclasses.replace(made, section_ids=given)
         )
 
     async def _give_to_search(

@@ -7,7 +7,7 @@ kept with the version from then on; when two ask at once, both read back whichev
 was kept first. Every version is given them this way, however old: from its stored
 content (`of_latest`), which is read only until they are kept. A new version's
 sections are given the ids of the same sections in the version before
-(`carried_over`), so what points into a section follows it.
+(`of_new_version`), written with the version, so what points into a section follows it.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from app.common import mongo_timeouts
-from app.guidance import ids, records, section_matching
+from app.guidance import ids, models, records, section_matching
 from app.guidance.documents import reader, store
 from app.guidance.parsing import anchors
 
@@ -25,11 +25,9 @@ if TYPE_CHECKING:
 
     import pymongo.asynchronous.database
 
-    from app.guidance import models
     from app.guidance.parsing import models as parsing_models
 
-# Where a version record keeps its sections' ids, in order: `{anchor, id}` each.
-_SECTION_IDS = "sectionIds"
+_SECTION_IDS = models.SECTION_IDS
 
 
 async def of_latest(
@@ -71,12 +69,48 @@ async def _kept(
 def _anchors_at(content_url: str, s3_client: Any) -> list[str] | None:
     """The anchor of each section of the content stored at `content_url`, in its
     order; None if nothing is stored there."""
+    sections = _sections_at(content_url, s3_client)
+    return None if sections is None else _anchors_of(sections)
+
+
+def _sections_at(
+    content_url: str, s3_client: Any
+) -> list[parsing_models.MarkdownSection] | None:
+    """The sections of the content stored at `content_url`, in its order; None if
+    nothing is stored there."""
     stored = store.read(content_url, s3_client=s3_client)
     if stored is None:
         return None
-    document = reader.from_markdown(stored.decode("utf-8"))
-    of_section = anchors.of_document(document.sections)
-    return [of_section[id(section)] for section in document.sections]
+    return list(reader.from_markdown(stored.decode("utf-8")).sections)
+
+
+def _anchors_of(sections: Sequence[parsing_models.MarkdownSection]) -> list[str]:
+    of_section = anchors.of_document(list(sections))
+    return [of_section[id(section)] for section in sections]
+
+
+async def of_new_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    content_url: str,
+    s3_client: Any,
+) -> dict[str, ids.SectionId] | None:
+    """Each section of a new version of `document_id`, stored at `content_url` and not
+    yet recorded, by its anchor in its order, with the id of the same section in the
+    guide's latest version, or a new id (`carried_over`). None for a guide's first
+    version, or where either content is not there: its sections are given ids when
+    they are first asked for, as any version's are."""
+    before = await records.latest_version(database, document_id)
+    if before is None:
+        return None
+    before_sections = await asyncio.to_thread(
+        _sections_at, before.content_url, s3_client
+    )
+    after_sections = await asyncio.to_thread(_sections_at, content_url, s3_client)
+    if before_sections is None or after_sections is None:
+        return None
+    before_ids = await of_version(database, before.id, _anchors_of(before_sections))
+    return carried_over(before_sections, before_ids, after_sections)
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)

@@ -67,11 +67,13 @@ def _working_the_queue(
     queue = sqs.SqsQueue(
         sqs.client(), url, polling_threads=config.conversions_concurrency
     )
+    s3_client = s3.get_s3_client()
     handler = conversion.ConversionHandler(
         database,
         staging_store.MongoStagingStore(database, config.staging_retention_seconds),
-        service.GuidanceService(s3_client=s3.get_s3_client()),
+        service.GuidanceService(s3_client=s3_client),
         search_service.SearchServiceIndex(config.search_api_base_url),
+        s3_client=s3_client,
     )
     working = consumer.Consumer(
         queue, handler, concurrency=config.conversions_concurrency

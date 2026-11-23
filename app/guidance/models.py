@@ -21,6 +21,9 @@ from app.guidance import ids
 # The document a version belongs to: the many end of the one-to-many.
 DOCUMENT_ID = "documentId"
 
+# Where a version keeps its sections' ids, in its order: `{anchor, id}` each.
+SECTION_IDS = "sectionIds"
+
 FILTERABLE_METADATA = ("schemes", "systems", "audience", "guidanceType")
 
 # The words a guide specific to no scheme is stored with among its schemes. Such a
@@ -99,12 +102,25 @@ class Version:
     version_number: str | None = None
     created_by_id: str | None = None
     created_by_display_name: str | None = None
+    # Each section's id by its anchor, in its order; None until they are given - see
+    # `section_ids`.
+    section_ids: Mapping[str, ids.SectionId] | None = None
 
     def to_document(self) -> dict[str, Any]:
         created_by = (
             None
             if self.created_by_id is None
             else {"id": self.created_by_id, "displayName": self.created_by_display_name}
+        )
+        given = (
+            {}
+            if self.section_ids is None
+            else {
+                SECTION_IDS: [
+                    {"anchor": anchor, "id": section_id}
+                    for anchor, section_id in self.section_ids.items()
+                ]
+            }
         )
         return {
             "_id": self.id,
@@ -114,6 +130,7 @@ class Version:
             "versionNumber": self.version_number,
             "createdBy": created_by,
             "createdAt": self.created_at,
+            **given,
         }
 
     @classmethod
@@ -128,6 +145,14 @@ class Version:
             created_by_id=created_by.get("id"),
             created_by_display_name=created_by.get("displayName"),
             created_at=document["createdAt"],
+            section_ids=(
+                None
+                if SECTION_IDS not in document
+                else {
+                    section["anchor"]: ids.SectionId(section["id"])
+                    for section in document[SECTION_IDS]
+                }
+            ),
         )
 
 
