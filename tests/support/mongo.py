@@ -28,6 +28,9 @@ async def mongo_database(mongo_container: Any) -> AsyncIterator[Any]:
     client: AsyncMongoClient = AsyncMongoClient(
         connection_url, uuidRepresentation="standard"
     )
+    # A new container can refuse its first connections for a moment; wait until
+    # it answers, so no test's own time budget is spent on that.
+    await client.admin.command("ping")
 
     db = client["test-database"]
 
