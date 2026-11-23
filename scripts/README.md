@@ -12,6 +12,6 @@ rpa-ai-guidance hub backend.
   `.docx` as Markdown.
 - `export_openapi.py` - write the app's OpenAPI document to `docs/openapi.json`
   (`uv run task openapi`), or with `--check` fail if the committed file is stale
-  (`uv run task openapi-check`, run by the pull-request workflow).
+  (`uv run task openapi-check`, part of `uv run task test`).
 - `check_raises.py` - fail if a `pytest.raises` block makes more than one call,
   so that only the call under test can raise (run by `uv run task lint`).

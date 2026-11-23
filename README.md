@@ -265,7 +265,7 @@ Ensure the python virtual environment is configured and libraries are installed 
 Testing follows the [FastApi documented approach](https://fastapi.tiangolo.com/tutorial/testing/); using pytest & starlette.
 
 ```bash
-uv run task test      # the full gate: lint, mypy, then pytest with coverage
+uv run task test      # the full gate: lint, mypy, the OpenAPI check, then pytest with coverage
 uv run pytest         # tests only
 uv run task format    # ruff format + ruff check --fix
 uv run task lint      # ruff format --check + ruff check (no fixes)

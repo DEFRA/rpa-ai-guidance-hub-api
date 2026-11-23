@@ -25,9 +25,6 @@ jobs:
           uv sync --frozen
           uv run task test
 
-      - name: Check openapi.json is up to date
-        run: uv run task openapi-check
-
       # Dependabot-triggered runs cannot read Actions secrets (only Dependabot
       # secrets), so SONAR_TOKEN is empty and the scan would fail.
       - name: SonarCloud Scan
