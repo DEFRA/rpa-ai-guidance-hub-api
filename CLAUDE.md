@@ -13,7 +13,7 @@ uv sync                      # install deps (dev group included by default)
 uv run task format           # ruff format + ruff check --fix
 uv run task lint             # ruff format --check + ruff check (no fixes)
 uv run task typecheck        # mypy over app/ and tests/
-uv run task test             # lint + typecheck + pytest with coverage reports
+uv run task test             # lint + typecheck + openapi-check + pytest with coverage reports
 uv run pytest                # tests only
 uv run pytest tests/health/test_health_router.py::TestHealthProbe::test_health  # one test
 pre-commit install           # git hooks (ruff + hygiene checks)

@@ -75,7 +75,7 @@ lint = "uv run ruff format ./app ./tests --check && uv run ruff check ./app ./te
 typecheck = "uv run mypy ./app ./tests"
 openapi = "uv run python -m scripts.export_openapi"
 openapi-check = "uv run python -m scripts.export_openapi --check"
-test = "uv run task lint && uv run task typecheck && uv run coverage run -m pytest -vv && uv run coverage html && uv run coverage xml"
+test = "uv run task lint && uv run task typecheck && uv run task openapi-check && uv run coverage run -m pytest -vv && uv run coverage html && uv run coverage xml"
 
 [tool.pytest.ini_options]
 minversion = "7.0"
