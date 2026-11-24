@@ -106,6 +106,39 @@ def handler(database, staging, search) -> conversion.ConversionHandler:
     )
 
 
+@pytest.fixture
+async def saved(handler, body, converts):  # noqa: ARG001 - for its effect
+    """The document, made by the first job."""
+    await handler(body, last_delivery=False)
+
+
+@pytest.fixture
+async def next_job(
+    saved,  # noqa: ARG001 - the first job has to have run with its own conversion
+    staging,
+    job,
+    converts,
+) -> conversion.ConversionJob:
+    """A second upload's job, naming the first one's document."""
+    next_job = await _new_version_job(staging, job, "2.0")
+    converts.return_value = _stored(next_job)
+    return next_job
+
+
+@pytest.fixture
+def contents(mocker, job):
+    """What each version stored, as the hub writes it: every one after the first
+    renumbers the first's sections, and puts a new one before them."""
+    first = f"s3://docs/{job.document_id}/{job.version_id}/content.md"
+    return mocker.patch.object(
+        section_ids.store,
+        "read",
+        side_effect=lambda url, s3_client=None: (  # noqa: ARG005
+            _FIRST_CONTENT if url == first else _LATER_CONTENT
+        ).encode(),
+    )
+
+
 class TestConvertingAnUpload:
     @pytest.mark.usefixtures("converts")
     async def test_saves_its_document_and_marks_the_save_complete(
@@ -297,37 +330,6 @@ def _stored(job: conversion.ConversionJob) -> models.StoredDocument:
 class TestConvertingAnUploadIntoANewVersion:
     """A job naming a document that is there already: a new version of a guide, which
     its own record commits."""
-
-    @pytest.fixture
-    async def saved(self, handler, body, converts):  # noqa: ARG002 - for its effect
-        """The document, made by the first job."""
-        await handler(body, last_delivery=False)
-
-    @pytest.fixture
-    async def next_job(
-        self,
-        saved,  # noqa: ARG002 - the first job has to have run with its own conversion
-        staging,
-        job,
-        converts,
-    ) -> conversion.ConversionJob:
-        """A second upload's job, naming the first one's document."""
-        next_job = await _new_version_job(staging, job, "2.0")
-        converts.return_value = _stored(next_job)
-        return next_job
-
-    @pytest.fixture
-    def contents(self, mocker, job):
-        """What each version stored, as the hub writes it: every one after the first
-        renumbers the first's sections, and puts a new one before them."""
-        first = f"s3://docs/{job.document_id}/{job.version_id}/content.md"
-        return mocker.patch.object(
-            section_ids.store,
-            "read",
-            side_effect=lambda url, s3_client=None: (  # noqa: ARG005
-                _FIRST_CONTENT if url == first else _LATER_CONTENT
-            ).encode(),
-        )
 
     async def test_fails_when_the_content_of_the_version_it_follows_is_not_there(
         self, handler, job, next_job, staging, database, mocker

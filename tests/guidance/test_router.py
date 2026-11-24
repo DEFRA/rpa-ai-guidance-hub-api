@@ -330,6 +330,32 @@ def client(collections, converts, staging, submitter):  # noqa: ARG001 - for the
     return TestClient(app)
 
 
+@pytest.fixture
+def document(client, staging, converts, mocker):
+    """A document made from the first upload, and the second upload staged.
+
+    Its sections' ids are not what the version cases are about, and need the
+    versions' content and a real database: see the conversion's cases.
+    """
+    client.post("/guides", json=_request())
+    mocker.patch.object(conversion.section_ids, "of_new_version", return_value={})
+    staging.minted = OTHER_DOCUMENT
+    staging.stage(
+        file_id=NEXT_FILE,
+        path=f"{NEXT_UPLOAD}/{NEXT_FILE}",
+        version_id=NEXT_VERSION,
+    )
+    converts.return_value = models.StoredDocument(
+        document_id=DOCUMENT,
+        version_id=NEXT_VERSION,
+        content=NEXT_CONTENT,
+        title=COVER_TITLE,
+        sections=24,
+        images=45,
+    )
+    return DOCUMENT
+
+
 class TestCreatingADocument:
     def test_a_submission_is_accepted_at_once_pointing_at_its_progress(
         self, client, submitter
@@ -899,31 +925,6 @@ class TestReadingADocumentBack:
 class TestAddingAVersionToADocument:
     """An upload that updates a guide is saved as its document's newest version, and
     followed as a new document's save is."""
-
-    @pytest.fixture
-    def document(self, client, staging, converts, mocker):
-        """A document made from the first upload, and the second upload staged.
-
-        Its sections' ids are not what these cases are about, and need the versions'
-        content and a real database: see the conversion's cases.
-        """
-        client.post("/guides", json=_request())
-        mocker.patch.object(conversion.section_ids, "of_new_version", return_value={})
-        staging.minted = OTHER_DOCUMENT
-        staging.stage(
-            file_id=NEXT_FILE,
-            path=f"{NEXT_UPLOAD}/{NEXT_FILE}",
-            version_id=NEXT_VERSION,
-        )
-        converts.return_value = models.StoredDocument(
-            document_id=DOCUMENT,
-            version_id=NEXT_VERSION,
-            content=NEXT_CONTENT,
-            title=COVER_TITLE,
-            sections=24,
-            images=45,
-        )
-        return DOCUMENT
 
     @staticmethod
     def _next(**overrides: Any) -> dict[str, Any]:
