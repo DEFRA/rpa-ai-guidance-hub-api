@@ -1,10 +1,11 @@
 """The records of a document and its versions, in two collections.
 
-`documents` holds what a document is to the people who use it, the details given on
-the form, and the upload its first version came from; that upload makes one document
-only (`uploadId` is unique). `document_versions` holds each conversion: where its
-Markdown went, and who was signed in when it was made. The newest version is the
-newest by `createdAt`.
+`documents` holds the upload a document's first version came from; that upload makes
+one document only (`uploadId` is unique). `document_versions` holds each conversion:
+where its Markdown went, the details given on the form with it, and who was signed in
+when it was made. The newest version is the newest by `createdAt`, and a document's
+details are its newest version's; a document keeps its own only for a version saved
+before versions kept theirs.
 
 A record's ids are the object store's prefixes for its content (see `ids`). A record
 is created, never replaced: its ids are reserved on the upload's staging record, so a
@@ -17,6 +18,7 @@ identity that was signed in.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -111,9 +113,17 @@ async def file_saved_as_version(
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Document | None:
-    """One document by its id, without its versions."""
+    """One document by its id, without its versions, with its details as
+    `_latest_details` gives them: its latest version's, or its own where that version
+    kept none."""
     found = await database[DOCUMENTS].find_one({"_id": document_id})
-    return None if found is None else models.Document.from_document(found)
+    if found is None:
+        return None
+    document = models.Document.from_document(found)
+    latest = await latest_version(database, document_id)
+    if latest is None or latest.metadata is None:
+        return document
+    return dataclasses.replace(document, metadata=dict(latest.metadata))
 
 
 @mongo_timeouts.mongo(mongo_timeouts.FAST)
@@ -234,14 +244,15 @@ _SCHEMES = f"{_METADATA}.schemes"
 
 
 def _as_now() -> list[dict[str, Any]]:
-    """The stage reading each document's metadata as now
-    (`models.details_as_now`): a guide stored as "Not scheme-specific" has no
-    scheme.
+    """The stages reading each document's details as now: its latest version's, read
+    as `models.details_as_now` reads them (a guide stored as "Not scheme-specific"
+    has no scheme).
 
-    The match after it works on what this works out, so it cannot use the
+    The match after them works on what they work out, so it cannot use the
     metadata indexes.
     """
     return [
+        *_latest_details(),
         {
             "$set": {
                 _SCHEMES: {
@@ -257,7 +268,39 @@ def _as_now() -> list[dict[str, Any]]:
                     ]
                 }
             }
-        }
+        },
+    ]
+
+
+# Where `_latest_details` puts each document's latest version while it reads it.
+_LATEST = "latest"
+
+
+def _latest_details() -> list[dict[str, Any]]:
+    """The stages giving each document its latest version's details, or its own where
+    that version kept none: one saved before versions kept their own."""
+    return [
+        {
+            "$lookup": {
+                "from": VERSIONS,
+                "localField": "_id",
+                "foreignField": DOCUMENT_ID,
+                "pipeline": [
+                    {_SORT: dict(_NEWEST)},
+                    {"$limit": 1},
+                    {"$project": {_METADATA: 1}},
+                ],
+                "as": _LATEST,
+            }
+        },
+        {
+            "$set": {
+                _METADATA: {
+                    "$ifNull": [{_FIRST: f"${_LATEST}.{_METADATA}"}, f"${_METADATA}"]
+                }
+            }
+        },
+        {"$unset": _LATEST},
     ]
 
 
@@ -368,8 +411,11 @@ async def find_many(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_ids: Sequence[ids.DocumentId],
 ) -> dict[ids.DocumentId, models.Document]:
-    """Those of `document_ids` that are documents, by id, in a single query."""
-    cursor = database[DOCUMENTS].find({"_id": {_IN: list(document_ids)}})
+    """Those of `document_ids` that are documents, by id, each with its latest
+    version's details, in a single query."""
+    cursor = await database[DOCUMENTS].aggregate(
+        [{_MATCH: {"_id": {_IN: list(document_ids)}}}, *_latest_details()]
+    )
     return {
         document["_id"]: models.Document.from_document(document)
         async for document in cursor
