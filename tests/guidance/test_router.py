@@ -424,7 +424,7 @@ class TestCreatingADocument:
         assert record[records.DOCUMENT_ID] == DOCUMENT
         assert record["contentUrl"] == CONTENT
         assert "createdAt" in record
-        assert "source" not in record
+        assert record["source"] == {"uploadId": UPLOAD, "fileId": FILE}
 
     def test_what_the_document_called_itself_is_kept_beside_the_version(
         self, client, versions
@@ -1010,6 +1010,17 @@ class TestAddingAVersionToADocument:
 
     def test_submitted_again_it_answers_the_document(self, client, document):
         client.post(f"/guides/{document}/versions", json=self._next())
+
+        second = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert second.status_code == 200
+        assert second.json()["id"] == str(document)
+
+    def test_once_its_staging_record_has_expired_it_answers_the_document(
+        self, client, document, staging
+    ):
+        client.post(f"/guides/{document}/versions", json=self._next())
+        del staging.staged[NEXT_FILE]
 
         second = client.post(f"/guides/{document}/versions", json=self._next())
 

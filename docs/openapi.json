@@ -1951,7 +1951,7 @@
     },
     "/guides/{document_id}/versions": {
       "post": {
-        "description": "Start converting an upload into a new version of a document, and answer where\nto follow it, as `POST /guides` does. The version is the document's newest once it\nis saved, and so live at once.\n\nThe upload's ids are reserved under the document's own id, so the file's staging\nrecord names the document it is saved into. An upload whose ids are reserved\nunder another document, being made into a guide of its own say, is a conflict.\nSubmitting the same upload again never starts a second save: once its version is\nrecorded and the save marked complete, the document is answered (200).",
+        "description": "Start converting an upload into a new version of a document, and answer where\nto follow it, as `POST /guides` does. The version is the document's newest once it\nis saved, and so live at once.\n\nThe upload's ids are reserved under the document's own id, so the file's staging\nrecord names the document it is saved into. An upload whose ids are reserved\nunder another document, being made into a guide of its own say, is a conflict.\nSubmitting the same upload again never starts a second save: once its version is\nrecorded and the save marked complete, or its staging record has expired, the\ndocument is answered (200).",
         "operationId": "create_version_guides__document_id__versions_post",
         "parameters": [
           {

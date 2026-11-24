@@ -105,6 +105,8 @@ class NewDocument(pydantic.BaseModel):
                 self.created_by.display_name if self.created_by else None
             ),
             created_at=created_at,
+            upload_id=self.source.upload_id,
+            file_id=self.source.file_id,
         )
 
 

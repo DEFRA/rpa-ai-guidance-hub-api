@@ -133,6 +133,19 @@ async def find_by_upload(
 
 
 @mongo_timeouts.mongo(mongo_timeouts.FAST)
+async def file_saved_as_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    upload_id: ids.UploadId,
+) -> ids.FileId | None:
+    """The file of `upload_id` saved as a version of `document_id`, if one was."""
+    found = await database[VERSIONS].find_one(
+        {DOCUMENT_ID: document_id, _UPLOAD_ID: upload_id}
+    )
+    return None if found is None else models.Version.from_document(found).file_id
+
+
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Document | None:

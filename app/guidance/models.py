@@ -120,12 +120,21 @@ class Version:
     sections: Mapping[str, GivenSection] | None = None
     # The version this one's sections were matched with: None for a guide's first.
     follows: ids.VersionId | None = None
+    # The upload it was converted from: None for a version stored before versions
+    # kept it.
+    upload_id: ids.UploadId | None = None
+    file_id: ids.FileId | None = None
 
     def to_document(self) -> dict[str, Any]:
         created_by = (
             None
             if self.created_by_id is None
             else {"id": self.created_by_id, "displayName": self.created_by_display_name}
+        )
+        source = (
+            None
+            if self.upload_id is None
+            else {"uploadId": self.upload_id, "fileId": self.file_id}
         )
         given = (
             {}
@@ -145,6 +154,7 @@ class Version:
             "versionNumber": self.version_number,
             "createdBy": created_by,
             "createdAt": self.created_at,
+            "source": source,
             **given,
             **({} if self.follows is None else {FOLLOWS: self.follows}),
         }
@@ -152,6 +162,7 @@ class Version:
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> Version:
         created_by = document.get("createdBy") or {}
+        source = document.get("source") or {}
         return cls(
             id=document["_id"],
             document_id=document[DOCUMENT_ID],
@@ -172,6 +183,8 @@ class Version:
                 }
             ),
             follows=document.get(FOLLOWS),
+            upload_id=source.get("uploadId"),
+            file_id=source.get("fileId"),
         )
 
 

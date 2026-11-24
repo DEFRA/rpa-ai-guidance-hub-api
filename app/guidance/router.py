@@ -188,7 +188,8 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     record names the document it is saved into. An upload whose ids are reserved
     under another document, being made into a guide of its own say, is a conflict.
     Submitting the same upload again never starts a second save: once its version is
-    recorded and the save marked complete, the document is answered (200).
+    recorded and the save marked complete, or its staging record has expired, the
+    document is answered (200).
     """
     if await records.find(database, document_id) is None:
         raise fastapi.HTTPException(
@@ -196,17 +197,19 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
             detail=f"No guide {document_id}",
         )
 
+    saved_from = await records.file_saved_as_version(
+        database, document_id, new.source.upload_id
+    )
+    if saved_from is not None and await _finished(staging, saved_from):
+        response.status_code = fastapi.status.HTTP_200_OK
+        return await _answered(database, document_id)
+
     staged, reserved_for, version_id = await _reserved(staging, new.source, document_id)
     if reserved_for != document_id:
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_409_CONFLICT,
             detail=f"File {new.source.file_id} is being made into {reserved_for}",
         )
-
-    already = await records.find_version(database, document_id, version_id)
-    if already is not None and await _finished(staging, staged.file_id):
-        response.status_code = fastapi.status.HTTP_200_OK
-        return await _answered(database, document_id)
 
     return await _saving(
         staging, submitter, response, staged, _job(new, staged, document_id, version_id)

@@ -29,6 +29,8 @@ VERSION = models.Version(
     created_by_id="dev-user-123",
     created_by_display_name="Dev User",
     created_at=CREATED,
+    upload_id="6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24",
+    file_id="7a2e9c41-5d3b-4f60-8e1a-2c4b6d8f0a13",
 )
 
 
@@ -59,7 +61,7 @@ class TestADocumentAsStored:
 
 
 class TestAVersionAsStored:
-    def test_is_stored_with_its_number_and_who_made_it_nested_as_its_creator(self):
+    def test_is_stored_with_its_upload_and_creator_nested(self):
         assert VERSION.to_document() == {
             "_id": "0199b8a2-0000-7000-8000-000000000002",
             "documentId": "0199b8a2-0000-7000-8000-000000000001",
@@ -68,10 +70,20 @@ class TestAVersionAsStored:
             "versionNumber": "2.1",
             "createdBy": {"id": "dev-user-123", "displayName": "Dev User"},
             "createdAt": CREATED,
+            "source": {
+                "uploadId": "6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24",
+                "fileId": "7a2e9c41-5d3b-4f60-8e1a-2c4b6d8f0a13",
+            },
         }
 
     def test_reads_back_as_it_was_stored(self):
         assert models.Version.from_document(VERSION.to_document()) == VERSION
+
+    def test_one_stored_before_versions_kept_their_upload_reads_back_with_none(self):
+        stored = VERSION.to_document()
+        del stored["source"]
+
+        assert models.Version.from_document(stored).file_id is None
 
     def test_one_stored_before_versions_had_numbers_reads_back_with_none(self):
         stored = VERSION.to_document()
