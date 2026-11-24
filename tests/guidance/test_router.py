@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import json
 import uuid
 from typing import Any
 
@@ -30,6 +31,8 @@ from app.guidance import conversion, models, records, router, service
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
 from app.guidance.parsing.errors import DocumentParseError
+from app.search import search_service
+from tests.fakes import search_index as fake_search_index
 from tests.fakes import submitter as fake_submitter
 
 UPLOAD = "854a1f43-aab4-4579-b166-d708c0aad436"
@@ -278,11 +281,19 @@ def converts(mocker):
 
 
 @pytest.fixture
-def submitter(collections, staging):
+def search() -> fake_search_index.InMemorySearchIndex:
+    return fake_search_index.InMemorySearchIndex()
+
+
+@pytest.fixture
+def submitter(collections, staging, search):
     """The queue's stand-in, giving each job at once to the handler."""
     fake = fake_submitter.InMemorySubmitter(
         conversion.ConversionHandler(
-            collections, staging, service.GuidanceService(s3_client=None)
+            collections,
+            staging,
+            service.GuidanceService(s3_client=None),
+            search,
         )
     )
     app.dependency_overrides[router.get_conversion_submitter] = lambda: fake
@@ -437,6 +448,13 @@ class TestCreatingADocument:
 
         assert versions.documents[0]["createdBy"] is None
 
+    def test_the_job_carries_the_requests_trace_id(self, client, submitter):
+        client.post(
+            "/guides", json=_request(), headers={"x-cdp-request-id": "trace-123"}
+        )
+
+        assert json.loads(submitter.sent[0])["trace_id"] == "trace-123"
+
 
 class TestFollowingTheSave:
     """The staging record says how far the save has got: a step per picture and one
@@ -472,6 +490,35 @@ class TestSubmittingTheSameJourneyTwice:
 
     def test_after_the_save_the_second_submission_answers_the_document(self, client):
         client.post("/guides", json=_request())
+
+        second = client.post("/guides", json=_request())
+
+        assert second.status_code == 200
+        assert second.json()["id"] == str(DOCUMENT)
+
+    def test_with_another_file_of_the_upload_it_answers_the_document(
+        self, client, staging, submitter
+    ):
+        """Finished is the save of the file the document was made from, not of the
+        file this request names: no second job is started for the same upload."""
+        client.post("/guides", json=_request())
+        other = "0c0ffee0-47d0-4104-9944-5e23421ef437"
+        staging.stage(file_id=other, path=f"{UPLOAD}/{other}")
+
+        second = client.post(
+            "/guides",
+            json=_request(source={"uploadId": UPLOAD, "fileId": other}),
+        )
+
+        assert second.status_code == 200
+        assert second.json()["id"] == str(DOCUMENT)
+        assert len(submitter.sent) == 1
+
+    def test_once_its_staging_record_has_expired_it_answers_the_document(
+        self, client, staging
+    ):
+        client.post("/guides", json=_request())
+        del staging.staged[FILE]
 
         second = client.post("/guides", json=_request())
 
@@ -561,6 +608,44 @@ class TestWhenTheSaveFails:
         assert response.status_code == 202
         assert staging.staged[FILE].saving_status == "complete"
         assert [record["_id"] for record in documents.documents] == [DOCUMENT]
+
+    def test_a_save_that_failed_after_its_document_was_committed_is_sent_again(
+        self, client, converts, staging, search, submitter
+    ):
+        """Search refused the version after the document was committed. A second
+        submission is not answered as done: its job is sent again, which gives
+        search the version without converting the upload again."""
+        search.failure = search_service.IndexRefusedError("422 no guide title")
+        client.post("/guides", json=_request())
+        search.failure = None
+
+        response = client.post("/guides", json=_request())
+
+        assert response.status_code == 202
+        assert len(submitter.sent) == 2  # noqa: PLR2004 - the first and the second
+        assert [version.id for version, _ in search.indexed] == [VERSION]
+        assert staging.staged[FILE].saving_status == "complete"
+        assert converts.call_count == 1
+
+    def test_a_failed_save_sent_again_with_another_file_of_its_upload_is_finished(
+        self, client, staging, search
+    ):
+        """The journey sends one file per upload. A caller that sends another file of
+        the same upload, while the first one's save is unfinished, finishes that save
+        under the first file's ids, rather than start one the document cannot take."""
+        search.failure = search_service.IndexRefusedError("422 no guide title")
+        client.post("/guides", json=_request())
+        search.failure = None
+        other = "0c0ffee0-47d0-4104-9944-5e23421ef437"
+        staging.stage(file_id=other, path=f"{UPLOAD}/{other}")
+
+        response = client.post(
+            "/guides", json=_request(source={"uploadId": UPLOAD, "fileId": other})
+        )
+
+        assert response.headers["Location"] == f"/guides/staging/{FILE}"
+        assert staging.staged[FILE].saving_status == "complete"
+        assert [version.id for version, _ in search.indexed] == [VERSION]
 
 
 class TestWhenTheSaveCannotBeStarted:

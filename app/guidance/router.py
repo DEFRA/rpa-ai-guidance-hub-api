@@ -33,7 +33,7 @@ import fastapi
 from fastapi.concurrency import run_in_threadpool
 
 from app import config
-from app.common import mongo, s3
+from app.common import mongo, s3, tracing
 from app.guidance import conversion, ids, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import models as staging_models
@@ -121,15 +121,23 @@ async def create_document(
     - and every one of those means the same version of the same document: a finished
     document is answered as it is (200), a save under way is answered as it stands,
     and a save that failed, or has had no update for a while, is started again under
-    the ids its first attempt reserved.
+    the ids its first attempt reserved. A save is finished once it is marked
+    complete, not once its document is committed: search is given the version
+    between the two, so a save that failed there is started again too, for the file
+    the document was made from, whichever file of the upload is named.
 
     A job that cannot be sent is recorded as a failed save and answered 503, so the
     caller does not follow a save that will never come.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
-        response.status_code = fastapi.status.HTTP_200_OK
-        return await _answered(database, already.id)
+        if await _finished(staging, already.file_id):
+            response.status_code = fastapi.status.HTTP_200_OK
+            return await _answered(database, already.id)
+        # Its save is finished under the ids the file it was made from reserved,
+        # whichever file of the upload this request names.
+        source = new.source.model_copy(update={"file_id": already.file_id})
+        new = new.model_copy(update={"source": source})
 
     staged, document_id, version_id = await _reserved(staging, new.source)
 
@@ -144,6 +152,7 @@ async def create_document(
                 document_id=document_id,
                 version_id=version_id,
                 request=new,
+                trace_id=tracing.ctx_trace_id.get(None),
             ),
         )
 
@@ -280,6 +289,13 @@ async def read_asset(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+async def _finished(staging: staging_store.StagingStore, file_id: ids.FileId) -> bool:
+    """Whether the upload's save was marked complete, or its staging record has
+    expired, so that no save can be followed or started again."""
+    staged = await staging.get(file_id)
+    return staged is None or staged.promoted_at is not None
 
 
 async def _reserved(

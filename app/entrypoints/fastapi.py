@@ -23,6 +23,7 @@ from app.preferences import router as preferences_router
 from app.reference import router as reference_router
 from app.review import router as review_router
 from app.search import router as search_router
+from app.search import search_service
 from app.users import records as user_records
 from app.users import router as users_router
 
@@ -70,6 +71,7 @@ def _working_the_queue(
         database,
         staging_store.MongoStagingStore(database, config.staging_retention_seconds),
         service.GuidanceService(s3_client=s3.get_s3_client()),
+        search_service.SearchServiceIndex(config.search_api_base_url),
     )
     working = consumer.Consumer(
         queue, handler, concurrency=config.conversions_concurrency

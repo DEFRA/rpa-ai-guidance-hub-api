@@ -27,6 +27,7 @@ os.environ.setdefault(
 os.environ.setdefault("REFERENCE_AUDIENCES", "Caseworker,Customer")
 os.environ.setdefault("REFERENCE_SYSTEMS", "Siti Agri,CRM")
 os.environ.setdefault("REFERENCE_GUIDANCE_TYPES", "Process guide")
+os.environ.setdefault("SEARCH_API_BASE_URL", "http://search.test")
 
 os.environ.setdefault("AWS_ACCOUNT", "123456789012")
 os.environ.setdefault("CDP_JWT_JWKS_URI", "http://localhost/.well-known/jwks.json")

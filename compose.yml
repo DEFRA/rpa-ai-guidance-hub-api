@@ -35,6 +35,36 @@ services:
       retries: 3
       start_period: 30s
 
+  # The API gives each saved version to search to index, so search runs here too, from
+  # its published image. Its settings are given one by one, not from ./.env, which
+  # holds the API's (its database among them).
+  rpa-ai-guidance-hub-search:
+    image: defradigital/rpa-ai-guidance-hub-search@sha256:f9e578abced058172affc1b8e0566304da0ca31a6ad9490192c1b166c92679e1 # 0.17.0
+    ports:
+      - 8086:8086
+    depends_on:
+      floci:
+        condition: service_healthy
+      # Not service_started: search pings Mongo as it starts, and exits if it cannot.
+      mongodb:
+        condition: service_healthy
+    environment:
+      # Not development, which the image sets: that runs uvicorn reloading for changes.
+      PYTHON_ENV: production
+      PORT: 8086
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://mongodb:27017/
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://floci:4566
+      FLOCI_ENDPOINT_URL: http://floci:4566
+      # Search starts without Bedrock, but its config requires the setting.
+      CLAUDE_SONNET_MODEL_CONFIG: anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-local
+    networks:
+      - cdp-tenant
+
   rpa-ai-guidance-hub-api:
     build:
       context: .
@@ -49,6 +79,9 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_started
+      # Each save is given to search, so that it is indexed.
+      rpa-ai-guidance-hub-search:
+        condition: service_started
     env_file:
       - ".env"
     environment:
@@ -59,6 +92,8 @@ services:
       FLOCI_ENDPOINT_URL: http://floci:4566
       # Not ${CONVERSIONS_SQS_QUEUE_URL:-...}, for the same reason.
       CONVERSIONS_SQS_QUEUE_URL: http://floci:4566/000000000000/rpa_ai_guidance_hub_conversions
+      # Not ${SEARCH_API_BASE_URL:-...}, for the same reason.
+      SEARCH_API_BASE_URL: http://rpa-ai-guidance-hub-search:8086
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/}
       HOST: ${HOST:-0.0.0.0}
       # Same bucket name whether run on host or in the container - only the

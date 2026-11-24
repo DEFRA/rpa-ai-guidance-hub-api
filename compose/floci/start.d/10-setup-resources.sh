@@ -10,6 +10,10 @@ aws s3 mb s3://rpa-ai-guidance-hub-source-docs || true
 # the digest of its bytes, so no key ever holds anything but what it first held.
 aws s3 mb s3://rpa-ai-guidance-hub-managed-docs || true
 
+# The search service's sections, chunk sets and index builds (`SEARCH_STORE_S3_BUCKET`,
+# by its default name).
+aws s3 mb s3://rpa-ai-guidance-hub-search-store || true
+
 # SQS queues
 
 # The queue of documents to convert. As CDP's tenant config defines it in every

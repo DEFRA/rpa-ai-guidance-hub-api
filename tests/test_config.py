@@ -352,6 +352,14 @@ class TestGetConfig:
         with pytest.raises(RuntimeError, match="(?i)conversions_sqs_queue_url"):
             config.get_config()
 
+    def test_refuses_to_build_without_the_search_service(self, monkeypatch):
+        """Every environment has a search service, so the API does not start without
+        its address."""
+        monkeypatch.delenv("SEARCH_API_BASE_URL", raising=False)
+
+        with pytest.raises(RuntimeError, match="(?i)search_api_base_url"):
+            config.get_config()
+
     def test_raises_runtime_error_naming_the_offending_variable(self, monkeypatch):
         monkeypatch.delenv("CLAUDE_SONNET_MODEL_CONFIG", raising=False)
 

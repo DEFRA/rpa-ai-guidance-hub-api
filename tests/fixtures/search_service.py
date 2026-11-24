@@ -1,8 +1,9 @@
 """The search service's answers, as factories.
 
 Checked against `DocumentMatchesResponse` and `TitleSearchResponse` in the search
-service's `app/search/v1/schemas.py` and `docs/openapi.json`, at `eba1583`: camelCase
-on the wire.
+service's `app/search/v1/schemas.py` and `docs/openapi.json`, at `eba1583`, and
+`Accepted` in its `app/ingestion/schemas.py` and `docs/openapi.json`, at `f4201e1`:
+camelCase on the wire.
 """
 
 from __future__ import annotations
@@ -40,3 +41,13 @@ def title_result(document_id: str, title: str, score: float = 1.0) -> dict[str, 
 def title_search(*results: dict[str, Any]) -> dict[str, Any]:
     """`GET /v1/search?title=…`, as `TitleSearchResponse`, the likest first."""
     return {"queryId": "00000000-0000-0000-0000-000000000000", "results": list(results)}
+
+
+def accepted(document_id: str, version_id: str) -> dict[str, Any]:
+    """`PUT /documents/{documentId}/versions/{versionId}`, as `Accepted`."""
+    return {
+        "documentId": document_id,
+        "versionId": version_id,
+        "status": "published",
+        "operation": "index",
+    }
