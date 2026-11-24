@@ -1027,6 +1027,82 @@ class TestAddingAVersionToADocument:
         assert second.status_code == 200
         assert second.json()["id"] == str(document)
 
+    def test_with_another_file_of_the_upload_it_answers_the_document(
+        self, client, document, staging, submitter
+    ):
+        client.post(f"/guides/{document}/versions", json=self._next())
+        sent = len(submitter.sent)
+        other = "3e5a7c91-2b4d-4f68-8a0c-1e3f5b7d9a24"
+        staging.stage(file_id=other, path=f"{NEXT_UPLOAD}/{other}")
+
+        second = client.post(
+            f"/guides/{document}/versions",
+            json=_request(
+                source={"uploadId": NEXT_UPLOAD, "fileId": other}, versionNumber="2.0"
+            ),
+        )
+
+        assert second.status_code == 200
+        assert second.json()["id"] == str(document)
+        assert len(submitter.sent) == sent
+
+    def test_while_the_first_is_saving_a_second_follows_it_rather_than_start_another(
+        self, client, document, staging, submitter
+    ):
+        staging.stage(
+            file_id=NEXT_FILE,
+            path=f"{NEXT_UPLOAD}/{NEXT_FILE}",
+            document_id=document,
+            version_id=NEXT_VERSION,
+            saving_status=staging_models.SavingStatus.IN_PROGRESS,
+            save_steps_completed=12,
+            save_steps_total=74,
+        )
+        sent = len(submitter.sent)
+
+        response = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert response.status_code == 202
+        assert response.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
+        assert response.json()["saveStepsCompleted"] == 12
+        assert len(submitter.sent) == sent
+
+    def test_a_failed_save_can_be_submitted_again_and_finishes(
+        self, client, document, converts, staging, versions
+    ):
+        converts.side_effect = [
+            DocumentParseError("not a .docx"),
+            converts.return_value,
+        ]
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        response = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert response.status_code == 202
+        assert staging.staged[NEXT_FILE].saving_status == "complete"
+        assert [record["_id"] for record in versions.documents] == [
+            VERSION,
+            NEXT_VERSION,
+        ]
+
+    def test_a_save_that_failed_after_its_version_was_recorded_is_sent_again(
+        self, client, document, converts, staging, search, submitter
+    ):
+        """Search refused the version after it was recorded. Its job is sent again,
+        which gives search the version without converting the upload again."""
+        search.failure = search_service.IndexRefusedError("422 no guide title")
+        client.post(f"/guides/{document}/versions", json=self._next())
+        search.failure = None
+        sent, converted = len(submitter.sent), converts.call_count
+
+        response = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert response.status_code == 202
+        assert len(submitter.sent) == sent + 1
+        assert converts.call_count == converted
+        assert [version.id for version, _ in search.indexed] == [VERSION, NEXT_VERSION]
+        assert staging.staged[NEXT_FILE].saving_status == "complete"
+
     def test_a_failed_save_sent_again_with_another_file_of_its_upload_is_finished(
         self, client, document, staging, search
     ):
