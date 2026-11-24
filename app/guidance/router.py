@@ -172,7 +172,7 @@ async def create_document(
         },
     },
 )
-async def create_version(  # noqa: PLR0913 - the document, the request, what serves them
+async def create_version(  # noqa: PLR0913 - the request and what serves it
     document_id: ids.DocumentId,
     new: schemas.NewDocument,
     database: Database,
