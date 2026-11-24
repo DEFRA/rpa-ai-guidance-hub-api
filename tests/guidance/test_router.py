@@ -980,6 +980,25 @@ class TestAddingAVersionToADocument:
         assert response.status_code == 409
         assert len(submitter.sent) == 1
 
+    def test_its_file_sent_again_as_a_new_guide_is_a_conflict(
+        self, client, document, submitter
+    ):
+        """The queue refused the version's job, so its ids stay reserved for this
+        guide: saving the file as a new guide would make a live version of this one."""
+        submitter.refusal = RuntimeError("queue refused")
+        refused = client.post(f"/guides/{document}/versions", json=self._next())
+        submitter.refusal = None
+        sent = len(submitter.sent)
+
+        response = client.post(
+            "/guides",
+            json=_request(source={"uploadId": NEXT_UPLOAD, "fileId": NEXT_FILE}),
+        )
+
+        assert refused.status_code == 503
+        assert response.status_code == 409
+        assert len(submitter.sent) == sent
+
     def test_the_upload_is_converted_into_the_document(
         self, client, document, converts
     ):

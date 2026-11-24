@@ -87,6 +87,10 @@ Submitter = Annotated[
             "model": schemas.Document,
             "description": "The upload was converted already: its document",
         },
+        fastapi.status.HTTP_409_CONFLICT: {
+            "description": "The file has not parsed, or is being made into a version "
+            "of a guide there is already",
+        },
         fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "The conversion could not be started; try again",
         },
@@ -115,7 +119,9 @@ async def create_document(
     the document was made from, whichever file of the upload is named.
 
     A job that cannot be sent is recorded as a failed save and answered 503, so the
-    caller does not follow a save that will never come.
+    caller does not follow a save that will never come. A file whose ids are reserved
+    for a new version of a guide there is already is a conflict: saving it as a new
+    guide would make a live version of that one.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
@@ -128,6 +134,13 @@ async def create_document(
         new = new.model_copy(update={"source": source})
 
     staged, document_id, version_id = await _reserved(staging, new.source)
+    if already is None and await records.find(database, document_id) is not None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail=f"File {new.source.file_id} is being made into a version of "
+            f"{document_id}",
+        )
+
     return await _saving(
         staging, submitter, response, staged, _job(new, staged, document_id, version_id)
     )
