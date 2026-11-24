@@ -146,7 +146,8 @@ async def create_document(
         },
         fastapi.status.HTTP_409_CONFLICT: {
             "description": "The file has not parsed, or is being made into another "
-            "document",
+            "document, or the version it replaces is not the latest any more: then "
+            "`detail.latestVersionId` names the latest",
         },
         fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "The conversion could not be started; try again",
@@ -155,7 +156,7 @@ async def create_document(
 )
 async def create_version(  # noqa: PLR0913 - the request and what serves it
     document_id: ids.DocumentId,
-    new: schemas.NewDocument,
+    new: schemas.NewVersion,
     database: Database,
     response: fastapi.Response,
     staging: Staging,
@@ -172,6 +173,9 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     recorded and the save marked complete, or its staging record has expired, the
     document is answered (200); until then, the save is finished for the file it was
     started from, whichever file of the upload is named.
+
+    A new version that replaces a version that is not the latest any more is a
+    conflict: another version was saved after the designer chose this one.
     """
     if await records.find(database, document_id) is None:
         raise fastapi.HTTPException(
@@ -182,10 +186,12 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     saved_from = await records.file_saved_as_version(
         database, document_id, new.source.upload_id
     )
-    if saved_from is not None:
-        if await _finished(staging, saved_from):
-            response.status_code = fastapi.status.HTTP_200_OK
-            return await _answered(database, document_id)
+    if saved_from is None:
+        await _replacing_the_latest(database, document_id, new.replaces_version_id)
+    elif await _finished(staging, saved_from):
+        response.status_code = fastapi.status.HTTP_200_OK
+        return await _answered(database, document_id)
+    else:
         # Its save is finished under the ids the file it was saved from reserved,
         # whichever file of the upload this request names.
         source = new.source.model_copy(update={"file_id": saved_from})
@@ -331,6 +337,24 @@ async def read_asset(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+async def _replacing_the_latest(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    replaced: ids.VersionId,
+) -> None:
+    """Raise a conflict naming the guide's latest version, unless it is `replaced`."""
+    latest = await records.latest_version(database, document_id)
+    if latest is None or latest.id != replaced:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"Version {replaced} is not the latest version of guide "
+                f"{document_id}",
+                "latestVersionId": None if latest is None else str(latest.id),
+            },
+        )
 
 
 async def _finished(staging: staging_store.StagingStore, file_id: ids.FileId) -> bool:
