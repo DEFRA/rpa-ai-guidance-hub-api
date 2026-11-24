@@ -175,7 +175,7 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     started from, whichever file of the upload is named.
 
     A new version that replaces a version that is not the latest any more is a
-    conflict: another version was saved after the designer chose this one.
+    conflict: another version was saved after the maintainer chose this one.
     """
     if await records.find(database, document_id) is None:
         raise fastapi.HTTPException(

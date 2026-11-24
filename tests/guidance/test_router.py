@@ -1025,8 +1025,8 @@ class TestAddingAVersionToADocument:
     def test_a_version_replacing_one_no_longer_the_latest_is_a_conflict(
         self, client, document, staging, submitter
     ):
-        """Another version was saved after the designer chose the one to replace. The
-        answer names it, so the designer can be told."""
+        """Another version was saved after the maintainer chose the one to replace. The
+        answer names it, so the maintainer can be told."""
         client.post(f"/guides/{document}/versions", json=self._next())
         sent = len(submitter.sent)
         staging.stage(

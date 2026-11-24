@@ -386,7 +386,7 @@ class TestConvertingAnUploadIntoANewVersion:
         self, handler, job, next_job, staging, converts, database
     ):
         """Both were asked for while the first version was the latest: the guide has
-        changed since the second one's designer chose what to replace."""
+        changed since the second one's maintainer chose what to replace."""
         third_job = await _new_version_job(staging, job, "3.0")
         await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
         converts.return_value = _stored(third_job)

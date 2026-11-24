@@ -9,7 +9,7 @@ failure is recorded on the staging record first.
 
 Search accepts a version before it indexes it: the hub and search agree in the end,
 not at once. Of two new versions that replace the same version, the one written second
-fails: the guide changed after its designer chose what to replace.
+fails: the guide changed after its maintainer chose what to replace.
 """
 
 from __future__ import annotations

@@ -115,7 +115,7 @@ class NewVersion(NewDocument):
 
     replaces_version_id: ids.VersionId = pydantic.Field(
         alias="replacesVersionId",
-        description="The guide's latest version when the designer chose to replace it",
+        description="The guide's latest version when the maintainer chose to replace it",
     )
 
 
