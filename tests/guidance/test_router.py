@@ -988,6 +988,11 @@ class TestAddingAVersionToADocument:
         assert converts.call_args.kwargs["document_id"] == document
         assert converts.call_args.kwargs["version_id"] == NEXT_VERSION
 
+    def test_its_job_names_the_version_it_replaces(self, client, document, submitter):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert json.loads(submitter.sent[-1])["follows"] == str(VERSION)
+
     def test_once_saved_it_is_the_documents_newest_version(self, client, document):
         client.post(f"/guides/{document}/versions", json=self._next())
 

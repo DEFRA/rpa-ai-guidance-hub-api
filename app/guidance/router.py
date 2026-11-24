@@ -204,9 +204,8 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
             detail=f"File {new.source.file_id} is being made into {reserved_for}",
         )
 
-    return await _saving(
-        staging, submitter, response, staged, _job(new, staged, document_id, version_id)
-    )
+    job = _job(new, staged, document_id, version_id, new.replaces_version_id)
+    return await _saving(staging, submitter, response, staged, job)
 
 
 @router.get("")
@@ -414,14 +413,17 @@ def _job(
     staged: staging_models.StagedDocument,
     document_id: ids.DocumentId,
     version_id: ids.VersionId,
+    follows: ids.VersionId | None = None,
 ) -> conversion.ConversionJob:
-    """The job that saves the staged upload as that version of that document."""
+    """The job that saves the staged upload as that version of that document, which
+    replaces `follows`."""
     return conversion.ConversionJob(
         file_id=staged.file_id,
         source_url=f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}",
         document_id=document_id,
         version_id=version_id,
         request=new,
+        follows=follows,
         trace_id=tracing.ctx_trace_id.get(None),
     )
 
