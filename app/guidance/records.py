@@ -12,8 +12,8 @@ is created, never replaced: its ids are reserved on the upload's staging record,
 record already there is from an earlier attempt at the same save, and is the answer.
 
 A version's title is the one the maintainer confirmed, which starts as its content's
-own: what the guide was called then. An owner is a detail given on the form; a version's creator is the
-identity that was signed in.
+own: what the guide was called then. An owner is a detail given on the form; a
+version's creator is the identity that was signed in.
 """
 
 from __future__ import annotations
@@ -497,10 +497,6 @@ async def create(
 
     Its id is the prefix the document is stored under, not an id minted here.
 
-    Its metadata is what the journey collected, owners included: this service does
-    not interpret it, because what an author is asked about a document is a question
-    for the journey rather than for the store behind it.
-
     Writing it is what commits the document, so it goes last, after its first
     version. If it is already there, an earlier attempt committed it, or it is the
     document a later version is added to, and that record is answered as it stands.
@@ -519,8 +515,11 @@ async def create_version(
     Its id is the prefix this version was stored under, and its content URL names
     the file inside it - the whole of what is needed to read the version back.
 
-    Its title is the document's own title as this version had it, kept so a person
-    can see what a version was called without fetching it.
+    Its title is the one the maintainer confirmed for it, kept so a person can see
+    what a version was called without fetching it. Its details are what the journey
+    collected, owners included: this service does not interpret them, because what
+    an author is asked about a document is a question for the journey rather than
+    for the store behind it.
 
     Its creator is who was signed in, not who owns the document - see the module
     docstring. It is optional because the endpoint is not yet authenticated, and a

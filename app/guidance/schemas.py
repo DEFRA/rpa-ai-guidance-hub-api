@@ -116,11 +116,13 @@ class NewDocument(pydantic.BaseModel):
 
 
 class NewVersion(NewDocument):
-    """An upload to convert into a new version of a guide, and the version it replaces."""
+    """An upload to convert into a new version of a guide, and the version it
+    replaces."""
 
     replaces_version_id: ids.VersionId = pydantic.Field(
         alias="replacesVersionId",
-        description="The guide's latest version when the maintainer chose to replace it",
+        description="The guide's latest version when the maintainer chose to "
+        "replace it",
     )
 
 
@@ -131,10 +133,10 @@ class Version(pydantic.BaseModel):
     in addresses relative to that URL, so anything holding it can reach them and a
     second field pointing at them would be free to disagree with the file.
 
-    The title is a copy of what the stored document called itself when this version
-    was made, so that a list of versions reads as something a person can follow. The
-    version number is the author's, and null for a version stored before versions
-    had one.
+    The title is the one the maintainer confirmed for this version, which starts as
+    the stored document's own, so that a list of versions reads as something a person
+    can follow. The version number is the author's, and null for a version stored
+    before versions had one.
     """
 
     id: ids.VersionId
