@@ -192,8 +192,10 @@ async def guides_in_brief(
     pinned = {pin.document_id for pin in user.pins}
     sectioned = {pin.document_id for pin in user.pins if pin.section_id is not None}
     sectioned |= {b.document_id for case in user.cases for b in case.bookmarks}
+
     documents = await guidance_records.find_many(database, list(pinned | sectioned))
     latest = await guidance_records.latest_versions_of(database, list(documents))
+
     with_sections = {
         guide: version for guide, version in latest.items() if guide in sectioned
     }
@@ -201,6 +203,7 @@ async def guides_in_brief(
     headings = await section_ids.headings_of(
         database, [version.id for version in with_sections.values()]
     )
+
     return {
         guide: models.GuideInBrief(
             title=_title(document, latest.get(guide)),
@@ -223,10 +226,12 @@ async def guide_sections(
     nothing lists."""
     existing = await guidance_records.existing(database, list(guides))
     latest = await guidance_records.latest_versions_of(database, list(existing))
+
     given = await section_ids.of_latest(database, latest, s3_client)
     headings = await section_ids.headings_of(
         database, [version.id for version in latest.values()]
     )
+
     return {
         guide: models.GuideSections(by_anchor, _headings_of(guide, latest, headings))
         for guide, by_anchor in given.items()

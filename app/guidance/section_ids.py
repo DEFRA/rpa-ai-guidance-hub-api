@@ -117,14 +117,17 @@ async def of_new_version(
         _sections_at, before.content_url, s3_client
     )
     after_sections = await asyncio.to_thread(_sections_at, content_url, s3_client)
+
     if before_sections is None or after_sections is None:
         missing = before.content_url if before_sections is None else content_url
         message = (
             f"No content at {missing}, so the sections' ids cannot be carried over"
         )
         raise ContentMissingError(message)
+
     before_ids = await of_version(database, before.id, _anchors_of(before_sections))
     carried = carried_over(before_sections, before_ids, after_sections)
+
     headings = dict(
         zip(
             _anchors_of(after_sections),
@@ -132,6 +135,7 @@ async def of_new_version(
             strict=True,
         )
     )
+
     return {
         anchor: models.GivenSection(section_id, headings[anchor])
         for anchor, section_id in carried.items()
