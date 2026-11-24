@@ -45,13 +45,19 @@ class PinInBrief(pydantic.BaseModel):
     """A guide the user has pinned, or a section of one, as the side navigation shows
     it: the guide's id and title, and for a section, its id, its anchor and its
     heading as the guide's latest version has them (the heading as it read when it
-    was pinned, where that version does not say)."""
+    was pinned, where that version does not say), or, for a section the latest
+    version no longer has, its last heading and the version that removed it."""
 
     id: guidance_ids.DocumentId
     title: str | None
     section_id: guidance_ids.SectionId | None = pydantic.Field(alias="sectionId")
     section: str | None
     heading: str | None
+    removed_in_version: str | None = pydantic.Field(
+        default=None,
+        alias="removedInVersion",
+        description="The number of the version that removed the section",
+    )
 
     @classmethod
     def from_model(cls, pin: models.Pin, guide: models.GuideInBrief) -> PinInBrief:
@@ -65,19 +71,28 @@ class PinInBrief(pydantic.BaseModel):
             heading=pin.heading
             if pin.section_id is None
             else guide.sections.heading_of(pin.section_id, pin.heading),
+            removedInVersion=None
+            if pin.section_id is None
+            else guide.sections.removed_in(pin.section_id),
         )
 
 
 class PlacedBookmark(pydantic.BaseModel):
     """A section bookmarked to a case, as the side navigation shows it: its id, its
     anchor and heading as the guide's latest version has them (the heading as it read
-    when it was bookmarked, where that version does not say), and where the bookmark
-    is among the case's, from 0, which is what a patch that moves or removes it names
-    it by."""
+    when it was bookmarked, where that version does not say; its last heading and the
+    version that removed it, for a section the latest version no longer has), and
+    where the bookmark is among the case's, from 0, which is what a patch that moves
+    or removes it names it by."""
 
     section_id: guidance_ids.SectionId = pydantic.Field(alias="sectionId")
     section: str | None
     heading: str | None
+    removed_in_version: str | None = pydantic.Field(
+        default=None,
+        alias="removedInVersion",
+        description="The number of the version that removed the section",
+    )
     position: int
 
 
@@ -136,6 +151,7 @@ def _in_guide_order(
             sectionId=bookmark.section_id,
             section=sections.anchor_of(bookmark.section_id),
             heading=sections.heading_of(bookmark.section_id, bookmark.heading),
+            removedInVersion=sections.removed_in(bookmark.section_id),
             position=position,
         )
         for position, bookmark in sorted(

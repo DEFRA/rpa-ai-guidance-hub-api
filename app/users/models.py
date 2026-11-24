@@ -180,13 +180,27 @@ class Case:
 
 
 @dataclasses.dataclass(frozen=True)
+class RemovedSection:
+    """A section that a later version of its guide no longer has: the number of the
+    version that removed it, and its heading in the last version that had it, where
+    that version kept one."""
+
+    version_number: str | None
+    heading: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class GuideSections:
     """A guide's sections as its latest version has them: each anchor with the id it
     was given, in the guide's order, and each heading by id where the version keeps
-    them (every version after a guide's first)."""
+    them (every version after a guide's first); and each section an earlier version
+    had that the latest does not."""
 
     by_anchor: Mapping[str, guidance_ids.SectionId]
     headings: Mapping[guidance_ids.SectionId, str] = dataclasses.field(
+        default_factory=dict
+    )
+    removed: Mapping[guidance_ids.SectionId, RemovedSection] = dataclasses.field(
         default_factory=dict
     )
 
@@ -203,9 +217,18 @@ class GuideSections:
         self, section_id: guidance_ids.SectionId, kept: str | None
     ) -> str | None:
         """The section's heading as the latest version has it, where it keeps them;
-        else `kept`, as a pin or bookmark kept it, which is the same for a guide's
-        first version, as a heading changes only with a new version."""
-        return self.headings.get(section_id, kept)
+        for a removed section, as the last version with it had it; else `kept`, as a
+        pin or bookmark kept it, which is the same for a guide's first version, as a
+        heading changes only with a new version."""
+        gone = self.removed.get(section_id)
+        last = None if gone is None else gone.heading
+        return self.headings.get(section_id) or last or kept
+
+    def removed_in(self, section_id: guidance_ids.SectionId) -> str | None:
+        """The number of the version that removed the section; none while the latest
+        version has it."""
+        gone = self.removed.get(section_id)
+        return None if gone is None else gone.version_number
 
     def order_of(self, section_id: guidance_ids.SectionId) -> int:
         """Where the section comes in the guide; one it does not have, after all of

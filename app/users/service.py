@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 from typing import TYPE_CHECKING, Any
 
 from app.guidance import ids as guidance_ids
@@ -203,16 +204,37 @@ async def guides_in_brief(
     headings = await section_ids.headings_of(
         database, [version.id for version in with_sections.values()]
     )
+    versions = await guidance_records.versions_of_each(database, list(with_sections))
 
     return {
         guide: models.GuideInBrief(
             title=_title(document, latest.get(guide)),
             sections=models.GuideSections(
-                given.get(guide, {}), _headings_of(guide, with_sections, headings)
+                given.get(guide, {}),
+                _headings_of(guide, with_sections, headings),
+                _removed(versions.get(guide, []), given.get(guide, {})),
             ),
         )
         for guide, document in documents.items()
     }
+
+
+def _removed(
+    versions: Sequence[guidance_models.Version],
+    latest: Mapping[str, guidance_ids.SectionId],
+) -> dict[guidance_ids.SectionId, models.RemovedSection]:
+    """Each section an earlier version of a guide had that its latest version does
+    not, from its versions newest first: the version after the last one that had it
+    removed it."""
+    now = set(latest.values())
+    removed: dict[guidance_ids.SectionId, models.RemovedSection] = {}
+    for newer, older in itertools.pairwise(versions):
+        for section in (older.sections or {}).values():
+            if section.id not in now and section.id not in removed:
+                removed[section.id] = models.RemovedSection(
+                    newer.version_number, section.heading
+                )
+    return removed
 
 
 async def guide_sections(
