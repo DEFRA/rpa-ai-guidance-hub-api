@@ -1027,6 +1027,32 @@ class TestAddingAVersionToADocument:
         assert second.status_code == 200
         assert second.json()["id"] == str(document)
 
+    def test_a_failed_save_sent_again_with_another_file_of_its_upload_is_finished(
+        self, client, document, staging, search
+    ):
+        """It finishes the first file's save, as `POST /guides` does, rather than start
+        a second version."""
+        search.failure = search_service.IndexRefusedError("422 no guide title")
+        client.post(f"/guides/{document}/versions", json=self._next())
+        search.failure = None
+        other = "3e5a7c91-2b4d-4f68-8a0c-1e3f5b7d9a24"
+        staging.stage(
+            file_id=other,
+            path=f"{NEXT_UPLOAD}/{other}",
+            version_id=uuid.UUID("0199b8a3-0a2f-7e63-9a5d-7f9b3c5e7a91"),
+        )
+
+        response = client.post(
+            f"/guides/{document}/versions",
+            json=_request(
+                source={"uploadId": NEXT_UPLOAD, "fileId": other}, versionNumber="2.0"
+            ),
+        )
+
+        assert response.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
+        assert staging.staged[NEXT_FILE].saving_status == "complete"
+        assert [version.id for version, _ in search.indexed] == [VERSION, NEXT_VERSION]
+
     def test_submitted_again_it_saves_no_second_version(
         self, client, document, versions, converts
     ):

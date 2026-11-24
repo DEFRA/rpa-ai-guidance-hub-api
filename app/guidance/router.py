@@ -170,7 +170,8 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     under another document, being made into a guide of its own say, is a conflict.
     Submitting the same upload again never starts a second save: once its version is
     recorded and the save marked complete, or its staging record has expired, the
-    document is answered (200).
+    document is answered (200); until then, the save is finished for the file it was
+    started from, whichever file of the upload is named.
     """
     if await records.find(database, document_id) is None:
         raise fastapi.HTTPException(
@@ -181,9 +182,14 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     saved_from = await records.file_saved_as_version(
         database, document_id, new.source.upload_id
     )
-    if saved_from is not None and await _finished(staging, saved_from):
-        response.status_code = fastapi.status.HTTP_200_OK
-        return await _answered(database, document_id)
+    if saved_from is not None:
+        if await _finished(staging, saved_from):
+            response.status_code = fastapi.status.HTTP_200_OK
+            return await _answered(database, document_id)
+        # Its save is finished under the ids the file it was saved from reserved,
+        # whichever file of the upload this request names.
+        source = new.source.model_copy(update={"file_id": saved_from})
+        new = new.model_copy(update={"source": source})
 
     staged, reserved_for, version_id = await _reserved(staging, new.source, document_id)
     if reserved_for != document_id:
