@@ -521,10 +521,7 @@ async def create_version(
     try:
         created = await _created(database[VERSIONS], version.to_document())
     except pymongo.errors.DuplicateKeyError as clash:
-        message = (
-            f"Version {version.id} follows {version.follows}, which another version of "
-            f"document {version.document_id} follows already"
-        )
+        message = f"Another version follows {version.follows}, as {version.id} does"
         raise OvertakenVersionError(message) from clash
     return _filed(models.Version.from_document(created), version.document_id)
 
