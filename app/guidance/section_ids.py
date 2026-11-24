@@ -1,18 +1,11 @@
-"""Each section's id: what anything pointing into a guide keeps, so that it can
-follow its section from one version to the next while the section's anchor, its
-number and words, stays its address.
+"""Each section's id, which a pin or a bookmark keeps so that it can follow its
+section from one version of a guide to the next.
 
-A version's sections are given their ids the first time they are asked for, and
-kept with the version from then on; when two ask at once, both read back whichever
-was kept first. Every version is given them this way, however old: from its stored
-content (`of_latest`), which is read only until they are kept. A new version's
-sections are given the ids of the same sections in the version before
-(`of_new_version`), written with the version, so what points into a section follows it.
-
-A heading changes only with a new version, so a new version keeps each section's
-heading beside its id (`headings_of`), for what points into a section to name it as it
-reads now. A guide's first version keeps none: its headings are as each pin and
-bookmark kept them.
+A version's sections are given their ids the first time they are asked for, and kept
+with the version; when two ask at once, both read back whichever was kept first. A new
+version's sections take the ids of the same sections in the version before, and keep
+their headings beside them. A guide's first version keeps none: a pin on it shows the
+heading the pin kept.
 """
 
 from __future__ import annotations

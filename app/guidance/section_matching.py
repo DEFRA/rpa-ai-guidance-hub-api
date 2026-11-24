@@ -1,15 +1,9 @@
-"""Which section of the version before each section of a new version is, so that what
-points into a section (a pin, a case bookmark) can follow it to the new version.
+"""Matches each section of a new version with the same section of the version before,
+so that a pin or a bookmark can follow it.
 
-Each section of the new version is matched with at most one section before:
-
-1. By the words of its heading, its number aside, so a section renumbered or moved is
-   still itself. Sections headed alike are matched in order.
-2. Of those left, by the words under its heading, when they are not empty and exactly
-   one section left on each side has them: a section whose heading was reworded.
-3. Every other section is new.
-
-Words are compared with the spaces between them normalised.
+A section is the same when its heading has the same words, its number aside; sections
+headed alike match in order. Failing that, it is the same when the words under it are
+the same, and only one section left on each side has them. Any other section is new.
 """
 
 from __future__ import annotations

@@ -1,54 +1,18 @@
-"""The record of a document: what it is, and every version of it there has been.
+"""The records of a document and its versions, in two collections.
 
-Two collections, because two different things change at two different rates.
+`documents` holds what a document is to the people who use it, the details given on
+the form, and the upload its first version came from; that upload makes one document
+only (`uploadId` is unique). `document_versions` holds each conversion: where its
+Markdown went, and who was signed in when it was made. The newest version is the
+newest by `createdAt`.
 
-`documents` holds what a document *is* to the people using it - the title an author
-typed, who it is for, who owns it - and where it came from. The upload is the one its
-first version came from: one .docx became one document. A later version is another
-upload, made into a version of that document rather than into a document of its own.
+A record's ids are the object store's prefixes for its content (see `ids`). A record
+is created, never replaced: its ids are reserved on the upload's staging record, so a
+record already there is from an earlier attempt at the same save, and is the answer.
 
-`document_versions` holds what one conversion produced: where its Markdown went, and
-who was signed in when it was made. One document has many, and the newest is only the
-newest by `createdAt`. A version id is a time-ordered uuid, but nothing reads meaning
-into its order.
-
-**A version records its content URL and nothing else about where it is.** That URL is
-enough to restore the document, and the pictures are named by the document itself, in
-addresses relative to that very URL - so a second field pointing at them would be a
-copy of something the file already says, free to disagree with it.
-
-The title is the exception, and deliberately so. It is copied out of the document the
-version stored, and reading a version back takes the title from the content rather
-than from here - so this field is never the answer to "what is it called?". What it
-answers is "what was it called *then*", which nothing else can: a document retitled
-between versions leaves a trail here, and the copy differing from the content is the
-whole of the information rather than a fault in it.
-
-The ids are the ones the object store uses. `documents._id` is the prefix a document
-is written under and a version's `_id` is the prefix beneath that, so a record and a
-key are two spellings of one address rather than two facts to keep in step. They are
-stored as native uuids, and the prefixes are their text (see `ids`).
-
-**Records are created, never replaced, and one already there is kept.** A new
-document's ids are reserved once, on its upload's staging record, so the only thing
-that can already hold one of them is an earlier attempt at the same document. Each
-insert is whole or absent, so finding the record means that attempt got this far,
-and the record found is the answer. A version found under a different document is
-not that, and is raised.
-
-**An owner and a version's creator are not the same thing and are not stored
-together.** An owner is metadata: a person or a team named on the form, possibly
-nobody with an account, and there may be several. A version's creator is the
-authenticated identity that made *that* version - a machine id from the auth
-provider, with a display name kept beside it so a listing can name them without a
-directory lookup. Conflating the two would make the answer to "who is responsible for
-this?" depend on who last pressed a button.
-
-`uploadId` is unique across documents, and that is how the upload a document came from
-is converted once; a later version's upload is converted once by the version id its
-staging record reserves. The journey that produces a version can be submitted twice -
-a refresh, a back button, a retried request - and each of those means the same version
-rather than another one.
+A version's title is a copy of its content's title when it was saved: what the guide
+was called then. An owner is a detail given on the form; a version's creator is the
+identity that was signed in.
 """
 
 from __future__ import annotations
@@ -512,8 +476,7 @@ async def create_version(
     the file inside it - the whole of what is needed to read the version back.
 
     Its title is the document's own title as this version had it, kept so a person
-    can see what a version was called without fetching it. See the module docstring
-    for why a copy is the point here and would be a fault anywhere else.
+    can see what a version was called without fetching it.
 
     Its creator is who was signed in, not who owns the document - see the module
     docstring. It is optional because the endpoint is not yet authenticated, and a

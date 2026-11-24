@@ -1,30 +1,11 @@
-"""Creating a document from an upload, and reading one back.
+"""The endpoints that save an upload as a guide or as a new version of one, and that
+read guides back.
 
-`POST /guides` is what the front end's journey ends in: the .docx has been uploaded
-and scanned, the author has described it, and this is where those two become one
-thing. It sends the upload to be converted and answers at once (202), pointing at the
-file's staging record, where the caller follows the save to the end - see
-`conversion` for how the work is run off the queue.
-
-`POST /guides/{documentId}/versions` is the same journey for an upload that updates a
-guide: what it makes is a new version of that document, the newest, so live once it
-is saved.
-
-The upload is named by its file id, and everything else about it is read from its
-staging record rather than taken from the caller: where cdp-uploader left it, whether
-it parsed, and the ids the document is stored under. Those ids are reserved on the
-staging record the first time, so a retried or repeated submission finishes the same
-document rather than starting another. The writes go bottom up - the content, then
-its version record, then the document record, which commits it - and each leaves in
-place whatever an earlier attempt already wrote.
-
-The route is still `/guides` because that is what the front end calls and what a
-reader of these documents calls them. Underneath, the thing being stored is a
-document with versions - see `records` for why the two words are not the same.
-
-Converting is done after the reply. A document with many pictures is one object store
-write per picture, and a caller waiting on all of them would wait for as long as the
-slowest save takes.
+A save answers at once and runs off the queue (see `conversion`); the caller follows it
+on the file's staging record. The upload's details and the ids it is saved under come
+from that record, not from the caller, so a repeated submission finishes the same save.
+The routes say "guides", as the front end does; underneath, a guide is a document with
+versions (see `records`).
 """
 
 from __future__ import annotations

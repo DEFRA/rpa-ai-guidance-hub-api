@@ -1,36 +1,15 @@
-"""Converting an upload and saving the document it becomes, off the API's queue.
+"""Converts an upload and saves the document it becomes, off the API's queue.
 
-A document with many pictures takes a while to save, one write per picture, so the
-request that starts it does not wait: it sends a `ConversionJob` to the queue and
-answers at once, and the caller follows the save on the file's staging record. The
-consumer gives each message to `ConversionHandler`, which does the work.
+A document with many pictures takes one write per picture, so the request that starts
+a save does not wait for it. The caller follows the save on the file's staging record.
 
-**Once the document is committed, search is given the version to index**, and only
-then is the save marked complete, so the message stays until search has it. Search
-answers before it has indexed it: the hub and search agree in the end, not at once.
+SQS may deliver a message more than once, so each delivery keeps what an earlier one
+wrote. A message whose last delivery fails goes to the dead-letter queue, so that
+failure is recorded on the staging record first.
 
-**A job names the document its version is of:** a new one, whose record, written after
-the version, commits it; or one there already, a guide's later version, which its own
-record commits. A later version is written with its sections' ids: those of the same
-sections in the guide's latest version, so what points into a section follows it. It
-names that version too, and only one version may follow each: of two saved at once,
-the second to be written was matched with a version that is no longer the latest, so
-it is refused and its message delivered again, to be matched with the one before it.
-
-**Safe to repeat**, as SQS may deliver a message more than once: the ids are reserved
-once, on the staging record, every write creates rather than replaces and keeps what
-is already there, a version already recorded is not converted again, and search keeps
-only the newest version it is given.
-
-**What becomes of a failure** decides what becomes of the message:
-
-- one retrying cannot fix (`_UNFIXABLE`) is recorded on the staging record and returned
-  from, so the message is deleted;
-- any other is raised, so SQS delivers the message again; on its last delivery it is
-  recorded first, so nobody is left following a save that will never finish, and SQS
-  then moves the message to the dead-letter queue;
-- a message that is not a job names no upload to record anything on, so it is raised
-  and ends on the dead-letter queue.
+Search accepts a version before it indexes it: the hub and search agree in the end,
+not at once. Of two new versions of a guide saved at once, the one written second is
+refused, and its message is delivered again so that it is matched with the other.
 """
 
 from __future__ import annotations
