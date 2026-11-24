@@ -124,6 +124,9 @@ class Version:
     # kept it.
     upload_id: ids.UploadId | None = None
     file_id: ids.FileId | None = None
+    # The guide's details as given with this version: None for one saved before
+    # versions kept their own.
+    metadata: Mapping[str, Any] | None = None
 
     def to_document(self) -> dict[str, Any]:
         created_by = (
@@ -157,6 +160,7 @@ class Version:
             "source": source,
             **given,
             **({} if self.follows is None else {FOLLOWS: self.follows}),
+            **({} if self.metadata is None else {"metadata": dict(self.metadata)}),
         }
 
     @classmethod
@@ -185,6 +189,7 @@ class Version:
             follows=document.get(FOLLOWS),
             upload_id=source.get("uploadId"),
             file_id=source.get("fileId"),
+            metadata=document.get("metadata"),
         )
 
 

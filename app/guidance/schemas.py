@@ -100,6 +100,7 @@ class NewDocument(pydantic.BaseModel):
             content_url=stored.content,
             title=stored.title,
             version_number=self.version_number,
+            metadata=self.metadata,
             created_by_id=self.created_by.id if self.created_by else None,
             created_by_display_name=(
                 self.created_by.display_name if self.created_by else None
