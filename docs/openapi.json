@@ -394,7 +394,7 @@
         "type": "object"
       },
       "NewDocument": {
-        "description": "An upload to convert, what its author said about the document, and the\nnumber they gave this version of it.",
+        "description": "An upload to convert, what its author said about the document, and the\ntitle and number they gave this version of it.",
         "properties": {
           "createdBy": {
             "anyOf": [
@@ -413,6 +413,18 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The title the maintainer confirmed; the one read from the file when not given",
+            "title": "Title"
           },
           "versionNumber": {
             "description": "Two whole numbers with a full stop between them, such as 1.0",
@@ -454,6 +466,18 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The title the maintainer confirmed; the one read from the file when not given",
+            "title": "Title"
           },
           "versionNumber": {
             "description": "Two whole numbers with a full stop between them, such as 1.0",

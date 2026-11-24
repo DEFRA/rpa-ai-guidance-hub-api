@@ -67,10 +67,15 @@ class Person(pydantic.BaseModel):
 
 class NewDocument(pydantic.BaseModel):
     """An upload to convert, what its author said about the document, and the
-    number they gave this version of it."""
+    title and number they gave this version of it."""
 
     source: Source
     metadata: dict[str, Any]
+    title: str | None = pydantic.Field(
+        default=None,
+        description="The title the maintainer confirmed; the one read from the file "
+        "when not given",
+    )
     version_number: VersionNumber = pydantic.Field(
         alias="versionNumber",
         description="Two whole numbers with a full stop between them, such as 1.0",
@@ -97,7 +102,7 @@ class NewDocument(pydantic.BaseModel):
             id=stored.version_id,
             document_id=stored.document_id,
             content_url=stored.content,
-            title=stored.title,
+            title=self.title or stored.title,
             version_number=self.version_number,
             metadata=self.metadata,
             created_by_id=self.created_by.id if self.created_by else None,

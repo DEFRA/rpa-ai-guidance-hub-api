@@ -11,8 +11,8 @@ A record's ids are the object store's prefixes for its content (see `ids`). A re
 is created, never replaced: its ids are reserved on the upload's staging record, so a
 record already there is from an earlier attempt at the same save, and is the answer.
 
-A version's title is a copy of its content's title when it was saved: what the guide
-was called then. An owner is a detail given on the form; a version's creator is the
+A version's title is the one the maintainer confirmed, which starts as its content's
+own: what the guide was called then. An owner is a detail given on the form; a version's creator is the
 identity that was signed in.
 """
 

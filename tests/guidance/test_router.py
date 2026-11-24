@@ -457,16 +457,24 @@ class TestCreatingADocument:
         assert "createdAt" in record
         assert record["source"] == {"uploadId": UPLOAD, "fileId": FILE}
 
-    def test_what_the_document_called_itself_is_kept_beside_the_version(
+    def test_the_title_the_maintainer_confirmed_is_the_versions(self, client, versions):
+        """One title for each version, outside the details: the guide is shown with its
+        latest version's."""
+        client.post("/guides", json=_request(title="CS Revenue Claims, revised"))
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert versions.documents[0]["title"] == "CS Revenue Claims, revised"
+        assert body["versions"][0]["title"] == "CS Revenue Claims, revised"
+
+    def test_without_a_title_the_version_has_the_one_read_from_the_file(
         self, client, versions
     ):
-        """A copy of the stored document's own title, so a list of versions reads as
-        something a person can follow. Reading a version back takes the title from the
-        content; this is what it was called *then*, which nothing else records."""
+        """The title the maintainer confirms starts as the file's own; a caller that
+        sends none keeps that."""
         client.post("/guides", json=_request())
 
         assert versions.documents[0]["title"] == COVER_TITLE
-        assert versions.documents[0]["title"] != METADATA["title"]
 
     def test_the_ids_are_the_ones_the_object_store_used(
         self, client, documents, versions
