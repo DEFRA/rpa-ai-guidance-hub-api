@@ -1298,13 +1298,17 @@ class TestASectionRemovedInALaterVersion:
         assert (pin["heading"], pin["removedInVersion"]) == ("3 Two and more", "3.0")
 
     async def test_a_section_the_latest_version_has_was_removed_by_none(
-        self, client, database, content_url
+        self, client, database, content_url, mocker
     ):
+        """And its guide's versions before the latest are not read: only a section gone
+        from the latest version needs them."""
         user_id = await _user(client)
         guide = await _guide(database, "Claims", content_url=content_url)
         await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
         await _renumbered(database, guide)
+        history = mocker.spy(guidance_records, "versions_of_each")
 
         [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
 
         assert pin["removedInVersion"] is None
+        assert history.call_count == 0
