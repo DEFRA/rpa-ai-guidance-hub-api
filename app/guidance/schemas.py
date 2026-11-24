@@ -86,7 +86,6 @@ class NewDocument(pydantic.BaseModel):
             upload_id=self.source.upload_id,
             file_id=self.source.file_id,
             filename=self.source.filename,
-            metadata=self.metadata,
             created_at=created_at,
         )
 
@@ -180,7 +179,7 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=models.details_as_now(document.metadata),
+            metadata=models.details_as_now(document.metadata or {}),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
@@ -209,7 +208,7 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=models.details_as_now(document.metadata),
+            metadata=models.details_as_now(document.metadata or {}),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,

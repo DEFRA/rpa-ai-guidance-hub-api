@@ -54,20 +54,22 @@ def details_as_now(details: dict[str, Any]) -> dict[str, Any]:
 class Document:
     """What a document is to the people using it, and the upload it came from.
 
-    `metadata` is what the journey collected, uninterpreted - see `records`.
+    `metadata` is what the journey collected, uninterpreted: as a read answers it, its
+    latest version's (see `records`). Its record keeps none, but for a document saved
+    before versions kept their own.
     """
 
     id: ids.DocumentId
     upload_id: ids.UploadId
     file_id: ids.FileId
-    metadata: dict[str, Any]
     created_at: dt.datetime
     filename: str | None = None
+    metadata: dict[str, Any] | None = None
 
     def to_document(self) -> dict[str, Any]:
         return {
             "_id": self.id,
-            "metadata": self.metadata,
+            **({} if self.metadata is None else {"metadata": self.metadata}),
             "source": {
                 "uploadId": self.upload_id,
                 "fileId": self.file_id,
@@ -84,7 +86,7 @@ class Document:
             upload_id=source["uploadId"],
             file_id=source["fileId"],
             filename=source.get("filename"),
-            metadata=document["metadata"],
+            metadata=document.get("metadata"),
             created_at=document["createdAt"],
         )
 

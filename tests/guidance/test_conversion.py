@@ -248,7 +248,10 @@ class TestConvertingAnUpload:
         await records.create_version(
             database, dataclasses.replace(version, metadata=None)
         )
-        await records.create(database, saved.document_for(job.document_id, _NOW))
+        guide = saved.document_for(job.document_id, _NOW)
+        await records.create(
+            database, dataclasses.replace(guide, metadata=saved.metadata)
+        )
 
         await handler(body, last_delivery=False)
 

@@ -228,7 +228,7 @@ class ConversionHandler:
             if version.id == job.version_id
         ]
         details = document.metadata if version.metadata is None else version.metadata
-        await self._search.index(version, models.details_as_now(dict(details)))
+        await self._search.index(version, models.details_as_now(dict(details or {})))
 
     def _reporting_on(self, file_id: ids.FileId) -> Callable[[int, int], None]:
         """Tells the staging record each step of the save, from the worker thread.

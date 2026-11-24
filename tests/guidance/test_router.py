@@ -388,16 +388,17 @@ class TestCreatingADocument:
         ]
         assert response.json()["versions"][0]["contentUrl"] == CONTENT
 
-    def test_what_the_author_said_is_recorded_against_the_document(
-        self, client, documents
+    def test_what_the_author_said_is_recorded_against_the_version_not_the_guide(
+        self, client, documents, versions
     ):
-        """Metadata is the document's, not the version's: re-converting must not
-        disturb what an author said about what the document is."""
+        """Each version keeps the details given with it, and the guide's are its latest
+        version's, so the guide's record keeps none."""
         client.post("/guides", json=_request())
 
         record = documents.documents[0]
+        assert versions.documents[0]["metadata"] == METADATA
         assert record["_id"] == DOCUMENT
-        assert record["metadata"] == METADATA
+        assert "metadata" not in record
         assert record["source"]["uploadId"] == UPLOAD
         assert "createdAt" in record
 
