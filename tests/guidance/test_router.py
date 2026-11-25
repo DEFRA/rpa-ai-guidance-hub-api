@@ -574,6 +574,23 @@ class TestSubmittingTheSameJourneyTwice:
         assert second.status_code == 200
         assert second.json()["id"] == str(DOCUMENT)
 
+    def test_sent_again_as_its_save_commits_it_follows_the_save(
+        self, client, submitter, mocker
+    ):
+        """The first save commits the guide after the retry looked for this upload's
+        guide: the guide found by its reserved id is this upload's own."""
+        client.post("/guides", json=_request())
+        sent = len(submitter.sent)
+        mocker.patch.object(
+            records, "find_by_upload", new=mocker.AsyncMock(return_value=None)
+        )
+
+        second = client.post("/guides", json=_request())
+
+        assert second.status_code == 202
+        assert second.headers["Location"] == f"/guides/staging/{FILE}"
+        assert len(submitter.sent) == sent
+
     def test_and_does_not_convert_again(self, client, converts):
         client.post("/guides", json=_request())
         client.post("/guides", json=_request())
@@ -1081,6 +1098,23 @@ class TestAddingAVersionToADocument:
 
         assert second.status_code == 200
         assert second.json()["id"] == str(document)
+
+    def test_sent_again_as_its_save_commits_it_follows_the_save(
+        self, client, document, submitter, mocker
+    ):
+        """The first save commits the version after the retry looked for this
+        upload's version: the latest version is then this upload's own."""
+        client.post(f"/guides/{document}/versions", json=self._next())
+        sent = len(submitter.sent)
+        mocker.patch.object(
+            records, "file_saved_as_version", new=mocker.AsyncMock(return_value=None)
+        )
+
+        second = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert second.status_code == 202
+        assert second.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
+        assert len(submitter.sent) == sent
 
     def test_once_its_staging_record_has_expired_it_answers_the_document(
         self, client, document, staging

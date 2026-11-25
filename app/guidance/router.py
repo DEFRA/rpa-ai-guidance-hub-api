@@ -134,7 +134,8 @@ async def create_document(
         new = new.model_copy(update={"source": source})
 
     staged, document_id, version_id = await _reserved(staging, new.source)
-    if already is None and await records.find(database, document_id) is not None:
+    upload_id = new.source.upload_id
+    if already is None and await _of_another_upload(database, document_id, upload_id):
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_409_CONFLICT,
             detail=f"File {new.source.file_id} is being made into a version of "
@@ -200,7 +201,9 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
         database, document_id, new.source.upload_id
     )
     if saved_from is None:
-        await _replacing_the_latest(database, document_id, new.replaces_version_id)
+        await _replacing_the_latest(
+            database, document_id, new.replaces_version_id, new.source.upload_id
+        )
     elif await _finished(staging, saved_from):
         response.status_code = fastapi.status.HTTP_200_OK
         return await _answered(database, document_id)
@@ -355,10 +358,12 @@ async def _replacing_the_latest(
     database: pymongo.asynchronous.database.AsyncDatabase,
     document_id: ids.DocumentId,
     replaced: ids.VersionId,
+    upload_id: ids.UploadId,
 ) -> None:
-    """Raise a conflict naming the guide's latest version, unless it is `replaced`."""
+    """Raise a conflict naming the guide's latest version, unless it is `replaced`,
+    or made from `upload_id`: this upload's own, committed since it was looked for."""
     latest = await records.latest_version(database, document_id)
-    if latest is None or latest.id != replaced:
+    if latest is None or (latest.id != replaced and latest.upload_id != upload_id):
         raise fastapi.HTTPException(
             status_code=fastapi.status.HTTP_409_CONFLICT,
             detail={
@@ -439,6 +444,18 @@ def _job(
         follows=follows,
         trace_id=tracing.ctx_trace_id.get(None),
     )
+
+
+async def _of_another_upload(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    upload_id: ids.UploadId,
+) -> bool:
+    """Whether `document_id` is a guide there already, made from another upload,
+    so the file's ids are reserved for a new version of it. A guide made from
+    `upload_id` is this upload's own, committed since it was looked for."""
+    found = await records.find(database, document_id)
+    return found is not None and found.upload_id != upload_id
 
 
 async def _saving(
