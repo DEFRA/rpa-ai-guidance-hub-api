@@ -189,3 +189,17 @@ async def links_of(
     if record is None:
         return []
     return [GuideLink.from_entry(record, entry) for entry in record[_LINKS]]
+
+
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
+async def guides_linking_to(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    canonical_link: str,
+) -> list[ids.DocumentId]:
+    """The guides whose latest version links to `canonical_link`, each once, in id
+    order: found through the index on it, so the time does not grow with the number of
+    guides. Put in order here, as a sort in the query could read every guide instead."""
+    cursor = database[GUIDE_LINKS].find(
+        {f"{_LINKS}.{_CANONICAL_LINK}": canonical_link}, {"_id": 1}
+    )
+    return sorted([record["_id"] async for record in cursor])

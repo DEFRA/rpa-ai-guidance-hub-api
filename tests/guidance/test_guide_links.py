@@ -40,6 +40,8 @@ MARKDOWN = (
 
 @pytest.fixture
 async def database(mongo_database):
+    """With no guide's links kept, as one case's guides are another's matches."""
+    await mongo_database[guide_links.GUIDE_LINKS].delete_many({})
     await guide_links.ensure_indexes(mongo_database)
     return mongo_database
 
@@ -190,10 +192,35 @@ class TestANewVersion:
         assert len(await guide_links.links_of(database, other.document_id)) == 3
 
 
-class TestTheIndex:
-    async def test_finds_the_guides_that_link_to_a_canonical_link(self, database):
-        indexes = await database[guide_links.GUIDE_LINKS].index_information()
+class TestTheGuidesThatLinkToADocument:
+    async def test_are_each_guide_whose_latest_version_links_to_it_once(self, database):
+        twice = _version()
+        once = _version()
+        await guide_links.keep(database, twice, MARKDOWN)
+        await guide_links.keep(
+            database, once, f"## 1 Introduction\n\n[the form]({FORM})"
+        )
+        await guide_links.keep(database, _version(), "## 1 Introduction\n\nNo links.")
 
-        assert [("links.canonicalLink", 1)] in [
-            index["key"] for index in indexes.values()
-        ]
+        found = await guide_links.guides_linking_to(database, FORM_CANONICAL)
+
+        assert found == sorted([twice.document_id, once.document_id])
+
+    async def test_are_found_through_the_index_on_the_canonical_link(self, database):
+        """So the time does not grow with the number of guides."""
+        await guide_links.keep(database, _version(), MARKDOWN)
+        before = await _uses_of_the_canonical_link_index(database)
+
+        await guide_links.guides_linking_to(database, FORM_CANONICAL)
+
+        assert await _uses_of_the_canonical_link_index(database) == before + 1
+
+
+async def _uses_of_the_canonical_link_index(database) -> int:
+    """How many operations have used the index on each link's canonical link."""
+    cursor = await database[guide_links.GUIDE_LINKS].aggregate([{"$indexStats": {}}])
+    async for index in cursor:
+        if index["key"] == {"links.canonicalLink": 1}:
+            return index["accesses"]["ops"]
+    message = "No index on links.canonicalLink"
+    raise AssertionError(message)
