@@ -9,9 +9,7 @@ search service make the same slug (`src/services/guide-sections.js`,
 `app/indexing/prepare/anchors.py`).
 
 The rule is GitHub's, but for one thing: a dot between two digits becomes a hyphen, so
-`### 3.1 Overview` is `#3-1-overview`, and "1.2" is not read as "12". Anchors made
-before that dropped the dot (`#31-overview`), and guides converted then still carry
-them.
+`### 3.1 Overview` is `#3-1-overview`, and "1.2" is not read as "12".
 """
 
 from __future__ import annotations
