@@ -48,8 +48,7 @@ class MisfiledVersionError(RuntimeError):
 
 
 class OvertakenVersionError(RuntimeError):
-    """Raised when another version of the document follows the one this version was
-    matched with: it was matched with a version that is no longer the latest."""
+    """Raised when another version replaced the version this one replaces first."""
 
 
 # Newest first, by when a version was made. A version id is time-ordered too, but
@@ -76,8 +75,7 @@ async def ensure_indexes(
     """
     await database[DOCUMENTS].create_index(_UPLOAD_ID, unique=True)
     await database[VERSIONS].create_index([(DOCUMENT_ID, 1), *_NEWEST])
-    # One version follows each: a version matched with one that another follows was
-    # overtaken while it was made.
+    # One version replaces each.
     await database[VERSIONS].create_index(
         [(DOCUMENT_ID, 1), (models.FOLLOWS, 1)],
         unique=True,
@@ -486,18 +484,17 @@ async def create_version(
     earlier attempt wrote it, and that record is answered as it stands - unless it
     belongs to another document, which no attempt at this one could have done.
 
-    One version follows each: a version that follows one another version already
-    follows was matched with a version that is no longer the latest, and is raised.
+    One version replaces each: a second version that replaces the same one is raised.
 
     Raises:
         MisfiledVersionError: if the version id is taken by another document's
             version.
-        OvertakenVersionError: if another version follows the one this follows.
+        OvertakenVersionError: if another version replaced the one this replaces.
     """
     try:
         created = await _created(database[VERSIONS], version.to_document())
     except pymongo.errors.DuplicateKeyError as clash:
-        message = f"Another version follows {version.follows}, as {version.id} does"
+        message = f"Another version replaced {version.follows} before {version.id} did"
         raise OvertakenVersionError(message) from clash
     return _filed(models.Version.from_document(created), version.document_id)
 

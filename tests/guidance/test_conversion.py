@@ -11,7 +11,6 @@ import asyncio
 import datetime as dt
 import json
 import uuid
-from unittest import mock
 
 import boto3
 import pydantic
@@ -292,10 +291,14 @@ _LATER_CONTENT = (
 
 
 async def _new_version_job(
-    staging, job: conversion.ConversionJob, version_number: str
+    staging,
+    job: conversion.ConversionJob,
+    version_number: str,
+    upload: str | None = None,
 ) -> conversion.ConversionJob:
-    """Another upload's job, naming `job`'s document: a new version of its guide."""
-    upload, file_id = str(uuid.uuid4()), str(uuid.uuid4())
+    """Another upload's job, naming `job`'s document: a new version of its guide, that
+    replaces `job`'s version."""
+    upload, file_id = upload or str(uuid.uuid4()), str(uuid.uuid4())
     await staging.claim(file_id, f"{upload}/{file_id}")
     await staging.mark_complete(
         file_id, parsing_models.MinimalDocumentInfo(title="Claims guide")
@@ -308,6 +311,7 @@ async def _new_version_job(
             "file_id": file_id,
             "source_url": f"s3://rpa-ai-guidance-hub-source-docs/{upload}/{file_id}",
             "version_id": reserved.version_id,
+            "follows": job.version_id,
             "request": job.request.model_copy(
                 update={"source": source, "version_number": version_number}
             ),
@@ -351,6 +355,15 @@ class TestConvertingAnUploadIntoANewVersion:
         versions = await records.versions_of(database, job.document_id)
         assert [version.id for version in versions] == [job.version_id]
 
+    async def test_is_left_to_be_delivered_again_when_what_it_replaces_is_not_there(
+        self, handler, next_job
+    ):
+        unknown = next_job.model_copy(update={"follows": uuid.uuid4()})
+        body = unknown.model_dump_json(by_alias=True)
+
+        with pytest.raises(LookupError):
+            await handler(body, last_delivery=False)
+
     @pytest.mark.usefixtures("contents")
     async def test_is_newer_than_the_version_it_follows_whatever_the_time(
         self, handler, job, next_job, database
@@ -369,28 +382,43 @@ class TestConvertingAnUploadIntoANewVersion:
         assert latest.id == next_job.version_id
 
     @pytest.mark.usefixtures("contents")
-    async def test_one_overtaken_while_matched_is_matched_again_when_delivered_again(
+    async def test_of_two_that_replace_one_version_the_second_saved_fails(
         self, handler, job, next_job, staging, converts, database
     ):
-        """Two new versions saved at once: both are matched with the first version, and
-        the second to be written is refused, to be matched with the one that overtook
-        it on its next delivery. A section new to both then has one id."""
+        """Both were asked for while the first version was the latest: the guide has
+        changed since the second one's maintainer chose what to replace."""
         third_job = await _new_version_job(staging, job, "3.0")
-        first = await records.latest_version(database, job.document_id)
         await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
         converts.return_value = _stored(third_job)
-        third_body = third_job.model_dump_json(by_alias=True)
-        with (
-            mock.patch.object(records, "latest_version", return_value=first),
-            pytest.raises(records.OvertakenVersionError),
-        ):
-            await handler(third_body, last_delivery=False)
 
-        await handler(third_body, last_delivery=False)
+        await handler(third_job.model_dump_json(by_alias=True), last_delivery=False)
 
-        second = await section_ids.of_version(database, next_job.version_id, [])
-        third = await section_ids.of_version(database, third_job.version_id, [])
-        assert third["1-check-you-can-apply"] == second["1-check-you-can-apply"]
+        assert (await staging.get(third_job.file_id)).saving_status == "failed"
+        versions = await records.versions_of(database, job.document_id)
+        assert [version.id for version in versions] == [
+            next_job.version_id,
+            job.version_id,
+        ]
+
+    @pytest.mark.usefixtures("contents")
+    async def test_two_files_of_one_upload_make_one_version(
+        self, handler, job, next_job, staging, converts, database
+    ):
+        """A caller sent another file of the upload while the first file's save was
+        under way: both replace the same version."""
+        upload = next_job.request.source.upload_id
+        other_job = await _new_version_job(staging, job, "2.0", upload=upload)
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+        converts.return_value = _stored(other_job)
+
+        await handler(other_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        assert (await staging.get(other_job.file_id)).saving_status == "failed"
+        versions = await records.versions_of(database, job.document_id)
+        assert [version.id for version in versions] == [
+            next_job.version_id,
+            job.version_id,
+        ]
 
     @pytest.mark.usefixtures("contents")
     async def test_its_sections_keep_the_ids_they_had_before(

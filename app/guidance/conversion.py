@@ -8,8 +8,8 @@ wrote. A message whose last delivery fails goes to the dead-letter queue, so tha
 failure is recorded on the staging record first.
 
 Search accepts a version before it indexes it: the hub and search agree in the end,
-not at once. Of two new versions of a guide saved at once, the one written second is
-refused, and its message is delivered again so that it is matched with the other.
+not at once. Of two new versions that replace the same version, the one written second
+fails: the guide changed after its maintainer chose what to replace.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ _UNFIXABLE = (
     service.SourceMissingError,
     errors.DocumentParseError,
     records.MisfiledVersionError,
+    records.OvertakenVersionError,
     section_ids.ContentMissingError,
     search_service.IndexRefusedError,
 )
@@ -83,6 +84,8 @@ class ConversionJob(pydantic.BaseModel):
     document_id: ids.DocumentId
     version_id: ids.VersionId
     request: schemas.NewDocument
+    # The version this one replaces: None for a guide's first.
+    follows: ids.VersionId | None = None
     # The request's trace id, so that the work, and what it asks of search, is traced
     # with it. None for a request that had none.
     trace_id: str | None = None
@@ -187,7 +190,7 @@ class ConversionHandler:
             stored.images,
         )
 
-        before = await records.latest_version(self._database, job.document_id)
+        before = await self._replaced(job)
         made = job.request.version_for(stored, _saved_at(before))
         if before is not None:
             made = dataclasses.replace(
@@ -198,6 +201,18 @@ class ConversionHandler:
                 follows=before.id,
             )
         return await records.create_version(self._database, made)
+
+    async def _replaced(self, job: ConversionJob) -> models.Version | None:
+        """The version `job` replaces, as it is recorded: None for a guide's first."""
+        if job.follows is None:
+            return None
+        replaced = await records.find_version(
+            self._database, job.document_id, job.follows
+        )
+        if replaced is None:
+            message = f"Version {job.follows}, which {job.version_id} replaces, is gone"
+            raise LookupError(message)
+        return replaced
 
     async def _give_to_search(
         self, job: ConversionJob, document: models.Document

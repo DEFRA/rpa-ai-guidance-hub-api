@@ -87,6 +87,10 @@ Submitter = Annotated[
             "model": schemas.Document,
             "description": "The upload was converted already: its document",
         },
+        fastapi.status.HTTP_409_CONFLICT: {
+            "description": "The file has not parsed, or is being made into a version "
+            "of a guide there is already",
+        },
         fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "The conversion could not be started; try again",
         },
@@ -115,7 +119,9 @@ async def create_document(
     the document was made from, whichever file of the upload is named.
 
     A job that cannot be sent is recorded as a failed save and answered 503, so the
-    caller does not follow a save that will never come.
+    caller does not follow a save that will never come. A file whose ids are reserved
+    for a new version of a guide there is already is a conflict: saving it as a new
+    guide would make a live version of that one.
     """
     already = await records.find_by_upload(database, new.source.upload_id)
     if already is not None:
@@ -128,6 +134,14 @@ async def create_document(
         new = new.model_copy(update={"source": source})
 
     staged, document_id, version_id = await _reserved(staging, new.source)
+    upload_id = new.source.upload_id
+    if already is None and await _of_another_upload(database, document_id, upload_id):
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail=f"File {new.source.file_id} is being made into a version of "
+            f"{document_id}",
+        )
+
     return await _saving(
         staging, submitter, response, staged, _job(new, staged, document_id, version_id)
     )
@@ -146,7 +160,8 @@ async def create_document(
         },
         fastapi.status.HTTP_409_CONFLICT: {
             "description": "The file has not parsed, or is being made into another "
-            "document",
+            "document, or the version it replaces is not the latest any more: then "
+            "`detail.latestVersionId` names the latest",
         },
         fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "The conversion could not be started; try again",
@@ -155,7 +170,7 @@ async def create_document(
 )
 async def create_version(  # noqa: PLR0913 - the request and what serves it
     document_id: ids.DocumentId,
-    new: schemas.NewDocument,
+    new: schemas.NewVersion,
     database: Database,
     response: fastapi.Response,
     staging: Staging,
@@ -172,6 +187,9 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     recorded and the save marked complete, or its staging record has expired, the
     document is answered (200); until then, the save is finished for the file it was
     started from, whichever file of the upload is named.
+
+    A new version that replaces a version that is not the latest any more is a
+    conflict: another version was saved after the maintainer chose this one.
     """
     if await records.find(database, document_id) is None:
         raise fastapi.HTTPException(
@@ -182,10 +200,14 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     saved_from = await records.file_saved_as_version(
         database, document_id, new.source.upload_id
     )
-    if saved_from is not None:
-        if await _finished(staging, saved_from):
-            response.status_code = fastapi.status.HTTP_200_OK
-            return await _answered(database, document_id)
+    if saved_from is None:
+        await _replacing_the_latest(
+            database, document_id, new.replaces_version_id, new.source.upload_id
+        )
+    elif await _finished(staging, saved_from):
+        response.status_code = fastapi.status.HTTP_200_OK
+        return await _answered(database, document_id)
+    else:
         # Its save is finished under the ids the file it was saved from reserved,
         # whichever file of the upload this request names.
         source = new.source.model_copy(update={"file_id": saved_from})
@@ -198,9 +220,8 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
             detail=f"File {new.source.file_id} is being made into {reserved_for}",
         )
 
-    return await _saving(
-        staging, submitter, response, staged, _job(new, staged, document_id, version_id)
-    )
+    job = _job(new, staged, document_id, version_id, new.replaces_version_id)
+    return await _saving(staging, submitter, response, staged, job)
 
 
 @router.get("")
@@ -333,6 +354,26 @@ async def read_asset(
     )
 
 
+async def _replacing_the_latest(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    replaced: ids.VersionId,
+    upload_id: ids.UploadId,
+) -> None:
+    """Raise a conflict naming the guide's latest version, unless it is `replaced`,
+    or made from `upload_id`: this upload's own, committed since it was looked for."""
+    latest = await records.latest_version(database, document_id)
+    if latest is None or (latest.id != replaced and latest.upload_id != upload_id):
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"Version {replaced} is not the latest version of guide "
+                f"{document_id}",
+                "latestVersionId": None if latest is None else str(latest.id),
+            },
+        )
+
+
 async def _finished(staging: staging_store.StagingStore, file_id: ids.FileId) -> bool:
     """Whether the upload's save was marked complete, or its staging record has
     expired, so that no save can be followed or started again."""
@@ -390,16 +431,31 @@ def _job(
     staged: staging_models.StagedDocument,
     document_id: ids.DocumentId,
     version_id: ids.VersionId,
+    follows: ids.VersionId | None = None,
 ) -> conversion.ConversionJob:
-    """The job that saves the staged upload as that version of that document."""
+    """The job that saves the staged upload as that version of that document, which
+    replaces `follows`."""
     return conversion.ConversionJob(
         file_id=staged.file_id,
         source_url=f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}",
         document_id=document_id,
         version_id=version_id,
         request=new,
+        follows=follows,
         trace_id=tracing.ctx_trace_id.get(None),
     )
+
+
+async def _of_another_upload(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    upload_id: ids.UploadId,
+) -> bool:
+    """Whether `document_id` is a guide there already, made from another upload,
+    so the file's ids are reserved for a new version of it. A guide made from
+    `upload_id` is this upload's own, committed since it was looked for."""
+    found = await records.find(database, document_id)
+    return found is not None and found.upload_id != upload_id
 
 
 async def _saving(

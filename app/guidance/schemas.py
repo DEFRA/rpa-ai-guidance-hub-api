@@ -110,6 +110,15 @@ class NewDocument(pydantic.BaseModel):
         )
 
 
+class NewVersion(NewDocument):
+    """An upload to convert into a new version of a guide, and the version it replaces."""
+
+    replaces_version_id: ids.VersionId = pydantic.Field(
+        alias="replacesVersionId",
+        description="The guide's latest version when the maintainer chose to replace it",
+    )
+
+
 class Version(pydantic.BaseModel):
     """One conversion: where its Markdown went, and who made it.
 

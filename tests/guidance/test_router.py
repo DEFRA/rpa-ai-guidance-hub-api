@@ -64,6 +64,10 @@ NEXT_VERSION = uuid.UUID("0199b8a3-0a2d-7c41-9e3b-5d7f1a3c5e79")
 # A document other than the one the first upload made.
 OTHER_DOCUMENT = uuid.UUID("0199b8a3-0a2e-7d52-8f4c-6e8a2b4d6f80")
 NEXT_CONTENT = f"s3://rpa-ai-guidance-hub-docs/{DOCUMENT}/{NEXT_VERSION}/content.md"
+# A third upload, made to replace the first version while the second was saved.
+LATE_UPLOAD = "9b4e2a71-3c5d-4e8f-a1b2-c3d4e5f60718"
+LATE_FILE = "2c8d4f61-7a3b-4e59-9d0c-1b2a3c4d5e6f"
+LATE_VERSION = uuid.UUID("0199b8a3-0a30-7a14-8c2d-4e6f8a0b2c35")
 
 
 def _request(**overrides: Any) -> dict[str, Any]:
@@ -570,6 +574,23 @@ class TestSubmittingTheSameJourneyTwice:
         assert second.status_code == 200
         assert second.json()["id"] == str(DOCUMENT)
 
+    def test_sent_again_as_its_save_commits_it_follows_the_save(
+        self, client, submitter, mocker
+    ):
+        """The first save commits the guide after the retry looked for this upload's
+        guide: the guide found by its reserved id is this upload's own."""
+        client.post("/guides", json=_request())
+        sent = len(submitter.sent)
+        mocker.patch.object(
+            records, "find_by_upload", new=mocker.AsyncMock(return_value=None)
+        )
+
+        second = client.post("/guides", json=_request())
+
+        assert second.status_code == 202
+        assert second.headers["Location"] == f"/guides/staging/{FILE}"
+        assert len(submitter.sent) == sent
+
     def test_and_does_not_convert_again(self, client, converts):
         client.post("/guides", json=_request())
         client.post("/guides", json=_request())
@@ -928,10 +949,14 @@ class TestAddingAVersionToADocument:
 
     @staticmethod
     def _next(**overrides: Any) -> dict[str, Any]:
+        """The second upload, replacing the first version."""
         return _request(
-            source={"uploadId": NEXT_UPLOAD, "fileId": NEXT_FILE},
-            versionNumber="2.0",
-            **overrides,
+            **{
+                "source": {"uploadId": NEXT_UPLOAD, "fileId": NEXT_FILE},
+                "versionNumber": "2.0",
+                "replacesVersionId": str(VERSION),
+                **overrides,
+            }
         )
 
     def test_it_is_accepted_at_once_pointing_at_its_progress(
@@ -972,6 +997,25 @@ class TestAddingAVersionToADocument:
         assert response.status_code == 409
         assert len(submitter.sent) == 1
 
+    def test_its_file_sent_again_as_a_new_guide_is_a_conflict(
+        self, client, document, submitter
+    ):
+        """The queue refused the version's job, so its ids stay reserved for this
+        guide: saving the file as a new guide would make a live version of this one."""
+        submitter.refusal = RuntimeError("queue refused")
+        refused = client.post(f"/guides/{document}/versions", json=self._next())
+        submitter.refusal = None
+        sent = len(submitter.sent)
+
+        response = client.post(
+            "/guides",
+            json=_request(source={"uploadId": NEXT_UPLOAD, "fileId": NEXT_FILE}),
+        )
+
+        assert refused.status_code == 503
+        assert response.status_code == 409
+        assert len(submitter.sent) == sent
+
     def test_the_upload_is_converted_into_the_document(
         self, client, document, converts
     ):
@@ -979,6 +1023,11 @@ class TestAddingAVersionToADocument:
 
         assert converts.call_args.kwargs["document_id"] == document
         assert converts.call_args.kwargs["version_id"] == NEXT_VERSION
+
+    def test_its_job_names_the_version_it_replaces(self, client, document, submitter):
+        client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert json.loads(submitter.sent[-1])["follows"] == str(VERSION)
 
     def test_once_saved_it_is_the_documents_newest_version(self, client, document):
         client.post(f"/guides/{document}/versions", json=self._next())
@@ -1009,6 +1058,39 @@ class TestAddingAVersionToADocument:
         assert response.status_code == 404
         assert len(submitter.sent) == 1
 
+    def test_a_version_replacing_one_no_longer_the_latest_is_a_conflict(
+        self, client, document, staging, submitter
+    ):
+        """Another version was saved after the maintainer chose the one to replace. The
+        answer names it, so the maintainer can be told."""
+        client.post(f"/guides/{document}/versions", json=self._next())
+        sent = len(submitter.sent)
+        staging.stage(
+            file_id=LATE_FILE,
+            path=f"{LATE_UPLOAD}/{LATE_FILE}",
+            version_id=LATE_VERSION,
+        )
+
+        response = client.post(
+            f"/guides/{document}/versions",
+            json=self._next(source={"uploadId": LATE_UPLOAD, "fileId": LATE_FILE}),
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["latestVersionId"] == str(NEXT_VERSION)
+        assert len(submitter.sent) == sent
+
+    def test_a_version_that_does_not_name_the_version_it_replaces_is_refused(
+        self, client, document, submitter
+    ):
+        body = self._next()
+        del body["replacesVersionId"]
+
+        response = client.post(f"/guides/{document}/versions", json=body)
+
+        assert response.status_code == 422
+        assert len(submitter.sent) == 1
+
     def test_submitted_again_it_answers_the_document(self, client, document):
         client.post(f"/guides/{document}/versions", json=self._next())
 
@@ -1016,6 +1098,23 @@ class TestAddingAVersionToADocument:
 
         assert second.status_code == 200
         assert second.json()["id"] == str(document)
+
+    def test_sent_again_as_its_save_commits_it_follows_the_save(
+        self, client, document, submitter, mocker
+    ):
+        """The first save commits the version after the retry looked for this
+        upload's version: the latest version is then this upload's own."""
+        client.post(f"/guides/{document}/versions", json=self._next())
+        sent = len(submitter.sent)
+        mocker.patch.object(
+            records, "file_saved_as_version", new=mocker.AsyncMock(return_value=None)
+        )
+
+        second = client.post(f"/guides/{document}/versions", json=self._next())
+
+        assert second.status_code == 202
+        assert second.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
+        assert len(submitter.sent) == sent
 
     def test_once_its_staging_record_has_expired_it_answers_the_document(
         self, client, document, staging
@@ -1038,9 +1137,7 @@ class TestAddingAVersionToADocument:
 
         second = client.post(
             f"/guides/{document}/versions",
-            json=_request(
-                source={"uploadId": NEXT_UPLOAD, "fileId": other}, versionNumber="2.0"
-            ),
+            json=self._next(source={"uploadId": NEXT_UPLOAD, "fileId": other}),
         )
 
         assert second.status_code == 200
@@ -1121,9 +1218,7 @@ class TestAddingAVersionToADocument:
 
         response = client.post(
             f"/guides/{document}/versions",
-            json=_request(
-                source={"uploadId": NEXT_UPLOAD, "fileId": other}, versionNumber="2.0"
-            ),
+            json=self._next(source={"uploadId": NEXT_UPLOAD, "fileId": other}),
         )
 
         assert response.headers["Location"] == f"/guides/staging/{NEXT_FILE}"
