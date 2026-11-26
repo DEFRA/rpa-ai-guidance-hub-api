@@ -394,7 +394,7 @@
         "type": "object"
       },
       "NewDocument": {
-        "description": "An upload to convert, what its author said about the document, and the\nnumber they gave this version of it.",
+        "description": "An upload to convert, what its author said about the document, and the\ntitle and number they gave this version of it.",
         "properties": {
           "createdBy": {
             "anyOf": [
@@ -414,6 +414,18 @@
           "source": {
             "$ref": "#/components/schemas/Source"
           },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The title the maintainer confirmed, not blank; the one read from the file when not given",
+            "title": "Title"
+          },
           "versionNumber": {
             "description": "Two whole numbers with a full stop between them, such as 1.0",
             "title": "Versionnumber",
@@ -429,7 +441,7 @@
         "type": "object"
       },
       "NewVersion": {
-        "description": "An upload to convert into a new version of a guide, and the version it replaces.",
+        "description": "An upload to convert into a new version of a guide, and the version it\nreplaces.",
         "properties": {
           "createdBy": {
             "anyOf": [
@@ -454,6 +466,18 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The title the maintainer confirmed, not blank; the one read from the file when not given",
+            "title": "Title"
           },
           "versionNumber": {
             "description": "Two whole numbers with a full stop between them, such as 1.0",
@@ -1384,7 +1408,7 @@
         "type": "object"
       },
       "Version": {
-        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is a copy of what the stored document called itself when this version\nwas made, so that a list of versions reads as something a person can follow. The\nversion number is the author's, and null for a version stored before versions\nhad one.",
+        "description": "One conversion: where its Markdown went, and who made it.\n\nThe content URL is the whole of where. The pictures are named by the file itself,\nin addresses relative to that URL, so anything holding it can reach them and a\nsecond field pointing at them would be free to disagree with the file.\n\nThe title is the one the maintainer confirmed for this version, which starts as\nthe stored document's own, so that a list of versions reads as something a person\ncan follow. The version number is the author's, and null for a version stored\nbefore versions had one.",
         "properties": {
           "contentUrl": {
             "title": "Contenturl",

@@ -388,16 +388,17 @@ class TestCreatingADocument:
         ]
         assert response.json()["versions"][0]["contentUrl"] == CONTENT
 
-    def test_what_the_author_said_is_recorded_against_the_document(
-        self, client, documents
+    def test_what_the_author_said_is_recorded_against_the_version_not_the_guide(
+        self, client, documents, versions
     ):
-        """Metadata is the document's, not the version's: re-converting must not
-        disturb what an author said about what the document is."""
+        """Each version keeps the details given with it, and the guide's are its latest
+        version's, so the guide's record keeps none."""
         client.post("/guides", json=_request())
 
         record = documents.documents[0]
+        assert versions.documents[0]["metadata"] == METADATA
         assert record["_id"] == DOCUMENT
-        assert record["metadata"] == METADATA
+        assert "metadata" not in record
         assert record["source"]["uploadId"] == UPLOAD
         assert "createdAt" in record
 
@@ -456,16 +457,32 @@ class TestCreatingADocument:
         assert "createdAt" in record
         assert record["source"] == {"uploadId": UPLOAD, "fileId": FILE}
 
-    def test_what_the_document_called_itself_is_kept_beside_the_version(
+    def test_the_title_the_maintainer_confirmed_is_the_versions(self, client, versions):
+        """One title for each version, outside the details: the guide is shown with its
+        latest version's."""
+        client.post("/guides", json=_request(title="CS Revenue Claims, revised"))
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert versions.documents[0]["title"] == "CS Revenue Claims, revised"
+        assert body["versions"][0]["title"] == "CS Revenue Claims, revised"
+
+    def test_without_a_title_the_version_has_the_one_read_from_the_file(
         self, client, versions
     ):
-        """A copy of the stored document's own title, so a list of versions reads as
-        something a person can follow. Reading a version back takes the title from the
-        content; this is what it was called *then*, which nothing else records."""
+        """The title the maintainer confirms starts as the file's own; a caller that
+        sends none keeps that."""
         client.post("/guides", json=_request())
 
         assert versions.documents[0]["title"] == COVER_TITLE
-        assert versions.documents[0]["title"] != METADATA["title"]
+
+    @pytest.mark.parametrize("title", ["", " ", "   ", "\t\n"])
+    def test_a_blank_title_is_refused(self, client, documents, title):
+        """Search refuses a blank title after the save, so it is refused before."""
+        response = client.post("/guides", json=_request(title=title))
+
+        assert response.status_code == 422
+        assert documents.documents == []
 
     def test_the_ids_are_the_ones_the_object_store_used(
         self, client, documents, versions
@@ -895,6 +912,31 @@ class TestReadingADocumentBack:
             str(VERSION)
         ]
 
+    def test_its_details_are_those_of_the_newest_version_it_answers(
+        self, client, versions, mocker
+    ):
+        """Though that version was saved after the document was read."""
+        client.post("/guides", json=_request())
+        first = versions.documents[0]
+        newer = {
+            **first,
+            "_id": NEXT_VERSION,
+            "createdAt": first["createdAt"] + dt.timedelta(seconds=1),
+            "metadata": {**METADATA, "guidanceType": "policy"},
+        }
+        read_versions = records.versions_of
+
+        async def saved_meanwhile(database, document_id):
+            versions.documents.append(newer)
+            return await read_versions(database, document_id)
+
+        mocker.patch.object(records, "versions_of", new=saved_meanwhile)
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert body["versions"][0]["id"] == str(NEXT_VERSION)
+        assert body["metadata"]["guidanceType"] == "policy"
+
     def test_a_document_that_never_was(self, client):
         assert client.get(f"/guides/{uuid.uuid4()}").status_code == 404
 
@@ -1087,6 +1129,14 @@ class TestAddingAVersionToADocument:
         del body["replacesVersionId"]
 
         response = client.post(f"/guides/{document}/versions", json=body)
+
+        assert response.status_code == 422
+        assert len(submitter.sent) == 1
+
+    def test_a_version_with_a_blank_title_is_refused(self, client, document, submitter):
+        response = client.post(
+            f"/guides/{document}/versions", json=self._next(title="   ")
+        )
 
         assert response.status_code == 422
         assert len(submitter.sent) == 1

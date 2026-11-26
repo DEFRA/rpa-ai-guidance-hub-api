@@ -8,6 +8,7 @@ All fixture text is invented, as everywhere in this package.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import json
 import uuid
@@ -238,6 +239,25 @@ class TestConvertingAnUpload:
         [(_, metadata)] = search.indexed
         assert metadata["guideTitle"] == "As saved"
 
+    async def test_gives_search_the_guides_details_for_a_version_with_none_of_its_own(
+        self, handler, body, job, database, search, converts
+    ):
+        """A version saved before versions kept their own details."""
+        saved = job.request.model_copy(update={"metadata": {"guideTitle": "As saved"}})
+        version = saved.version_for(converts.return_value, _NOW)
+        await records.create_version(
+            database, dataclasses.replace(version, metadata=None)
+        )
+        guide = saved.document_for(job.document_id, _NOW)
+        await records.create(
+            database, dataclasses.replace(guide, metadata=saved.metadata)
+        )
+
+        await handler(body, last_delivery=False)
+
+        [(_, metadata)] = search.indexed
+        assert metadata["guideTitle"] == "As saved"
+
     @pytest.mark.usefixtures("converts")
     async def test_gives_search_the_version_under_the_requests_trace_id(
         self, handler, job, search, mocker
@@ -319,6 +339,19 @@ async def _new_version_job(
     )
 
 
+# Details given with a later upload, unlike the first one's.
+_CHANGED_DETAILS = {"schemes": ["Scheme B"], "owner": "new.owner@example.com"}
+
+
+def _with_details(
+    job: conversion.ConversionJob, details: dict[str, object]
+) -> conversion.ConversionJob:
+    """`job`, with the details given with its upload."""
+    return job.model_copy(
+        update={"request": job.request.model_copy(update={"metadata": details})}
+    )
+
+
 def _stored(job: conversion.ConversionJob) -> models.StoredDocument:
     """Where `job`'s conversion stored its version."""
     return models.StoredDocument(
@@ -354,6 +387,31 @@ class TestConvertingAnUploadIntoANewVersion:
         assert (await staging.get(next_job.file_id)).saving_status == "failed"
         versions = await records.versions_of(database, job.document_id)
         assert [version.id for version in versions] == [job.version_id]
+
+    @pytest.mark.usefixtures("contents")
+    async def test_gives_search_the_details_given_with_it(
+        self, handler, next_job, search
+    ):
+        changed = _with_details(next_job, _CHANGED_DETAILS)
+
+        await handler(changed.model_dump_json(by_alias=True), last_delivery=False)
+
+        [*_, (version, metadata)] = search.indexed
+        assert (version.id, metadata["owner"]) == (
+            changed.version_id,
+            "new.owner@example.com",
+        )
+
+    @pytest.mark.usefixtures("contents")
+    async def test_keeps_the_details_given_with_it_on_its_own_record(
+        self, handler, next_job, database
+    ):
+        changed = _with_details(next_job, _CHANGED_DETAILS)
+
+        await handler(changed.model_dump_json(by_alias=True), last_delivery=False)
+
+        stored = await database[records.VERSIONS].find_one({"_id": changed.version_id})
+        assert stored["metadata"] == _CHANGED_DETAILS
 
     async def test_is_left_to_be_delivered_again_when_what_it_replaces_is_not_there(
         self, handler, next_job

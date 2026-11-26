@@ -217,16 +217,18 @@ class ConversionHandler:
     async def _give_to_search(
         self, job: ConversionJob, document: models.Document
     ) -> None:
-        """Give search the version as it was recorded, with the document's details as
-        they are answered: what the hub keeps, not what a later request asked. Read
-        back, so that a delivery after one that saved the version but could not give it
-        to search gives it all the same."""
+        """Give search the version as it was recorded, with its details as they are
+        answered: what the hub keeps, not what a later request asked. A version saved
+        before versions kept their own details has its document's. Read back, so that a
+        delivery after one that saved the version but could not give it to search gives
+        it all the same."""
         [version] = [
             version
             for version in await records.versions_of(self._database, document.id)
             if version.id == job.version_id
         ]
-        await self._search.index(version, models.details_as_now(document.metadata))
+        details = document.metadata if version.metadata is None else version.metadata
+        await self._search.index(version, models.details_as_now(dict(details or {})))
 
     def _reporting_on(self, file_id: ids.FileId) -> Callable[[int, int], None]:
         """Tells the staging record each step of the save, from the worker thread.

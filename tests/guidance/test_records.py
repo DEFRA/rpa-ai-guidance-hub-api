@@ -227,6 +227,93 @@ class TestListingDocuments:
         assert [d.id for d in found] == [wanted]
 
 
+class TestAGuidesDetailsAreItsLatestVersions:
+    """Each version keeps the details given with it. A guide's details are its latest
+    version's, or the guide's own where that version kept none (one saved before
+    versions kept their own)."""
+
+    @staticmethod
+    async def _guide(database, own: dict, *given: dict | None) -> ids.DocumentId:
+        """A guide recorded with `own` details, with a version for each of `given`,
+        oldest first."""
+        document_id = ids.new_document_id()
+        await records.create(database, _document(document_id, str(uuid.uuid4()), own))
+        start = dt.datetime.now(tz=dt.UTC)
+        for n, details in enumerate(given):
+            await records.create_version(
+                database,
+                models.Version(
+                    id=ids.new_version_id(),
+                    document_id=document_id,
+                    content_url=f"s3://d/{n}",
+                    created_at=start + dt.timedelta(seconds=n),
+                    metadata=details,
+                ),
+            )
+        return document_id
+
+    async def test_a_guide_is_found_with_its_latest_versions_details(self, database):
+        guide = await self._guide(
+            database, {"owner": "first"}, {"owner": "first"}, {"owner": "second"}
+        )
+
+        found = await records.find(database, guide)
+
+        assert found.metadata == {"owner": "second"}
+
+    async def test_a_guide_whose_latest_version_kept_none_is_found_with_its_own(
+        self, database
+    ):
+        guide = await self._guide(database, {"owner": "first"}, None)
+
+        found = await records.find(database, guide)
+
+        assert found.metadata == {"owner": "first"}
+
+    async def test_a_guide_is_listed_and_filtered_by_its_latest_versions_details(
+        self, database
+    ):
+        old, new = f"old {uuid.uuid4()}", f"new {uuid.uuid4()}"
+        guide = await self._guide(
+            database, {"schemes": [old]}, {"schemes": [old]}, {"schemes": [new]}
+        )
+
+        by_new = await records.list_documents(
+            database, metadata={"schemes": [new]}, after=None, limit=10
+        )
+        by_old = await records.list_documents(
+            database, metadata={"schemes": [old]}, after=None, limit=10
+        )
+
+        assert [d.id for d in by_new] == [guide]
+        assert by_new[0].metadata == {"schemes": [new]}
+        assert by_old == []
+
+    async def test_a_guide_is_counted_by_its_latest_versions_details(self, database):
+        guide = await self._guide(
+            database, {"schemes": ["a"]}, {"schemes": ["a"]}, {"schemes": ["b"]}
+        )
+
+        counted = await records.count_values(
+            database, metadata={}, keys=["schemes"], only=[guide]
+        )
+
+        assert counted == {"schemes": {"b": 1}}
+
+    async def test_a_pinned_guide_matches_and_reads_by_its_latest_versions_details(
+        self, database
+    ):
+        guide = await self._guide(
+            database, {"audience": ["a"]}, {"audience": ["a"]}, {"audience": ["b"]}
+        )
+
+        shown = await records.matching(database, [guide], {"audience": ["b"]})
+        found = await records.find_many(database, [guide])
+
+        assert shown == {guide}
+        assert found[guide].metadata == {"audience": ["b"]}
+
+
 class TestLatestVersions:
     async def test_each_document_gets_its_newest_version_and_none_without(
         self, database

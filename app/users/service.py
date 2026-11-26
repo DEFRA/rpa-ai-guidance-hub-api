@@ -256,4 +256,4 @@ def _title(
     author called it."""
     if newest is not None and newest.title:
         return newest.title
-    return document.metadata.get("guideTitle")
+    return (document.metadata or {}).get("guideTitle")

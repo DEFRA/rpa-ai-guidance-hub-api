@@ -38,6 +38,17 @@ def _major_minor(number: str) -> str:
 VersionNumber = Annotated[str, pydantic.AfterValidator(_major_minor)]
 
 
+def _not_blank(title: str) -> str:
+    """Refuse a blank title here: search refuses it only after the version is saved."""
+    if not title.strip():
+        message = "must not be blank"
+        raise ValueError(message)
+    return title
+
+
+Title = Annotated[str, pydantic.AfterValidator(_not_blank)]
+
+
 class Source(pydantic.BaseModel):
     """Which upload the document is, as the front end knows it.
 
@@ -67,10 +78,15 @@ class Person(pydantic.BaseModel):
 
 class NewDocument(pydantic.BaseModel):
     """An upload to convert, what its author said about the document, and the
-    number they gave this version of it."""
+    title and number they gave this version of it."""
 
     source: Source
     metadata: dict[str, Any]
+    title: Title | None = pydantic.Field(
+        default=None,
+        description="The title the maintainer confirmed, not blank; the one read from "
+        "the file when not given",
+    )
     version_number: VersionNumber = pydantic.Field(
         alias="versionNumber",
         description="Two whole numbers with a full stop between them, such as 1.0",
@@ -86,7 +102,6 @@ class NewDocument(pydantic.BaseModel):
             upload_id=self.source.upload_id,
             file_id=self.source.file_id,
             filename=self.source.filename,
-            metadata=self.metadata,
             created_at=created_at,
         )
 
@@ -98,8 +113,9 @@ class NewDocument(pydantic.BaseModel):
             id=stored.version_id,
             document_id=stored.document_id,
             content_url=stored.content,
-            title=stored.title,
+            title=self.title or stored.title,
             version_number=self.version_number,
+            metadata=self.metadata,
             created_by_id=self.created_by.id if self.created_by else None,
             created_by_display_name=(
                 self.created_by.display_name if self.created_by else None
@@ -111,11 +127,13 @@ class NewDocument(pydantic.BaseModel):
 
 
 class NewVersion(NewDocument):
-    """An upload to convert into a new version of a guide, and the version it replaces."""
+    """An upload to convert into a new version of a guide, and the version it
+    replaces."""
 
     replaces_version_id: ids.VersionId = pydantic.Field(
         alias="replacesVersionId",
-        description="The guide's latest version when the maintainer chose to replace it",
+        description="The guide's latest version when the maintainer chose to "
+        "replace it",
     )
 
 
@@ -126,10 +144,10 @@ class Version(pydantic.BaseModel):
     in addresses relative to that URL, so anything holding it can reach them and a
     second field pointing at them would be free to disagree with the file.
 
-    The title is a copy of what the stored document called itself when this version
-    was made, so that a list of versions reads as something a person can follow. The
-    version number is the author's, and null for a version stored before versions
-    had one.
+    The title is the one the maintainer confirmed for this version, which starts as
+    the stored document's own, so that a list of versions reads as something a person
+    can follow. The version number is the author's, and null for a version stored
+    before versions had one.
     """
 
     id: ids.VersionId
@@ -159,6 +177,17 @@ class Version(pydantic.BaseModel):
         )
 
 
+def _details_of(
+    document: models.Document, latest: models.Version | None
+) -> dict[str, Any]:
+    """The details given with `latest`, the version answered with them, as a later
+    version may be saved between reading the document and reading its versions. The
+    document's own where that version kept none: one saved before versions did."""
+    if latest is None or latest.metadata is None:
+        return models.details_as_now(document.metadata or {})
+    return models.details_as_now(dict(latest.metadata))
+
+
 class Document(pydantic.BaseModel):
     """A document as it is answered: what it is, where it came from, when it was
     recorded, and every version of it there has been.
@@ -179,7 +208,7 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=models.details_as_now(document.metadata),
+            metadata=_details_of(document, versions[0] if versions else None),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
@@ -208,7 +237,7 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=models.details_as_now(document.metadata),
+            metadata=_details_of(document, latest),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,

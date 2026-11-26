@@ -139,6 +139,31 @@ class TestListingDocuments:
         assert item["id"] == str(document_id)
         assert item["latestVersion"]["id"] == str(newest.id)
 
+    async def test_each_item_carries_the_details_of_the_newest_version_it_carries(
+        self, client, database, mocker
+    ):
+        """Though that version was saved after the document was read."""
+        document_id, _ = await _seed(database, {"guidanceType": "process"})
+        newer = models.Version(
+            id=ids.new_version_id(),
+            document_id=document_id,
+            content_url=f"s3://docs/{document_id}/newer/content.md",
+            created_at=dt.datetime.now(tz=dt.UTC) + dt.timedelta(minutes=1),
+            metadata={"guidanceType": "policy"},
+        )
+        read_latest = records.latest_versions_of
+
+        async def saved_meanwhile(database, document_ids):
+            await records.create_version(database, newer)
+            return await read_latest(database, document_ids)
+
+        mocker.patch.object(records, "latest_versions_of", new=saved_meanwhile)
+
+        (item,) = (await client.get("/guides")).json()["items"]
+
+        assert item["latestVersion"]["id"] == str(newer.id)
+        assert item["metadata"]["guidanceType"] == "policy"
+
     async def test_each_item_carries_when_its_document_was_created(
         self, client, database
     ):
