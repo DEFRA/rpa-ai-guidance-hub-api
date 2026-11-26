@@ -21,9 +21,9 @@ share; neither is canonicalised.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import urllib.parse
-from dataclasses import dataclass
 
 
 class Kind(enum.StrEnum):
@@ -34,7 +34,7 @@ class Kind(enum.StrEnum):
     NETWORK_SHARE = "network-share"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Target:
     """What a link points at. Only a SharePoint item has a canonical link, and only
     a named Word document a file name, as the link gives it."""
