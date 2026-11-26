@@ -476,6 +476,23 @@ async def versions_of(
     return [models.Version.from_document(version) async for version in cursor]
 
 
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
+async def versions_of_each(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_ids: Sequence[ids.DocumentId],
+) -> dict[ids.DocumentId, list[models.Version]]:
+    """Every version of each of `document_ids` that has one, newest first, in a
+    single query."""
+    cursor = (
+        database[VERSIONS].find({DOCUMENT_ID: {_IN: list(document_ids)}}).sort(_NEWEST)
+    )
+    each: dict[ids.DocumentId, list[models.Version]] = {}
+    async for found in cursor:
+        version = models.Version.from_document(found)
+        each.setdefault(version.document_id, []).append(version)
+    return each
+
+
 @mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def latest_version(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId

@@ -264,7 +264,12 @@ class TestPins:
 
         user = (await client.get(f"/users/{user_id}")).json()
 
-        whole_guide = {"sectionId": None, "section": None, "heading": None}
+        whole_guide = {
+            "sectionId": None,
+            "section": None,
+            "heading": None,
+            "removedInVersion": None,
+        }
         assert user["pinned"] == [
             {"id": str(second), "title": "Second", **whole_guide},
             {"id": str(first), "title": "First", **whole_guide},
@@ -1214,3 +1219,109 @@ class TestASectionRenumberedInALaterVersion:
             "3-two-and-more",
             "3 Two and more",
         )
+
+
+async def _removing_two(database, guide: guidance_ids.DocumentId, number: str) -> None:
+    """A later version of `guide`, as a conversion writes one, that no longer has the
+    first version's second section: its other sections as the newest version has
+    them."""
+    versions = database[guidance_records.VERSIONS]
+    first = await versions.find_one({"documentId": guide}, sort=[("createdAt", 1)])
+    two = next(each["id"] for each in first["sectionIds"] if each["anchor"] == "2-two")
+    newest = await versions.find_one({"documentId": guide}, sort=[("createdAt", -1)])
+    await guidance_records.create_version(
+        database,
+        guidance_models.Version(
+            id=guidance_ids.new_version_id(),
+            document_id=guide,
+            content_url=f"s3://docs/{guide}/{number}/content.md",
+            title="Claims",
+            version_number=number,
+            created_at=newest["createdAt"].replace(tzinfo=dt.UTC)
+            + dt.timedelta(seconds=1),
+            sections={
+                each["anchor"]: guidance_models.GivenSection(
+                    each["id"], each.get("heading") or each["anchor"]
+                )
+                for each in newest["sectionIds"]
+                if each["id"] != two
+            },
+        ),
+    )
+
+
+class TestASectionRemovedInALaterVersion:
+    """A pin or a bookmark on a section that a later version no longer has says which
+    version removed it, with the heading the section last had, and no anchor."""
+
+    async def test_a_pinned_section_says_the_version_that_removed_it(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _removing_two(database, guide, "2.0")
+
+        [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        assert (pin["section"], pin["heading"], pin["removedInVersion"]) == (
+            None,
+            "2 Two",
+            "2.0",
+        )
+
+    async def test_a_bookmarked_section_says_the_version_that_removed_it(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch_cases(client, user_id, _new_case(guide))
+        await _removing_two(database, guide, "2.0")
+
+        [case] = await _cases(client, user_id)
+        [bookmark] = case["guides"][0]["bookmarks"]
+
+        assert (bookmark["section"], bookmark["heading"]) == (None, "2 Two")
+        assert bookmark["removedInVersion"] == "2.0"
+
+    async def test_it_has_the_heading_it_last_had_before_it_was_removed(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _renumbered(database, guide)
+        await _removing_two(database, guide, "3.0")
+
+        [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        assert (pin["heading"], pin["removedInVersion"]) == ("3 Two and more", "3.0")
+
+    async def test_it_says_the_version_that_removed_it_though_a_later_version_is_latest(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _removing_two(database, guide, "2.0")
+        await _removing_two(database, guide, "3.0")
+
+        [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        assert (pin["heading"], pin["removedInVersion"]) == ("2 Two", "2.0")
+
+    async def test_a_section_the_latest_version_has_was_removed_by_none(
+        self, client, database, content_url, mocker
+    ):
+        """And its guide's versions before the latest are not read: only a section gone
+        from the latest version needs them."""
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _renumbered(database, guide)
+        history = mocker.spy(guidance_records, "versions_of_each")
+
+        [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        assert pin["removedInVersion"] is None
+        assert history.call_count == 0

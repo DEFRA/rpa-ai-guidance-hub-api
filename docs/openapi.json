@@ -590,7 +590,7 @@
         "type": "object"
       },
       "PinInBrief": {
-        "description": "A guide the user has pinned, or a section of one, as the side navigation shows\nit: the guide's id and title, and for a section, its id, its anchor and its\nheading as the guide's latest version has them (the heading as it read when it\nwas pinned, where that version does not say).",
+        "description": "A guide the user has pinned, or a section of one, as the side navigation shows\nit: the guide's id and title, and for a section, its id, its anchor and its\nheading as the guide's latest version has them (the heading as it read when it\nwas pinned, where that version does not say), or, for a section the latest\nversion no longer has, its last heading and the version that removed it.",
         "properties": {
           "heading": {
             "anyOf": [
@@ -607,6 +607,18 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "removedInVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the version that removed the section",
+            "title": "Removedinversion"
           },
           "section": {
             "anyOf": [
@@ -766,7 +778,7 @@
         "type": "object"
       },
       "PlacedBookmark": {
-        "description": "A section bookmarked to a case, as the side navigation shows it: its id, its\nanchor and heading as the guide's latest version has them (the heading as it read\nwhen it was bookmarked, where that version does not say), and where the bookmark\nis among the case's, from 0, which is what a patch that moves or removes it names\nit by.",
+        "description": "A section bookmarked to a case, as the side navigation shows it: its id, its\nanchor and heading as the guide's latest version has them (the heading as it read\nwhen it was bookmarked, where that version does not say; its last heading and the\nversion that removed it, for a section the latest version no longer has), and\nwhere the bookmark is among the case's, from 0, which is what a patch that moves\nor removes it names it by.",
         "properties": {
           "heading": {
             "anyOf": [
@@ -782,6 +794,18 @@
           "position": {
             "title": "Position",
             "type": "integer"
+          },
+          "removedInVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the version that removed the section",
+            "title": "Removedinversion"
           },
           "section": {
             "anyOf": [

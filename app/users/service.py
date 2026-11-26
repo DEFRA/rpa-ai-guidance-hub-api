@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 from typing import TYPE_CHECKING, Any
 
 from app.guidance import ids as guidance_ids
@@ -190,8 +191,8 @@ async def guides_in_brief(
     guide with a section pinned or bookmarked, its sections. A guide that no longer
     exists is left out."""
     pinned = {pin.document_id for pin in user.pins}
-    sectioned = {pin.document_id for pin in user.pins if pin.section_id is not None}
-    sectioned |= {b.document_id for case in user.cases for b in case.bookmarks}
+    named = _sections_named(user)
+    sectioned = set(named)
 
     documents = await guidance_records.find_many(database, list(pinned | sectioned))
     latest = await guidance_records.latest_versions_of(database, list(documents))
@@ -203,16 +204,57 @@ async def guides_in_brief(
     headings = await section_ids.headings_of(
         database, [version.id for version in with_sections.values()]
     )
+    # Only a section gone from the latest version needs the versions before it.
+    gone = [
+        guide
+        for guide in with_sections
+        if named[guide] - set(given.get(guide, {}).values())
+    ]
+    versions = await guidance_records.versions_of_each(database, gone) if gone else {}
 
     return {
         guide: models.GuideInBrief(
             title=_title(document, latest.get(guide)),
             sections=models.GuideSections(
-                given.get(guide, {}), _headings_of(guide, with_sections, headings)
+                given.get(guide, {}),
+                _headings_of(guide, with_sections, headings),
+                _removed(versions.get(guide, []), given.get(guide, {})),
             ),
         )
         for guide, document in documents.items()
     }
+
+
+def _sections_named(
+    user: models.User,
+) -> dict[guidance_ids.DocumentId, set[guidance_ids.SectionId]]:
+    """The sections the user's pins and case bookmarks name, by guide."""
+    named: dict[guidance_ids.DocumentId, set[guidance_ids.SectionId]] = {}
+    for pin in user.pins:
+        if pin.section_id is not None:
+            named.setdefault(pin.document_id, set()).add(pin.section_id)
+    for case in user.cases:
+        for bookmark in case.bookmarks:
+            named.setdefault(bookmark.document_id, set()).add(bookmark.section_id)
+    return named
+
+
+def _removed(
+    versions: Sequence[guidance_models.Version],
+    latest: Mapping[str, guidance_ids.SectionId],
+) -> dict[guidance_ids.SectionId, models.RemovedSection]:
+    """Each section an earlier version of a guide had that its latest version does
+    not, from its versions newest first: the version after the last one that had it
+    removed it."""
+    now = set(latest.values())
+    removed: dict[guidance_ids.SectionId, models.RemovedSection] = {}
+    for newer, older in itertools.pairwise(versions):
+        for section in (older.sections or {}).values():
+            if section.id not in now and section.id not in removed:
+                removed[section.id] = models.RemovedSection(
+                    newer.version_number, section.heading
+                )
+    return removed
 
 
 async def guide_sections(
