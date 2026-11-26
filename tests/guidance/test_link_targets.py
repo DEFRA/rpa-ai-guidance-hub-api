@@ -104,6 +104,22 @@ class TestANamedWordDocument:
         )
         assert target.file_name == "Basic Navigation Guide.docx"
 
+    def test_in_a_library_view_is_named_by_the_path_its_id_holds(self):
+        link = (
+            "https://example.sharepoint.com/sites/Claims/Shared%20Documents/Forms/"
+            "AllItems.aspx?id=%2Fsites%2FClaims%2FShared%20Documents%2FClaim%20Form.docx"
+            "&parent=%2Fsites%2FClaims%2FShared%20Documents"
+        )
+
+        target = _target(link)
+
+        assert target.kind == link_targets.Kind.WORD_DOCUMENT
+        assert target.canonical_link == (
+            "https://example.sharepoint.com/sites/claims/shared%20documents/forms/"
+            "allitems.aspx?id=/sites/claims/shared%20documents/claim%20form.docx"
+        )
+        assert target.file_name == "Claim Form.docx"
+
     def test_behind_a_safe_link_is_the_link_it_wraps(self):
         link = (
             "https://eur03.safelinks.protection.outlook.com/?url="

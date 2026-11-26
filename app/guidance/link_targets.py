@@ -12,7 +12,7 @@ linked in two forms has two, since only SharePoint itself could say for sure tha
 two forms are one document, and so each form is remapped on its own.
 
 A link is a **named Word document** when it is marked as Word, or not marked at all,
-and names a `.docx` file: by `file=`, by the path a viewer's `sourcedoc` holds, or by
+and names a `.docx` file: by `file=`, by the path in `sourcedoc` or `id`, or by
 its own path. Any other SharePoint link - a folder, a page, a sharing link that names
 nothing, another kind of file - is another SharePoint item. A link to any other site,
 or one whose address cannot be read, is external, and a `file:` link names a network
@@ -49,6 +49,8 @@ _SAFE_LINKS = ".safelinks.protection.outlook.com"
 
 # Of a SharePoint link's query, what identifies the target, in the order kept.
 _IDENTIFYING = ("sourcedoc", "file", "id")
+# Of those, the ones that may hold the path of the file a link names.
+_HOLDING_A_PATH = ("sourcedoc", "id")
 
 # The mark a sharing link puts first on a Word document's path, and the mode that
 # opens the target by the path after it; another mode (`t`) is an opaque token.
@@ -124,12 +126,14 @@ def _identifying(query: str) -> dict[str, str]:
 
 
 def _file_name(path: list[str], query: dict[str, str]) -> str | None:
-    """The file a link names: by `file=`, by the path in `sourcedoc`, or by its own
-    path; None for a page, a folder or an opaque sharing link."""
+    """The file a link names, or the last part of a folder's path: by `file=`, by the
+    path in `sourcedoc` or `id`, or by its own path; None for a page or an opaque
+    sharing link."""
     if query.get("file"):
         return query["file"]
-    if query.get("sourcedoc", "").startswith("/"):
-        return query["sourcedoc"].rsplit("/", 1)[-1]
+    for name in _HOLDING_A_PATH:
+        if query.get(name, "").startswith("/"):
+            return query[name].rsplit("/", 1)[-1]
     last = path[-1] if path else ""
     return last if "." in last and not last.lower().endswith(_PAGE) else None
 
