@@ -308,8 +308,13 @@ def search() -> fake_search_index.InMemorySearchIndex:
 
 
 @pytest.fixture
-def submitter(collections, staging, search):
-    """The queue's stand-in, giving each job at once to the handler."""
+def submitter(collections, staging, search, mocker):
+    """The queue's stand-in, giving each job at once to the handler.
+
+    The links a version keeps are not what these cases are about, and need its content
+    and a real database: see the conversion's cases.
+    """
+    mocker.patch.object(conversion.guide_links, "keep_stored")
     fake = fake_submitter.InMemorySubmitter(
         conversion.ConversionHandler(
             collections,

@@ -19,7 +19,15 @@ import pytest
 
 from app.background import consumer, sqs
 from app.common import tracing
-from app.guidance import conversion, models, records, schemas, section_ids, service
+from app.guidance import (
+    conversion,
+    guide_links,
+    models,
+    records,
+    schemas,
+    section_ids,
+    service,
+)
 from app.guidance.documents import store
 from app.guidance.documents.staging import store as staging_store
 from app.guidance.parsing import errors
@@ -123,6 +131,13 @@ async def next_job(
     next_job = await _new_version_job(staging, job, "2.0")
     converts.return_value = _stored(next_job)
     return next_job
+
+
+@pytest.fixture(autouse=True)
+def stored(mocker):
+    """What a version stored, read back to keep its links: the first version's
+    content, unless a case says otherwise (`contents`)."""
+    return mocker.patch.object(store, "read", return_value=_FIRST_CONTENT.encode())
 
 
 @pytest.fixture
@@ -280,6 +295,27 @@ class TestConvertingAnUpload:
         assert traced == ["trace-123"]
         assert tracing.ctx_trace_id.get(None) == before
 
+    @pytest.mark.usefixtures("converts")
+    async def test_keeps_the_links_to_word_documents_in_the_version_it_saved(
+        self, handler, body, job, database
+    ):
+        await handler(body, last_delivery=False)
+
+        links = await guide_links.links_of(database, job.document_id)
+        assert [(link.version_id, link.text) for link in links] == [
+            (job.version_id, "the claim form")
+        ]
+
+    @pytest.mark.usefixtures("converts")
+    async def test_fails_when_its_content_is_not_there_to_keep_its_links(
+        self, handler, body, job, staging, stored
+    ):
+        stored.return_value = None
+
+        await handler(body, last_delivery=False)
+
+        assert (await staging.get(job.file_id)).saving_status == "failed"
+
     async def test_delivered_again_gives_search_the_version_it_could_not_give(
         self, handler, body, job, staging, search, converts
     ):
@@ -299,7 +335,9 @@ class TestConvertingAnUpload:
 
 _FIRST_CONTENT = (
     "# Claims guide\n\n"
-    "## 1 Apply for the payment\n\nSend the form.\n\n"
+    "## 1 Apply for the payment\n\n"
+    "Send [the claim form](https://example.sharepoint.com/:w:/r/teams/Team1234/"
+    "Claims/Claim%20Form.docx).\n\n"
     "## 2 Get paid\n\nWe pay you.\n"
 )
 _LATER_CONTENT = (
@@ -401,6 +439,18 @@ class TestConvertingAnUploadIntoANewVersion:
             changed.version_id,
             "new.owner@example.com",
         )
+
+    @pytest.mark.usefixtures("contents")
+    async def test_replaces_the_guides_links_with_its_own(
+        self, handler, next_job, database
+    ):
+        """The first version links to the claim form, and this one to nothing."""
+        before = await guide_links.links_of(database, next_job.document_id)
+
+        await handler(next_job.model_dump_json(by_alias=True), last_delivery=False)
+
+        after = await guide_links.links_of(database, next_job.document_id)
+        assert ([link.text for link in before], after) == (["the claim form"], [])
 
     @pytest.mark.usefixtures("contents")
     async def test_keeps_the_details_given_with_it_on_its_own_record(

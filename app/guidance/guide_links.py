@@ -17,6 +17,7 @@ again.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,7 @@ import pymongo.errors
 
 from app.common import mongo_timeouts
 from app.guidance import ids, link_targets, models, reading, section_ids
+from app.guidance.documents import store
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -143,6 +145,25 @@ async def keep(
         # The guide has a record the filter did not match: a later version's, or one
         # written since the filter was read. Replace it only if it is no later.
         await collection.replace_one(no_later, record)
+
+
+async def keep_stored(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    version: models.Version,
+    s3_client: Any,
+) -> None:
+    """`keep`, with the version's Markdown read from where it is stored.
+
+    Raises:
+        section_ids.ContentMissingError: if nothing is stored there.
+    """
+    stored = await asyncio.to_thread(
+        store.read, version.content_url, s3_client=s3_client
+    )
+    if stored is None:
+        message = f"No content at {version.content_url}, so its links cannot be kept"
+        raise section_ids.ContentMissingError(message)
+    await keep(database, version, stored.decode("utf-8"))
 
 
 async def _section_ids(
