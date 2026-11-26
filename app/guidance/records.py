@@ -64,6 +64,8 @@ _IN = "$in"
 _GROUP = "$group"
 _OR = "$or"
 _FIRST = "$first"
+_LIMIT = "$limit"
+_PROJECT = "$project"
 
 
 async def ensure_indexes(
@@ -177,7 +179,7 @@ async def list_documents(  # noqa: PLR0913 - each is a separate part of the quer
         *_updated_at(),
         *await _after(database, after, direction),
         {_SORT: {_UPDATED_AT: direction, "_id": direction}},
-        {"$limit": limit},
+        {_LIMIT: limit},
     ]
     cursor = await database[DOCUMENTS].aggregate(pipeline)
     return [models.Document.from_document(document) async for document in cursor]
@@ -287,8 +289,8 @@ def _latest_details() -> list[dict[str, Any]]:
                 "foreignField": DOCUMENT_ID,
                 "pipeline": [
                     {_SORT: dict(_NEWEST)},
-                    {"$limit": 1},
-                    {"$project": {_METADATA: 1}},
+                    {_LIMIT: 1},
+                    {_PROJECT: {_METADATA: 1}},
                 ],
                 "as": _LATEST,
             }
@@ -341,8 +343,8 @@ def _updated_at() -> list[dict[str, Any]]:
                 "foreignField": DOCUMENT_ID,
                 "pipeline": [
                     {_SORT: dict(_NEWEST)},
-                    {"$limit": 1},
-                    {"$project": {"createdAt": 1}},
+                    {_LIMIT: 1},
+                    {_PROJECT: {"createdAt": 1}},
                 ],
                 "as": "newest",
             }
@@ -400,7 +402,7 @@ async def matching(
         {_MATCH: {"_id": {_IN: list(document_ids)}}},
         *_as_now(),
         *_matching(metadata),
-        {"$project": {"_id": 1}},
+        {_PROJECT: {"_id": 1}},
     ]
     cursor = await database[DOCUMENTS].aggregate(pipeline)
     return {document["_id"] async for document in cursor}
