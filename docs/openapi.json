@@ -446,6 +446,18 @@
           "source": {
             "$ref": "#/components/schemas/Source"
           },
+          "sourceLink": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the maintainer says the document came from: a SharePoint link to a named Word document, or a Document ID link",
+            "title": "Sourcelink"
+          },
           "title": {
             "anyOf": [
               {
@@ -498,6 +510,18 @@
           },
           "source": {
             "$ref": "#/components/schemas/Source"
+          },
+          "sourceLink": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the maintainer says the document came from: a SharePoint link to a named Word document, or a Document ID link",
+            "title": "Sourcelink"
           },
           "title": {
             "anyOf": [
@@ -1512,6 +1536,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "sourceLink": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcelink"
           },
           "title": {
             "anyOf": [

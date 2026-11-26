@@ -56,6 +56,14 @@ METADATA = {
 
 # Who was signed in, which is not who owns the document - see `records`.
 AUTHOR = {"id": "dev-user-123", "displayName": "Dev User"}
+# Where the maintainer says the document came from, and its canonical link.
+SOURCE_LINK = (
+    "https://example.sharepoint.com/:w:/r/teams/Team1234/Claims/"
+    "CS%20Revenue%20Claims.docx?d=w1&web=1"
+)
+SOURCE_CANONICAL = (
+    "https://example.sharepoint.com/teams/team1234/claims/cs%20revenue%20claims.docx"
+)
 
 # A second upload: a new version of the document the first one made.
 NEXT_UPLOAD = "6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24"
@@ -480,6 +488,39 @@ class TestCreatingADocument:
         client.post("/guides", json=_request())
 
         assert versions.documents[0]["title"] == COVER_TITLE
+
+    def test_the_source_link_is_kept_as_given_with_its_canonical_link(
+        self, client, versions
+    ):
+        client.post("/guides", json=_request(sourceLink=SOURCE_LINK))
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert versions.documents[0]["sourceLink"] == {
+            "link": SOURCE_LINK,
+            "canonicalLink": SOURCE_CANONICAL,
+        }
+        assert body["versions"][0]["sourceLink"] == SOURCE_LINK
+
+    def test_without_a_source_link_the_version_has_none(self, client, versions):
+        """As every version saved before there were source links."""
+        client.post("/guides", json=_request())
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert "sourceLink" not in versions.documents[0]
+        assert body["versions"][0]["sourceLink"] is None
+
+    def test_a_source_link_that_names_no_word_document_is_refused(
+        self, client, documents
+    ):
+        """The details screen checks it first; this is for any other caller."""
+        response = client.post(
+            "/guides", json=_request(sourceLink="https://www.gov.uk/claims")
+        )
+
+        assert response.status_code == 422
+        assert documents.documents == []
 
     @pytest.mark.parametrize("title", ["", " ", "   ", "\t\n"])
     def test_a_blank_title_is_refused(self, client, documents, title):
@@ -1134,6 +1175,17 @@ class TestAddingAVersionToADocument:
         del body["replacesVersionId"]
 
         response = client.post(f"/guides/{document}/versions", json=body)
+
+        assert response.status_code == 422
+        assert len(submitter.sent) == 1
+
+    def test_a_version_whose_source_link_names_no_word_document_is_refused(
+        self, client, document, submitter
+    ):
+        response = client.post(
+            f"/guides/{document}/versions",
+            json=self._next(sourceLink="https://example.sharepoint.com/:f:/r/teams/T"),
+        )
 
         assert response.status_code == 422
         assert len(submitter.sent) == 1
