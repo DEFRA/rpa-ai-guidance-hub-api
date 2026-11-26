@@ -177,6 +177,17 @@ class Version(pydantic.BaseModel):
         )
 
 
+def _details_of(
+    document: models.Document, latest: models.Version | None
+) -> dict[str, Any]:
+    """The details given with `latest`, the version answered with them, as a later
+    version may be saved between reading the document and reading its versions. The
+    document's own where that version kept none: one saved before versions did."""
+    if latest is None or latest.metadata is None:
+        return models.details_as_now(document.metadata or {})
+    return models.details_as_now(dict(latest.metadata))
+
+
 class Document(pydantic.BaseModel):
     """A document as it is answered: what it is, where it came from, when it was
     recorded, and every version of it there has been.
@@ -197,7 +208,7 @@ class Document(pydantic.BaseModel):
     ) -> Document:
         return cls(
             id=document.id,
-            metadata=models.details_as_now(document.metadata or {}),
+            metadata=_details_of(document, versions[0] if versions else None),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,

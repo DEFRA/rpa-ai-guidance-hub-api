@@ -912,6 +912,31 @@ class TestReadingADocumentBack:
             str(VERSION)
         ]
 
+    def test_its_details_are_those_of_the_newest_version_it_answers(
+        self, client, versions, mocker
+    ):
+        """Though that version was saved after the document was read."""
+        client.post("/guides", json=_request())
+        first = versions.documents[0]
+        newer = {
+            **first,
+            "_id": NEXT_VERSION,
+            "createdAt": first["createdAt"] + dt.timedelta(seconds=1),
+            "metadata": {**METADATA, "guidanceType": "policy"},
+        }
+        read_versions = records.versions_of
+
+        async def saved_meanwhile(database, document_id):
+            versions.documents.append(newer)
+            return await read_versions(database, document_id)
+
+        mocker.patch.object(records, "versions_of", new=saved_meanwhile)
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert body["versions"][0]["id"] == str(NEXT_VERSION)
+        assert body["metadata"]["guidanceType"] == "policy"
+
     def test_a_document_that_never_was(self, client):
         assert client.get(f"/guides/{uuid.uuid4()}").status_code == 404
 
