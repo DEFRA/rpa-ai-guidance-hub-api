@@ -1,15 +1,18 @@
-"""The links to SharePoint Word documents in each guide's latest version, one record
-per link in `guide_links`, so the guides that link to a document can be found by its
+"""The links to SharePoint Word documents in each guide's latest version, one record per
+guide in `guide_links`, so the guides that link to a document can be found by its
 canonical link.
 
-Only a link that `link_targets` finds to be a named Word document is recorded: any
-other link cannot be matched to a document for certain. A record's id is its version's
-and its place among all the guide's links, `<version id>.<position>`, so keeping a
-version twice writes the same records again rather than more of them.
+Only a link that `link_targets` finds to be a named Word document is kept: any other
+link cannot be matched to a document for certain.
+
+A guide's record is replaced whole, in one write, so a reader never sees two versions'
+links, and two saves cannot each remove the other's. It holds the links of the version
+saved last by time, which is the guide's latest (`conversion._saved_at`): a version
+saved earlier changes nothing, whenever it is kept. A guide whose latest version has no
+such links has a record with none, so that no earlier version can put its links back.
 
 **Derived data.** Everything here is read from the version's Markdown and can be read
-again. A guide's records are its latest version's: keeping a new version replaces
-them.
+again.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, Any
 
-import pymongo
+import pymongo.errors
 
 from app.common import mongo_timeouts
 from app.guidance import ids, link_targets, models, reading, section_ids
@@ -29,19 +32,19 @@ if TYPE_CHECKING:
 
 GUIDE_LINKS = "guide_links"
 
-_GUIDE_ID = "guideId"
 _VERSION_ID = "versionId"
-_POSITION = "position"
+_SAVED_AT = "savedAt"
+_LINKS = "links"
 _CANONICAL_LINK = "canonicalLink"
 
 
 @dataclasses.dataclass(frozen=True)
 class GuideLink:
     """One link to a named Word document in a guide's latest version: where it is
-    (its section's id, None before the first section, and its order there), its
-    words, the link as written, its canonical link and the file it names."""
+    (its place among all the guide's links; its section's id, None before the first
+    section, and its order there), its words, the link as written, its canonical link
+    and the file it names."""
 
-    id: str
     guide_id: ids.DocumentId
     version_id: ids.VersionId
     position: int
@@ -52,12 +55,10 @@ class GuideLink:
     canonical_link: str
     file_name: str
 
-    def to_document(self) -> dict[str, Any]:
+    def to_entry(self) -> dict[str, Any]:
+        """The link in its guide's record, which holds its guide and version."""
         return {
-            "_id": self.id,
-            _GUIDE_ID: self.guide_id,
-            _VERSION_ID: self.version_id,
-            _POSITION: self.position,
+            "position": self.position,
             "sectionId": self.section_id,
             "order": self.order,
             "text": self.text,
@@ -67,18 +68,19 @@ class GuideLink:
         }
 
     @classmethod
-    def from_document(cls, document: Mapping[str, Any]) -> GuideLink:
+    def from_entry(
+        cls, record: Mapping[str, Any], entry: Mapping[str, Any]
+    ) -> GuideLink:
         return cls(
-            id=document["_id"],
-            guide_id=document[_GUIDE_ID],
-            version_id=document[_VERSION_ID],
-            position=document[_POSITION],
-            section_id=document["sectionId"],
-            order=document["order"],
-            text=document["text"],
-            source_link=document["sourceLink"],
-            canonical_link=document[_CANONICAL_LINK],
-            file_name=document["fileName"],
+            guide_id=record["_id"],
+            version_id=record[_VERSION_ID],
+            position=entry["position"],
+            section_id=entry["sectionId"],
+            order=entry["order"],
+            text=entry["text"],
+            source_link=entry["sourceLink"],
+            canonical_link=entry[_CANONICAL_LINK],
+            file_name=entry["fileName"],
         )
 
 
@@ -96,7 +98,6 @@ def links_in(
             continue
         found.append(
             GuideLink(
-                id=f"{version.id}.{position}",
                 guide_id=version.document_id,
                 version_id=version.id,
                 position=position,
@@ -114,10 +115,9 @@ def links_in(
 async def ensure_indexes(
     database: pymongo.asynchronous.database.AsyncDatabase,
 ) -> None:
-    """The indexes the records are read by: the guides a canonical link is in, and a
-    guide's links in order."""
-    await database[GUIDE_LINKS].create_index([(_CANONICAL_LINK, 1), (_GUIDE_ID, 1)])
-    await database[GUIDE_LINKS].create_index([(_GUIDE_ID, 1), (_POSITION, 1)])
+    """The index the guides that link to a canonical link are found by: an entry for
+    each guide and each canonical link in it."""
+    await database[GUIDE_LINKS].create_index([(f"{_LINKS}.{_CANONICAL_LINK}", 1)])
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)
@@ -126,20 +126,23 @@ async def keep(
     version: models.Version,
     markdown: str,
 ) -> None:
-    """Make the guide's links those of `version`, read from its Markdown."""
+    """Make the guide's links those of `version`, read from its Markdown, unless a
+    version saved later is kept already."""
     collection = database[GUIDE_LINKS]
     links = links_in(version, markdown, await _section_ids(database, version, markdown))
-    if links:
-        await collection.bulk_write(
-            [
-                pymongo.ReplaceOne({"_id": link.id}, link.to_document(), upsert=True)
-                for link in links
-            ],
-            ordered=False,
-        )
-    await collection.delete_many(
-        {_GUIDE_ID: version.document_id, _VERSION_ID: {"$ne": version.id}}
-    )
+    record = {
+        "_id": version.document_id,
+        _VERSION_ID: version.id,
+        _SAVED_AT: version.created_at,
+        _LINKS: [link.to_entry() for link in links],
+    }
+    no_later = {"_id": version.document_id, _SAVED_AT: {"$lte": version.created_at}}
+    try:
+        await collection.replace_one(no_later, record, upsert=True)
+    except pymongo.errors.DuplicateKeyError:
+        # The guide has a record the filter did not match: a later version's, or one
+        # written since the filter was read. Replace it only if it is no later.
+        await collection.replace_one(no_later, record)
 
 
 async def _section_ids(
@@ -159,6 +162,9 @@ async def links_of(
     database: pymongo.asynchronous.database.AsyncDatabase,
     guide_id: ids.DocumentId,
 ) -> list[GuideLink]:
-    """A guide's links, in the order they are in the guide."""
-    cursor = database[GUIDE_LINKS].find({_GUIDE_ID: guide_id}).sort(_POSITION, 1)
-    return [GuideLink.from_document(document) async for document in cursor]
+    """A guide's links, in the order they are in the guide; none for a guide whose
+    links were never kept."""
+    record = await database[GUIDE_LINKS].find_one({"_id": guide_id})
+    if record is None:
+        return []
+    return [GuideLink.from_entry(record, entry) for entry in record[_LINKS]]

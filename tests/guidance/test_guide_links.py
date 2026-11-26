@@ -6,6 +6,7 @@ All fixture text is invented.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import datetime as dt
 
@@ -22,6 +23,7 @@ FORM_CANONICAL = (
 )
 INTRODUCTION = ids.new_section_id()
 CHECKS = ids.new_section_id()
+SAVED = dt.datetime(2026, 11, 26, 9, 0, tzinfo=dt.UTC)
 
 MARKDOWN = (
     "[the guide index](https://example.sharepoint.com/:w:/r/teams/Team1234/Index.docx)\n\n"
@@ -42,13 +44,15 @@ async def database(mongo_database):
     return mongo_database
 
 
-def _version(guide: ids.DocumentId | None = None) -> models.Version:
-    """A version whose sections are the two MARKDOWN has."""
+def _version(
+    guide: ids.DocumentId | None = None, at: dt.datetime = SAVED
+) -> models.Version:
+    """A version whose sections are the two MARKDOWN has, saved `at`."""
     return models.Version(
         id=ids.new_version_id(),
         document_id=guide or ids.new_document_id(),
         content_url="s3://docs/content.md",
-        created_at=dt.datetime.now(tz=dt.UTC),
+        created_at=at,
         sections={
             "1-introduction": models.GivenSection(INTRODUCTION),
             "2-checks": models.GivenSection(CHECKS),
@@ -99,7 +103,6 @@ class TestAVersionsLinks:
         await guide_links.keep(database, version, MARKDOWN)
 
         form = (await guide_links.links_of(database, version.document_id))[1]
-        assert form.id == f"{version.id}.2"
         assert form.guide_id == version.document_id
         assert form.version_id == version.id
         assert form.source_link == FORM
@@ -129,11 +132,46 @@ class TestAVersionsLinks:
 class TestANewVersion:
     async def test_replaces_the_guides_links_with_its_own(self, database):
         first = _version()
-        second = _version(first.document_id)
+        second = _version(first.document_id, SAVED + dt.timedelta(minutes=1))
         await guide_links.keep(database, first, MARKDOWN)
 
         await guide_links.keep(
             database, second, f"## 1 Introduction\n\n[the form]({FORM})"
+        )
+
+        links = await guide_links.links_of(database, first.document_id)
+        assert [(link.version_id, link.text) for link in links] == [
+            (second.id, "the form")
+        ]
+
+    async def test_keeps_its_links_when_an_earlier_version_is_kept_after_it(
+        self, database
+    ):
+        """The newest by time is the guide's latest, whichever is kept last."""
+        first = _version()
+        second = _version(first.document_id, SAVED + dt.timedelta(minutes=1))
+        await guide_links.keep(
+            database, second, f"## 1 Introduction\n\n[the form]({FORM})"
+        )
+
+        await guide_links.keep(database, first, MARKDOWN)
+
+        links = await guide_links.links_of(database, first.document_id)
+        assert [(link.version_id, link.text) for link in links] == [
+            (second.id, "the form")
+        ]
+
+    async def test_keeps_its_links_when_kept_at_the_same_time_as_an_earlier_one(
+        self, database
+    ):
+        first = _version()
+        second = _version(first.document_id, SAVED + dt.timedelta(minutes=1))
+
+        await asyncio.gather(
+            guide_links.keep(
+                database, second, f"## 1 Introduction\n\n[the form]({FORM})"
+            ),
+            guide_links.keep(database, first, MARKDOWN),
         )
 
         links = await guide_links.links_of(database, first.document_id)
@@ -152,12 +190,10 @@ class TestANewVersion:
         assert len(await guide_links.links_of(database, other.document_id)) == 3
 
 
-class TestTheIndexes:
-    async def test_find_a_canonical_links_guides_and_a_guides_links_in_order(
-        self, database
-    ):
+class TestTheIndex:
+    async def test_finds_the_guides_that_link_to_a_canonical_link(self, database):
         indexes = await database[guide_links.GUIDE_LINKS].index_information()
 
-        keys = [index["key"] for index in indexes.values()]
-        assert [("canonicalLink", 1), ("guideId", 1)] in keys
-        assert [("guideId", 1), ("position", 1)] in keys
+        assert [("links.canonicalLink", 1)] in [
+            index["key"] for index in indexes.values()
+        ]
