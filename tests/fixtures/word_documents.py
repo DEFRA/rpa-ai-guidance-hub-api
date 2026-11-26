@@ -52,7 +52,7 @@ _CUSTOM_PROPERTIES_RELATIONSHIP = (
 def with_custom_property(name: str, value: str) -> bytes:
     """The smallest valid .docx, with one custom property, as SharePoint writes its
     own into a file in a library (`_dlc_DocIdUrl`)."""
-    properties = (
+    return with_custom_properties(
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/'
         'custom-properties" xmlns:vt="http://schemas.openxmlformats.org/'
@@ -61,6 +61,10 @@ def with_custom_property(name: str, value: str) -> bytes:
         f'name="{name}"><vt:lpwstr>{saxutils.escape(value)}</vt:lpwstr></property>'
         "</Properties>"
     )
+
+
+def with_custom_properties(part: str) -> bytes:
+    """The smallest valid .docx, with `part` as its custom properties part."""
     added = {
         "[Content_Types].xml": lambda blob: blob.replace(
             b"</Types>", _CUSTOM_PROPERTIES + b"</Types>"
@@ -77,5 +81,5 @@ def with_custom_property(name: str, value: str) -> bytes:
         for item in source.infolist():
             blob = source.read(item.filename)
             target.writestr(item, added.get(item.filename, lambda b: b)(blob))
-        target.writestr("docProps/custom.xml", properties)
+        target.writestr("docProps/custom.xml", part)
     return buffer.getvalue()

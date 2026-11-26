@@ -55,6 +55,12 @@ class TestParseMinimal:
 
         assert parser.parse_minimal(source).document_id_link == DOCUMENT_ID_LINK
 
+    def test_a_file_whose_custom_properties_cannot_be_read_has_none(self):
+        """They are SharePoint's, not the author's: the file is still read."""
+        source = word_documents.with_custom_properties("<broken")
+
+        assert parser.parse_minimal(source).document_id_link is None
+
     def test_a_file_with_no_document_id_link_has_none(self, docx_bytes):
         assert parser.parse_minimal(docx_bytes()).document_id_link is None
 
