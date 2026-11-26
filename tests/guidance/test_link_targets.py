@@ -164,6 +164,12 @@ class TestADocumentIdLink:
         )
         assert target.file_name is None
 
+    def test_keeps_its_id_alone_whatever_else_its_query_names(self):
+        """So one document has one canonical link, however it is linked by its ID."""
+        link = f"{DOCUMENT_ID_LINK}&file=Old%20Name.docx&sourcedoc=%7BAB12%7D"
+
+        assert _target(link) == _target(DOCUMENT_ID_LINK)
+
     def test_behind_a_safe_link_is_the_link_it_wraps(self):
         link = (
             "https://eur03.safelinks.protection.outlook.com/?url="

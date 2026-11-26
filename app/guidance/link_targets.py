@@ -112,15 +112,15 @@ def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
     path = segments[2:] if by_path else segments
     query = _identifying(parts.query)
 
-    canonical = _canonical(parts.hostname or "", path, query)
+    host = parts.hostname or ""
     if path and path[-1].lower() == _DOCUMENT_ID_PAGE and query.get("id"):
-        return Target(Kind.DOCUMENT_ID, canonical)
+        return Target(Kind.DOCUMENT_ID, _canonical(host, path, {"id": query["id"]}))
 
     named = _file_name(path, query)
     is_word = marker in ("", _WORD) and named is not None and _is_docx(named)
     return Target(
         Kind.WORD_DOCUMENT if is_word else Kind.SHAREPOINT_OTHER,
-        canonical,
+        _canonical(host, path, query),
         named if is_word else None,
     )
 
