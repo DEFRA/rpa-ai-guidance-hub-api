@@ -45,6 +45,7 @@ class Target:
 
 
 _SHAREPOINT = ".sharepoint.com"
+_WEB = ("http", "https")
 _SAFE_LINKS = ".safelinks.protection.outlook.com"
 
 # Of a SharePoint link's query, what identifies the target, in the order kept.
@@ -64,16 +65,21 @@ _UNREADABLE = urllib.parse.urlsplit("")
 
 
 def target_of(link: str) -> Target:
-    """What `link`, as written in a guide, points at."""
+    """What `link`, as written in a guide, points at. Only a link reached by http or
+    https can be SharePoint's: any other with a SharePoint host is external."""
     if link.startswith("#"):
         return Target(Kind.INTERNAL)
 
     parts = _unwrapped(_split(link))
     if parts.scheme.lower() == "file":
         return Target(Kind.NETWORK_SHARE)
-    if not (parts.hostname or "").endswith(_SHAREPOINT):
+    if not _is_sharepoint(parts):
         return Target(Kind.EXTERNAL)
     return _sharepoint(parts)
+
+
+def _is_sharepoint(parts: urllib.parse.SplitResult) -> bool:
+    return parts.scheme.lower() in _WEB and (parts.hostname or "").endswith(_SHAREPOINT)
 
 
 def _unwrapped(parts: urllib.parse.SplitResult) -> urllib.parse.SplitResult:
