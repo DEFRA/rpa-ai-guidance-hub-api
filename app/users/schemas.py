@@ -44,7 +44,8 @@ class OpenedGuide(pydantic.BaseModel):
 class PinInBrief(pydantic.BaseModel):
     """A guide the user has pinned, or a section of one, as the side navigation shows
     it: the guide's id and title, and for a section, its id, its anchor and its
-    heading as it read when it was pinned."""
+    heading as the guide's latest version has them (the heading as it read when it
+    was pinned, where that version does not say)."""
 
     id: guidance_ids.DocumentId
     title: str | None
@@ -61,14 +62,18 @@ class PinInBrief(pydantic.BaseModel):
             section=None
             if pin.section_id is None
             else guide.sections.anchor_of(pin.section_id),
-            heading=pin.heading,
+            heading=pin.heading
+            if pin.section_id is None
+            else guide.sections.heading_of(pin.section_id, pin.heading),
         )
 
 
 class PlacedBookmark(pydantic.BaseModel):
     """A section bookmarked to a case, as the side navigation shows it: its id, its
-    anchor and heading, and where the bookmark is among the case's, from 0, which is
-    what a patch that moves or removes it names it by."""
+    anchor and heading as the guide's latest version has them (the heading as it read
+    when it was bookmarked, where that version does not say), and where the bookmark
+    is among the case's, from 0, which is what a patch that moves or removes it names
+    it by."""
 
     section_id: guidance_ids.SectionId = pydantic.Field(alias="sectionId")
     section: str | None
@@ -130,7 +135,7 @@ def _in_guide_order(
         PlacedBookmark(
             sectionId=bookmark.section_id,
             section=sections.anchor_of(bookmark.section_id),
-            heading=bookmark.heading,
+            heading=sections.heading_of(bookmark.section_id, bookmark.heading),
             position=position,
         )
         for position, bookmark in sorted(
@@ -178,8 +183,9 @@ class User(pydantic.BaseModel):
 class PinnedSummary(guidance_schemas.DocumentSummary):
     """A pin as the Pinned page lists it: its guide as `GET /guides` lists it, with
     the pin's position among all the user's pins, which a patch of the pins takes,
-    whatever the filters show; and for a section, its id, its anchor in the guide's
-    latest version and its heading as it read when it was pinned."""
+    whatever the filters show; and for a section, its id, and its anchor and heading in
+    the guide's latest version (the heading as it read when it was pinned, where that
+    version does not say)."""
 
     position: int
     section_id: guidance_ids.SectionId | None = pydantic.Field(alias="sectionId")
@@ -194,7 +200,7 @@ class PinnedSummary(guidance_schemas.DocumentSummary):
             position=listed.position,
             sectionId=listed.pin.section_id,
             section=listed.anchor,
-            heading=listed.pin.heading,
+            heading=listed.heading,
         )
 
 

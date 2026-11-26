@@ -1,32 +1,20 @@
-"""Converting an upload and saving the document it becomes, off the API's queue.
+"""Converts an upload and saves the document it becomes, off the API's queue.
 
-A document with many pictures takes a while to save, one write per picture, so the
-request that starts it does not wait: it sends a `ConversionJob` to the queue and
-answers at once, and the caller follows the save on the file's staging record. The
-consumer gives each message to `ConversionHandler`, which does the work.
+A document with many pictures takes one write per picture, so the request that starts
+a save does not wait for it. The caller follows the save on the file's staging record.
 
-**Once the document is committed, search is given the version to index**, and only
-then is the save marked complete, so the message stays until search has it. Search
-answers before it has indexed it: the hub and search agree in the end, not at once.
+SQS may deliver a message more than once, so each delivery keeps what an earlier one
+wrote. A message whose last delivery fails goes to the dead-letter queue, so that
+failure is recorded on the staging record first.
 
-**Safe to repeat**, as SQS may deliver a message more than once: the ids are reserved
-once, on the staging record, every write creates rather than replaces and keeps what
-is already there, a document already committed is not converted again, and search
-keeps only the newest version it is given.
-
-**What becomes of a failure** decides what becomes of the message:
-
-- one retrying cannot fix (`_UNFIXABLE`) is recorded on the staging record and returned
-  from, so the message is deleted;
-- any other is raised, so SQS delivers the message again; on its last delivery it is
-  recorded first, so nobody is left following a save that will never finish, and SQS
-  then moves the message to the dead-letter queue;
-- a message that is not a job names no upload to record anything on, so it is raised
-  and ends on the dead-letter queue.
+Search accepts a version before it indexes it: the hub and search agree in the end,
+not at once. Of two new versions of a guide saved at once, the one written second is
+refused, and its message is delivered again so that it is matched with the other.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
@@ -36,7 +24,7 @@ import fastapi.concurrency
 import pydantic
 
 from app.common import tracing
-from app.guidance import ids, models, records, schemas, service
+from app.guidance import ids, models, records, schemas, section_ids, service
 from app.guidance.parsing import errors
 from app.search import search_service
 
@@ -57,8 +45,25 @@ _UNFIXABLE = (
     service.SourceMissingError,
     errors.DocumentParseError,
     records.MisfiledVersionError,
+    section_ids.ContentMissingError,
     search_service.IndexRefusedError,
 )
+
+
+# The finest time Mongo keeps.
+_TICK = dt.timedelta(milliseconds=1)
+
+
+def _saved_at(before: models.Version | None) -> dt.datetime:
+    """The time a version is saved at: now, but always after the version it follows,
+    to Mongo's millisecond, as the newest by time is the guide's latest. A version saved
+    since this one's conversion began can hold a later time than now."""
+    now = dt.datetime.now(tz=dt.UTC)
+    if before is None:
+        return now
+    # Mongo gives a time back in UTC without its zone.
+    followed = before.created_at.replace(tzinfo=before.created_at.tzinfo or dt.UTC)
+    return max(now, followed + _TICK)
 
 
 class SearchIndex(Protocol):
@@ -108,11 +113,15 @@ class ConversionHandler:
         staging: staging_store.StagingStore,
         guidance: service.GuidanceService,
         search: SearchIndex,
+        *,
+        s3_client: Any,
     ) -> None:
         self._database = database
         self._staging = staging
         self._guidance = guidance
         self._search = search
+        # Where the version before's content is read from, to carry its sections' ids.
+        self._s3 = s3_client
 
     async def __call__(self, body: str, *, last_delivery: bool) -> None:
         job = ConversionJob.model_validate_json(body)
@@ -137,17 +146,31 @@ class ConversionHandler:
             raise
 
     async def _save(self, job: ConversionJob) -> models.Document:
-        """Convert the upload and record what it makes, unless an earlier delivery did:
-        the document, as it is recorded.
+        """Convert the upload and record its version, unless an earlier delivery did,
+        then its document, unless that is there already: the document, as it is
+        recorded.
+
+        Bottom up. The version is recorded only once its content is wholly stored, and
+        the document last: until it exists nothing can reach the version, and once it
+        does everything beneath it is there.
+        """
+        version = await records.find_version(
+            self._database, job.document_id, job.version_id
+        )
+        if version is None:
+            version = await self._converted(job)
+        return await records.create(
+            self._database,
+            job.request.document_for(job.document_id, version.created_at),
+        )
+
+    async def _converted(self, job: ConversionJob) -> models.Version:
+        """Convert the upload, and record the version it makes, with its sections' ids
+        where there is a version before to carry them from.
 
         Converting is done in a worker thread, because parsing and the object store
         calls block.
         """
-        upload_id = job.request.source.upload_id
-        already = await records.find_by_upload(self._database, upload_id)
-        if already is not None:
-            return already
-
         stored = await fastapi.concurrency.run_in_threadpool(
             self._guidance.convert,
             job.source_url,
@@ -164,17 +187,17 @@ class ConversionHandler:
             stored.images,
         )
 
-        # Bottom up. The version is recorded only once its content is wholly stored,
-        # and the document last, because writing it is what commits the document:
-        # until it exists nothing can reach the version, and once it does everything
-        # beneath it is there.
-        now = dt.datetime.now(tz=dt.UTC)
-        await records.create_version(
-            self._database, job.request.version_for(stored, now)
-        )
-        return await records.create(
-            self._database, job.request.document_for(stored.document_id, now)
-        )
+        before = await records.latest_version(self._database, job.document_id)
+        made = job.request.version_for(stored, _saved_at(before))
+        if before is not None:
+            made = dataclasses.replace(
+                made,
+                sections=await section_ids.of_new_version(
+                    self._database, before, stored.content, self._s3
+                ),
+                follows=before.id,
+            )
+        return await records.create_version(self._database, made)
 
     async def _give_to_search(
         self, job: ConversionJob, document: models.Document

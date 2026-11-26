@@ -1,26 +1,11 @@
-"""Creating a document from an upload, and reading one back.
+"""The endpoints that save an upload as a guide or as a new version of one, and that
+read guides back.
 
-`POST /guides` is what the front end's journey ends in: the .docx has been uploaded
-and scanned, the author has described it, and this is where those two become one
-thing. It sends the upload to be converted and answers at once (202), pointing at the
-file's staging record, where the caller follows the save to the end - see
-`conversion` for how the work is run off the queue.
-
-The upload is named by its file id, and everything else about it is read from its
-staging record rather than taken from the caller: where cdp-uploader left it, whether
-it parsed, and the ids the document is stored under. Those ids are reserved on the
-staging record the first time, so a retried or repeated submission finishes the same
-document rather than starting another. The writes go bottom up - the content, then
-its version record, then the document record, which commits it - and each leaves in
-place whatever an earlier attempt already wrote.
-
-The route is still `/guides` because that is what the front end calls and what a
-reader of these documents calls them. Underneath, the thing being stored is a
-document with versions - see `records` for why the two words are not the same.
-
-Converting is done after the reply. A document with many pictures is one object store
-write per picture, and a caller waiting on all of them would wait for as long as the
-slowest save takes.
+A save answers at once and runs off the queue (see `conversion`); the caller follows it
+on the file's staging record. The upload's details and the ids it is saved under come
+from that record, not from the caller, so a repeated submission finishes the same save.
+The routes say "guides", as the front end does; underneath, a guide is a document with
+versions (see `records`).
 """
 
 from __future__ import annotations
@@ -89,6 +74,11 @@ def get_conversion_submitter(
     return submitter
 
 
+Submitter = Annotated[
+    conversion.ConversionSubmitter, fastapi.Depends(get_conversion_submitter)
+]
+
+
 @router.post(
     "",
     status_code=fastapi.status.HTTP_202_ACCEPTED,
@@ -107,9 +97,7 @@ async def create_document(
     database: Database,
     response: fastapi.Response,
     staging: Staging,
-    submitter: Annotated[
-        conversion.ConversionSubmitter, fastapi.Depends(get_conversion_submitter)
-    ],
+    submitter: Submitter,
 ) -> staging_schemas.StagedDocumentResponse | schemas.Document:
     """Start converting an upload into a document, and answer where to follow it.
 
@@ -140,25 +128,79 @@ async def create_document(
         new = new.model_copy(update={"source": source})
 
     staged, document_id, version_id = await _reserved(staging, new.source)
+    return await _saving(
+        staging, submitter, response, staged, _job(new, staged, document_id, version_id)
+    )
 
-    if await staging.start_saving(staged.file_id):
-        source_url = f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}"
-        await _sent(
-            submitter,
-            staging,
-            conversion.ConversionJob(
-                file_id=staged.file_id,
-                source_url=source_url,
-                document_id=document_id,
-                version_id=version_id,
-                request=new,
-                trace_id=tracing.ctx_trace_id.get(None),
-            ),
+
+@router.post(
+    "/{document_id}/versions",
+    status_code=fastapi.status.HTTP_202_ACCEPTED,
+    responses={
+        fastapi.status.HTTP_200_OK: {
+            "model": schemas.Document,
+            "description": "The upload was made into a version already: its document",
+        },
+        fastapi.status.HTTP_404_NOT_FOUND: {
+            "description": "No such document, or no such staged file",
+        },
+        fastapi.status.HTTP_409_CONFLICT: {
+            "description": "The file has not parsed, or is being made into another "
+            "document",
+        },
+        fastapi.status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "The conversion could not be started; try again",
+        },
+    },
+)
+async def create_version(  # noqa: PLR0913 - the request and what serves it
+    document_id: ids.DocumentId,
+    new: schemas.NewDocument,
+    database: Database,
+    response: fastapi.Response,
+    staging: Staging,
+    submitter: Submitter,
+) -> staging_schemas.StagedDocumentResponse | schemas.Document:
+    """Start converting an upload into a new version of a document, and answer where
+    to follow it, as `POST /guides` does. The version is the document's newest once it
+    is saved, and so live at once.
+
+    The upload's ids are reserved under the document's own id, so the file's staging
+    record names the document it is saved into. An upload whose ids are reserved
+    under another document, being made into a guide of its own say, is a conflict.
+    Submitting the same upload again never starts a second save: once its version is
+    recorded and the save marked complete, or its staging record has expired, the
+    document is answered (200); until then, the save is finished for the file it was
+    started from, whichever file of the upload is named.
+    """
+    if await records.find(database, document_id) is None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_404_NOT_FOUND,
+            detail=f"No guide {document_id}",
         )
 
-    response.headers["Location"] = f"/guides/staging/{staged.file_id}"
-    saving = await staging.get(staged.file_id)
-    return staging_schemas.StagedDocumentResponse.from_staged_document(saving or staged)
+    saved_from = await records.file_saved_as_version(
+        database, document_id, new.source.upload_id
+    )
+    if saved_from is not None:
+        if await _finished(staging, saved_from):
+            response.status_code = fastapi.status.HTTP_200_OK
+            return await _answered(database, document_id)
+        # Its save is finished under the ids the file it was saved from reserved,
+        # whichever file of the upload this request names.
+        source = new.source.model_copy(update={"file_id": saved_from})
+        new = new.model_copy(update={"source": source})
+
+    staged, reserved_for, version_id = await _reserved(staging, new.source, document_id)
+    if reserved_for != document_id:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_409_CONFLICT,
+            detail=f"File {new.source.file_id} is being made into {reserved_for}",
+        )
+
+    return await _saving(
+        staging, submitter, response, staged, _job(new, staged, document_id, version_id)
+    )
 
 
 @router.get("")
@@ -299,9 +341,12 @@ async def _finished(staging: staging_store.StagingStore, file_id: ids.FileId) ->
 
 
 async def _reserved(
-    staging: staging_store.StagingStore, source: schemas.Source
+    staging: staging_store.StagingStore,
+    source: schemas.Source,
+    document_id: ids.DocumentId | None = None,
 ) -> tuple[staging_models.StagedDocument, ids.DocumentId, ids.VersionId]:
-    """The upload's staging record, and the document and version ids reserved on it.
+    """The upload's staging record, and the document and version ids reserved on it:
+    `document_id`, for a new version of it, unless others were reserved before.
 
     Answers the caller's mistakes as their status codes: a file that was never
     staged (or whose record has expired), a file that is not part of the upload
@@ -329,7 +374,7 @@ async def _reserved(
             detail=f"File {source.file_id} is {staged.parsing_status}, not parsed",
         )
 
-    reserved = await staging.reserve_ids(source.file_id)
+    reserved = await staging.reserve_ids(source.file_id, document_id)
     if reserved is None or reserved.document_id is None or reserved.version_id is None:
         # Expired between reading it and reserving on it.
         raise fastapi.HTTPException(
@@ -338,6 +383,40 @@ async def _reserved(
         )
 
     return reserved, reserved.document_id, reserved.version_id
+
+
+def _job(
+    new: schemas.NewDocument,
+    staged: staging_models.StagedDocument,
+    document_id: ids.DocumentId,
+    version_id: ids.VersionId,
+) -> conversion.ConversionJob:
+    """The job that saves the staged upload as that version of that document."""
+    return conversion.ConversionJob(
+        file_id=staged.file_id,
+        source_url=f"s3://{config.get_config().source_docs_s3_bucket}/{staged.path}",
+        document_id=document_id,
+        version_id=version_id,
+        request=new,
+        trace_id=tracing.ctx_trace_id.get(None),
+    )
+
+
+async def _saving(
+    staging: staging_store.StagingStore,
+    submitter: conversion.ConversionSubmitter,
+    response: fastapi.Response,
+    staged: staging_models.StagedDocument,
+    job: conversion.ConversionJob,
+) -> staging_schemas.StagedDocumentResponse:
+    """Send the job, unless its save is under way or done, and answer the file's
+    staging record, which `Location` names too."""
+    if await staging.start_saving(staged.file_id):
+        await _sent(submitter, staging, job)
+
+    response.headers["Location"] = f"/guides/staging/{staged.file_id}"
+    saving = await staging.get(staged.file_id)
+    return staging_schemas.StagedDocumentResponse.from_staged_document(saving or staged)
 
 
 async def _sent(

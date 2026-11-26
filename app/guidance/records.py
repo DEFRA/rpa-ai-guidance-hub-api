@@ -1,53 +1,18 @@
-"""The record of a document: what it is, and every version of it there has been.
+"""The records of a document and its versions, in two collections.
 
-Two collections, because two different things change at two different rates.
+`documents` holds what a document is to the people who use it, the details given on
+the form, and the upload its first version came from; that upload makes one document
+only (`uploadId` is unique). `document_versions` holds each conversion: where its
+Markdown went, and who was signed in when it was made. The newest version is the
+newest by `createdAt`.
 
-`documents` holds what a document *is* to the people using it - the title an author
-typed, who it is for, who owns it - and where it came from. The upload is the
-document's own: one .docx became one document, and every version after the first is
-an edit of that rather than another upload of it.
+A record's ids are the object store's prefixes for its content (see `ids`). A record
+is created, never replaced: its ids are reserved on the upload's staging record, so a
+record already there is from an earlier attempt at the same save, and is the answer.
 
-`document_versions` holds what one conversion produced: where its Markdown went, and
-who was signed in when it was made. One document has many, and the newest is only the
-newest by `createdAt`. A version id is a time-ordered uuid, but nothing reads meaning
-into its order.
-
-**A version records its content URL and nothing else about where it is.** That URL is
-enough to restore the document, and the pictures are named by the document itself, in
-addresses relative to that very URL - so a second field pointing at them would be a
-copy of something the file already says, free to disagree with it.
-
-The title is the exception, and deliberately so. It is copied out of the document the
-version stored, and reading a version back takes the title from the content rather
-than from here - so this field is never the answer to "what is it called?". What it
-answers is "what was it called *then*", which nothing else can: a document retitled
-between versions leaves a trail here, and the copy differing from the content is the
-whole of the information rather than a fault in it.
-
-The ids are the ones the object store uses. `documents._id` is the prefix a document
-is written under and a version's `_id` is the prefix beneath that, so a record and a
-key are two spellings of one address rather than two facts to keep in step. They are
-stored as native uuids, and the prefixes are their text (see `ids`).
-
-**Records are created, never replaced, and one already there is kept.** A new
-document's ids are reserved once, on its upload's staging record, so the only thing
-that can already hold one of them is an earlier attempt at the same document. Each
-insert is whole or absent, so finding the record means that attempt got this far,
-and the record found is the answer. A version found under a different document is
-not that, and is raised.
-
-**An owner and a version's creator are not the same thing and are not stored
-together.** An owner is metadata: a person or a team named on the form, possibly
-nobody with an account, and there may be several. A version's creator is the
-authenticated identity that made *that* version - a machine id from the auth
-provider, with a display name kept beside it so a listing can name them without a
-directory lookup. Conflating the two would make the answer to "who is responsible for
-this?" depend on who last pressed a button.
-
-`uploadId` is unique across versions, and that is the whole of how one upload is
-converted once. The journey that produces a version can be submitted twice - a
-refresh, a back button, a retried request - and each of those means the same version
-rather than another one.
+A version's title is a copy of its content's title when it was saved: what the guide
+was called then. An owner is a detail given on the form; a version's creator is the
+identity that was signed in.
 """
 
 from __future__ import annotations
@@ -82,6 +47,11 @@ class MisfiledVersionError(RuntimeError):
     """Raised when a version id is already taken by a version of another document."""
 
 
+class OvertakenVersionError(RuntimeError):
+    """Raised when another version of the document follows the one this version was
+    matched with: it was matched with a version that is no longer the latest."""
+
+
 # Newest first, by when a version was made. A version id is time-ordered too, but
 # `createdAt` is what says which is newest.
 _NEWEST = [("createdAt", -1)]
@@ -106,6 +76,13 @@ async def ensure_indexes(
     """
     await database[DOCUMENTS].create_index(_UPLOAD_ID, unique=True)
     await database[VERSIONS].create_index([(DOCUMENT_ID, 1), *_NEWEST])
+    # One version follows each: a version matched with one that another follows was
+    # overtaken while it was made.
+    await database[VERSIONS].create_index(
+        [(DOCUMENT_ID, 1), (models.FOLLOWS, 1)],
+        unique=True,
+        partialFilterExpression={models.FOLLOWS: {"$exists": True}},
+    )
     for key in models.FILTERABLE_METADATA:
         await database[DOCUMENTS].create_index(f"{_METADATA}.{key}")
 
@@ -120,12 +97,45 @@ async def find_by_upload(
 
 
 @mongo_timeouts.mongo(mongo_timeouts.FAST)
+async def file_saved_as_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    upload_id: ids.UploadId,
+) -> ids.FileId | None:
+    """The file of `upload_id` saved as a version of `document_id`, if one was."""
+    found = await database[VERSIONS].find_one(
+        {DOCUMENT_ID: document_id, _UPLOAD_ID: upload_id}
+    )
+    return None if found is None else models.Version.from_document(found).file_id
+
+
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
 async def find(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId
 ) -> models.Document | None:
     """One document by its id, without its versions."""
     found = await database[DOCUMENTS].find_one({"_id": document_id})
     return None if found is None else models.Document.from_document(found)
+
+
+@mongo_timeouts.mongo(mongo_timeouts.FAST)
+async def find_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    document_id: ids.DocumentId,
+    version_id: ids.VersionId,
+) -> models.Version | None:
+    """A version of `document_id` by its id, if it is recorded.
+
+    Raises:
+        MisfiledVersionError: if the version id is taken by another document's
+            version.
+    """
+    found = await database[VERSIONS].find_one({"_id": version_id})
+    return (
+        None
+        if found is None
+        else _filed(models.Version.from_document(found), document_id)
+    )
 
 
 class UnknownCursorError(LookupError):
@@ -448,8 +458,8 @@ async def create(
     for the journey rather than for the store behind it.
 
     Writing it is what commits the document, so it goes last, after its first
-    version. If it is already there, an earlier attempt committed it, and that
-    record is answered as it stands.
+    version. If it is already there, an earlier attempt committed it, or it is the
+    document a later version is added to, and that record is answered as it stands.
     """
     stored = await _created(database[DOCUMENTS], document.to_document())
     return models.Document.from_document(stored)
@@ -466,8 +476,7 @@ async def create_version(
     the file inside it - the whole of what is needed to read the version back.
 
     Its title is the document's own title as this version had it, kept so a person
-    can see what a version was called without fetching it. See the module docstring
-    for why a copy is the point here and would be a fault anywhere else.
+    can see what a version was called without fetching it.
 
     Its creator is who was signed in, not who owns the document - see the module
     docstring. It is optional because the endpoint is not yet authenticated, and a
@@ -477,20 +486,32 @@ async def create_version(
     earlier attempt wrote it, and that record is answered as it stands - unless it
     belongs to another document, which no attempt at this one could have done.
 
+    One version follows each: a version that follows one another version already
+    follows was matched with a version that is no longer the latest, and is raised.
+
     Raises:
         MisfiledVersionError: if the version id is taken by another document's
             version.
+        OvertakenVersionError: if another version follows the one this follows.
     """
-    stored = models.Version.from_document(
-        await _created(database[VERSIONS], version.to_document())
-    )
-    if stored.document_id != version.document_id:
+    try:
+        created = await _created(database[VERSIONS], version.to_document())
+    except pymongo.errors.DuplicateKeyError as clash:
+        message = f"Another version follows {version.follows}, as {version.id} does"
+        raise OvertakenVersionError(message) from clash
+    return _filed(models.Version.from_document(created), version.document_id)
+
+
+def _filed(version: models.Version, document_id: ids.DocumentId) -> models.Version:
+    """`version`, if it is a version of `document_id`; else raises
+    `MisfiledVersionError`."""
+    if version.document_id != document_id:
         message = (
-            f"Version {version.id} belongs to document {stored.document_id}, "
-            f"not {version.document_id}"
+            f"Version {version.id} belongs to document {version.document_id}, "
+            f"not {document_id}"
         )
         raise MisfiledVersionError(message)
-    return stored
+    return version
 
 
 async def _created(collection: Any, record: dict[str, Any]) -> dict[str, Any]:

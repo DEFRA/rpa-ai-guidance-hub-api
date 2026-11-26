@@ -1,11 +1,11 @@
-"""Each section's id: what anything pointing into a guide keeps, so that it can
-follow its section from one version to the next while the section's anchor, its
-number and words, stays its address.
+"""Each section's id, which a pin or a bookmark keeps so that it can follow its
+section from one version of a guide to the next.
 
-A version's sections are given their ids the first time they are asked for, and
-kept with the version from then on; when two ask at once, both read back whichever
-was kept first. Every version is given them this way, however old: from its stored
-content (`of_latest`), which is read only until they are kept.
+A version's sections are given their ids the first time they are asked for, and kept
+with the version; when two ask at once, both read back whichever was kept first. A new
+version's sections take the ids of the same sections in the version before, and keep
+their headings beside them. A guide's first version keeps none: a pin on it shows the
+heading the pin kept.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from app.common import mongo_timeouts
-from app.guidance import ids, records
+from app.guidance import ids, models, records, section_matching
 from app.guidance.documents import reader, store
 from app.guidance.parsing import anchors
 
@@ -23,10 +23,13 @@ if TYPE_CHECKING:
 
     import pymongo.asynchronous.database
 
-    from app.guidance import models
+    from app.guidance.parsing import models as parsing_models
 
-# Where a version record keeps its sections' ids, in order: `{anchor, id}` each.
-_SECTION_IDS = "sectionIds"
+_SECTION_IDS = models.SECTION_IDS
+
+
+class ContentMissingError(RuntimeError):
+    """Raised when a version's content is not where its record says it is."""
 
 
 async def of_latest(
@@ -68,12 +71,88 @@ async def _kept(
 def _anchors_at(content_url: str, s3_client: Any) -> list[str] | None:
     """The anchor of each section of the content stored at `content_url`, in its
     order; None if nothing is stored there."""
+    sections = _sections_at(content_url, s3_client)
+    return None if sections is None else _anchors_of(sections)
+
+
+def _sections_at(
+    content_url: str, s3_client: Any
+) -> list[parsing_models.MarkdownSection] | None:
+    """The sections of the content stored at `content_url`, in its order; None if
+    nothing is stored there."""
     stored = store.read(content_url, s3_client=s3_client)
     if stored is None:
         return None
-    document = reader.from_markdown(stored.decode("utf-8"))
-    of_section = anchors.of_document(document.sections)
-    return [of_section[id(section)] for section in document.sections]
+    return list(reader.from_markdown(stored.decode("utf-8")).sections)
+
+
+def _anchors_of(sections: Sequence[parsing_models.MarkdownSection]) -> list[str]:
+    of_section = anchors.of_document(list(sections))
+    return [of_section[id(section)] for section in sections]
+
+
+async def of_new_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    before: models.Version,
+    content_url: str,
+    s3_client: Any,
+) -> dict[str, models.GivenSection]:
+    """Each section of a new version, stored at `content_url` and not yet recorded, by
+    its anchor in its order, with its heading and the id of the same section in the
+    version `before` it (`carried_over`), or a new id.
+
+    Raises:
+        ContentMissingError: if either content is not there: the new version's
+            sections could not keep their ids, and nothing could give them back once
+            the version is recorded.
+    """
+    before_sections = await asyncio.to_thread(
+        _sections_at, before.content_url, s3_client
+    )
+    after_sections = await asyncio.to_thread(_sections_at, content_url, s3_client)
+
+    if before_sections is None or after_sections is None:
+        missing = before.content_url if before_sections is None else content_url
+        message = (
+            f"No content at {missing}, so the sections' ids cannot be carried over"
+        )
+        raise ContentMissingError(message)
+
+    before_ids = await of_version(database, before.id, _anchors_of(before_sections))
+    carried = carried_over(before_sections, before_ids, after_sections)
+
+    headings = dict(
+        zip(
+            _anchors_of(after_sections),
+            (section.rendered_heading for section in after_sections),
+            strict=True,
+        )
+    )
+
+    return {
+        anchor: models.GivenSection(section_id, headings[anchor])
+        for anchor, section_id in carried.items()
+    }
+
+
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
+async def headings_of(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    version_ids: Sequence[ids.VersionId],
+) -> dict[ids.VersionId, dict[ids.SectionId, str]]:
+    """Each section's heading by its id, by version, for those of `version_ids` that
+    keep them: each version after a guide's first."""
+    found: dict[ids.VersionId, dict[ids.SectionId, str]] = {}
+    async for version in database[records.VERSIONS].find(
+        {"_id": {"$in": list(version_ids)}, f"{_SECTION_IDS}.heading": {"$ne": None}},
+        {_SECTION_IDS: 1},
+    ):
+        found[version["_id"]] = {
+            ids.SectionId(section["id"]): section["heading"]
+            for section in version[_SECTION_IDS]
+            if section.get("heading") is not None
+        }
+    return found
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)
@@ -94,6 +173,27 @@ async def of_version(
         )
         found = await versions.find_one({"_id": version_id}, {_SECTION_IDS: 1})
     return {} if found is None else _by_anchor(found[_SECTION_IDS])
+
+
+def carried_over(
+    before: Sequence[parsing_models.MarkdownSection],
+    before_ids: Mapping[str, ids.SectionId],
+    after: Sequence[parsing_models.MarkdownSection],
+) -> dict[str, ids.SectionId]:
+    """Each section of a new version (`after`) by its anchor, in its order, with the
+    id of the same section of the version before (`before`, whose ids by anchor are
+    `before_ids`); a new id for a new section."""
+    before_anchors = anchors.of_document(list(before))
+    after_anchors = anchors.of_document(list(after))
+    earlier = section_matching.earlier_sections(before, after)
+    return {
+        after_anchors[id(section)]: (
+            ids.new_section_id()
+            if at is None
+            else before_ids[before_anchors[id(before[at])]]
+        )
+        for section, at in zip(after, earlier, strict=True)
+    }
 
 
 def _by_anchor(kept: Sequence[Mapping[str, Any]]) -> dict[str, ids.SectionId]:
