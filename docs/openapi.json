@@ -423,7 +423,7 @@
                 "type": "null"
               }
             ],
-            "description": "The title the maintainer confirmed; the one read from the file when not given",
+            "description": "The title the maintainer confirmed, not blank; the one read from the file when not given",
             "title": "Title"
           },
           "versionNumber": {
@@ -476,7 +476,7 @@
                 "type": "null"
               }
             ],
-            "description": "The title the maintainer confirmed; the one read from the file when not given",
+            "description": "The title the maintainer confirmed, not blank; the one read from the file when not given",
             "title": "Title"
           },
           "versionNumber": {

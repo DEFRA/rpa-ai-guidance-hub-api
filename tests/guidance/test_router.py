@@ -476,6 +476,14 @@ class TestCreatingADocument:
 
         assert versions.documents[0]["title"] == COVER_TITLE
 
+    @pytest.mark.parametrize("title", ["", " ", "   ", "\t\n"])
+    def test_a_blank_title_is_refused(self, client, documents, title):
+        """Search refuses a blank title after the save, so it is refused before."""
+        response = client.post("/guides", json=_request(title=title))
+
+        assert response.status_code == 422
+        assert documents.documents == []
+
     def test_the_ids_are_the_ones_the_object_store_used(
         self, client, documents, versions
     ):
@@ -1096,6 +1104,14 @@ class TestAddingAVersionToADocument:
         del body["replacesVersionId"]
 
         response = client.post(f"/guides/{document}/versions", json=body)
+
+        assert response.status_code == 422
+        assert len(submitter.sent) == 1
+
+    def test_a_version_with_a_blank_title_is_refused(self, client, document, submitter):
+        response = client.post(
+            f"/guides/{document}/versions", json=self._next(title="   ")
+        )
 
         assert response.status_code == 422
         assert len(submitter.sent) == 1

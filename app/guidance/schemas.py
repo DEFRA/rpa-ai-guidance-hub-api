@@ -38,6 +38,17 @@ def _major_minor(number: str) -> str:
 VersionNumber = Annotated[str, pydantic.AfterValidator(_major_minor)]
 
 
+def _not_blank(title: str) -> str:
+    """Refuse a blank title here: search refuses it only after the version is saved."""
+    if not title.strip():
+        message = "must not be blank"
+        raise ValueError(message)
+    return title
+
+
+Title = Annotated[str, pydantic.AfterValidator(_not_blank)]
+
+
 class Source(pydantic.BaseModel):
     """Which upload the document is, as the front end knows it.
 
@@ -71,10 +82,10 @@ class NewDocument(pydantic.BaseModel):
 
     source: Source
     metadata: dict[str, Any]
-    title: str | None = pydantic.Field(
+    title: Title | None = pydantic.Field(
         default=None,
-        description="The title the maintainer confirmed; the one read from the file "
-        "when not given",
+        description="The title the maintainer confirmed, not blank; the one read from "
+        "the file when not given",
     )
     version_number: VersionNumber = pydantic.Field(
         alias="versionNumber",
