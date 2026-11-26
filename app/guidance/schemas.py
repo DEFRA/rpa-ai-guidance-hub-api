@@ -237,7 +237,7 @@ class DocumentSummary(pydantic.BaseModel):
         latest = summary.latest_version
         return cls(
             id=document.id,
-            metadata=models.details_as_now(document.metadata or {}),
+            metadata=_details_of(document, latest),
             source=Source(
                 uploadId=document.upload_id,
                 fileId=document.file_id,
