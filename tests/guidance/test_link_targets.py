@@ -4,6 +4,8 @@ Each case is a form of link seen in the guides (554 links, read on 2026-10-30), 
 the site, ids and names invented, as everywhere in this package.
 """
 
+import urllib.parse
+
 import pytest
 
 from app.guidance import link_targets
@@ -140,6 +142,43 @@ class TestANamedWordDocument:
         )
 
         assert _target(link).canonical_link == WORD_BY_PATH_CANONICAL
+
+
+DOCUMENT_ID_LINK = (
+    "https://example.sharepoint.com/teams/Team1234/_layouts/15/DocIdRedir.aspx"
+    "?ID=RPAINTRA-405-3434"
+)
+
+
+class TestADocumentIdLink:
+    """The link SharePoint's Document ID service gives a document, which stays the
+    same when the document moves."""
+
+    def test_keeps_only_the_id(self):
+        target = _target(f"{DOCUMENT_ID_LINK}&web=1")
+
+        assert target.kind == link_targets.Kind.DOCUMENT_ID
+        assert target.canonical_link == (
+            "https://example.sharepoint.com/teams/team1234/_layouts/15/docidredir.aspx"
+            "?id=rpaintra-405-3434"
+        )
+        assert target.file_name is None
+
+    def test_behind_a_safe_link_is_the_link_it_wraps(self):
+        link = (
+            "https://eur03.safelinks.protection.outlook.com/?url="
+            + urllib.parse.quote(DOCUMENT_ID_LINK, safe="")
+            + "&data=05%7C02"
+        )
+
+        assert _target(link) == _target(DOCUMENT_ID_LINK)
+
+    def test_without_an_id_is_another_sharepoint_item(self):
+        link = (
+            "https://example.sharepoint.com/teams/Team1234/_layouts/15/DocIdRedir.aspx"
+        )
+
+        assert _target(link).kind == link_targets.Kind.SHAREPOINT_OTHER
 
 
 class TestAnotherSharePointItem:
