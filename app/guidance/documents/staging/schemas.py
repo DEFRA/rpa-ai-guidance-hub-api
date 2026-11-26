@@ -102,6 +102,8 @@ class StagedDocumentResponse(pydantic.BaseModel):
     title: str | None = None
     version: str | None = None
     last_modified: datetime | None = None
+    # The link to the document by its SharePoint Document ID, if the file has one.
+    document_id_link: str | None = None
     # The document this file was converted into, and when it was committed: set
     # once the conversion finishes, so a caller that gave up waiting on POST
     # /guides can tell whether it finished anyway.
@@ -125,6 +127,7 @@ class StagedDocumentResponse(pydantic.BaseModel):
             title=staged_document.title,
             version=staged_document.version,
             last_modified=staged_document.last_modified,
+            document_id_link=staged_document.document_id_link,
             document_id=staged_document.document_id,
             promoted_at=staged_document.promoted_at,
             saving_status=staged_document.saving_status,

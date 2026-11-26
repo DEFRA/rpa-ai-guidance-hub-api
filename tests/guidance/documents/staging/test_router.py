@@ -179,6 +179,7 @@ class TestGetStagedDocument:
             title="Grant Application Guide",
             version="1.5",
             last_modified=last_modified,
+            document_id_link="https://example.sharepoint.com/_layouts/15/DocIdRedir.aspx?ID=A-1",
             parse_error=None,
         )
         staging_store.records["guide-123"] = staged_document
@@ -192,6 +193,9 @@ class TestGetStagedDocument:
         assert data["title"] == "Grant Application Guide"
         assert data["version"] == "1.5"
         assert data["lastModified"] == "2026-03-04T10:00:00Z"
+        assert data["documentIdLink"] == (
+            "https://example.sharepoint.com/_layouts/15/DocIdRedir.aspx?ID=A-1"
+        )
         assert data["parsingError"] is None
 
     def test_returns_failed_document_with_parsing_error(

@@ -52,6 +52,7 @@ class InMemoryStagingStore(store.StagingStore):
             title=info.title,
             version=info.version,
             last_modified=info.last_modified,
+            document_id_link=info.document_id_link,
             updated_at=datetime.now(UTC),
         )
 

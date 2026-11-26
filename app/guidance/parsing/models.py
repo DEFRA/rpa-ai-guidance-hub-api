@@ -236,3 +236,5 @@ class MinimalDocumentInfo:
     title: str = "Unavailable"
     version: str = "Unavailable"
     last_modified: datetime | None = None
+    # The link to the document by the ID SharePoint's Document ID service gave it.
+    document_id_link: str | None = None

@@ -1259,6 +1259,17 @@
             ],
             "title": "Documentid"
           },
+          "documentIdLink": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documentidlink"
+          },
           "fileId": {
             "title": "Fileid",
             "type": "string"

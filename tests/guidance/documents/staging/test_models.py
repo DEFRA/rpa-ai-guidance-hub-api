@@ -17,6 +17,7 @@ class TestStagedDocument:
             title="Guidance Title",
             version="1.0.0",
             last_modified=last_modified,
+            document_id_link="https://example.sharepoint.com/_layouts/15/DocIdRedir.aspx?ID=A-1",
             parse_error=None,
         )
 
@@ -31,6 +32,9 @@ class TestStagedDocument:
             "title": "Guidance Title",
             "version": "1.0.0",
             "last_modified": last_modified,
+            "document_id_link": (
+                "https://example.sharepoint.com/_layouts/15/DocIdRedir.aspx?ID=A-1"
+            ),
             "parse_error": None,
             "document_id": None,
             "version_id": None,
