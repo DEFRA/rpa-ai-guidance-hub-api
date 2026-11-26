@@ -64,6 +64,7 @@ _BY_PATH = "r"
 _DOCX = ".docx"
 _PAGE = ".aspx"
 _DOCUMENT_ID_PAGE = "docidredir.aspx"
+_LAYOUTS = "_layouts"
 
 _UNREADABLE = urllib.parse.urlsplit("")
 
@@ -113,7 +114,7 @@ def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
     query = _identifying(parts.query)
 
     host = parts.hostname or ""
-    if path and path[-1].lower() == _DOCUMENT_ID_PAGE and query.get("id"):
+    if _is_document_id_handler(path) and query.get("id"):
         return Target(Kind.DOCUMENT_ID, _canonical(host, path, {"id": query["id"]}))
 
     named = _file_name(path, query)
@@ -123,6 +124,13 @@ def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
         _canonical(host, path, query),
         named if is_word else None,
     )
+
+
+def _is_document_id_handler(path: list[str]) -> bool:
+    """Whether a path is SharePoint's Document ID handler, `DocIdRedir.aspx` in its
+    `_layouts` folder (`/_layouts/15/` today); a page of that name elsewhere is not."""
+    folders = [segment.lower() for segment in path[:-1]]
+    return bool(path) and path[-1].lower() == _DOCUMENT_ID_PAGE and _LAYOUTS in folders
 
 
 def _is_marker(segment: str) -> bool:

@@ -179,6 +179,14 @@ class TestADocumentIdLink:
 
         assert _target(link) == _target(DOCUMENT_ID_LINK)
 
+    def test_of_the_same_name_outside_the_layouts_folder_is_another_sharepoint_item(
+        self,
+    ):
+        """Only SharePoint's own handler, under `_layouts`, redirects by the ID."""
+        link = "https://example.sharepoint.com/teams/T/SitePages/DocIdRedir.aspx?ID=42"
+
+        assert _target(link).kind == link_targets.Kind.SHAREPOINT_OTHER
+
     def test_without_an_id_is_another_sharepoint_item(self):
         link = (
             "https://example.sharepoint.com/teams/Team1234/_layouts/15/DocIdRedir.aspx"
