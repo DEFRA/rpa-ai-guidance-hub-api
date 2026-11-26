@@ -224,6 +224,15 @@ async def create_version(  # noqa: PLR0913 - the request and what serves it
     return await _saving(staging, submitter, response, staged, job)
 
 
+@router.post("/source-link-checks")
+async def check_source_link(
+    check: schemas.SourceLinkCheck,
+) -> schemas.CheckedSourceLink:
+    """Whether the hub takes a link as where an upload came from, so the details screen
+    can say so before the upload is saved."""
+    return schemas.CheckedSourceLink.of(check.link)
+
+
 @router.get("")
 async def list_documents(
     database: Database,

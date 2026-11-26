@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 import pydantic
 
-from app.guidance import ids, models
+from app.guidance import ids, models, source_links
 
 # The digits a version number is written in: ASCII only, where `str.isdigit` would
 # also take superscripts and other scripts' digits.
@@ -301,3 +301,24 @@ class DocumentPage(pydantic.BaseModel):
             nextCursor=page.next_cursor,
             counts=counts_from_model(page.counts),
         )
+
+
+class SourceLinkCheck(pydantic.BaseModel):
+    """A SharePoint link a maintainer gives for the document they upload."""
+
+    link: str
+
+
+class CheckedSourceLink(pydantic.BaseModel):
+    """A source link's canonical link when it is taken, or why it is not."""
+
+    canonical_link: str | None = pydantic.Field(alias="canonicalLink")
+    refusal: source_links.Refusal | None
+
+    @classmethod
+    def of(cls, link: str) -> CheckedSourceLink:
+        try:
+            checked = source_links.checked(link)
+        except source_links.RefusedSourceLinkError as refused:
+            return cls(canonicalLink=None, refusal=refused.reason)
+        return cls(canonicalLink=checked.canonical_link, refusal=None)

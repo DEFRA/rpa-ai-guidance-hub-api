@@ -1288,3 +1288,36 @@ class TestAddingAVersionToADocument:
 
         assert len(versions.documents) == 2
         assert converts.call_count == 2
+
+
+class TestCheckingASourceLink:
+    """The details screen asks before it takes the link, so the rule is the API's
+    alone."""
+
+    def test_a_link_to_a_named_word_document_answers_its_canonical_link(self, client):
+        response = client.post(
+            "/guides/source-link-checks",
+            json={
+                "link": "https://example.sharepoint.com/:w:/r/teams/Team1234/"
+                "Claims/The%20Claim%20Form.docx?web=1"
+            },
+        )
+
+        assert (response.status_code, response.json()) == (
+            200,
+            {
+                "canonicalLink": "https://example.sharepoint.com/teams/team1234/"
+                "claims/the%20claim%20form.docx",
+                "refusal": None,
+            },
+        )
+
+    def test_any_other_link_answers_why_it_is_refused(self, client):
+        response = client.post(
+            "/guides/source-link-checks", json={"link": "https://www.gov.uk/claims"}
+        )
+
+        assert (response.status_code, response.json()) == (
+            200,
+            {"canonicalLink": None, "refusal": "not-sharepoint"},
+        )

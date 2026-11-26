@@ -126,6 +126,38 @@
         "title": "CaseInBrief",
         "type": "object"
       },
+      "CheckedSourceLink": {
+        "description": "A source link's canonical link when it is taken, or why it is not.",
+        "properties": {
+          "canonicalLink": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonicallink"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "canonicalLink",
+          "refusal"
+        ],
+        "title": "CheckedSourceLink",
+        "type": "object"
+      },
       "Document": {
         "description": "A document as it is answered: what it is, where it came from, when it was\nrecorded, and every version of it there has been.\n\n`createdAt` is when the document was recorded, which is when its first version\nwas: the moment it went live, since every upload does.",
         "properties": {
@@ -1043,6 +1075,15 @@
         "title": "ReferenceOption",
         "type": "object"
       },
+      "Refusal": {
+        "description": "Why a link is not taken: it is not SharePoint's at all, or it is, but names no\nWord document (a folder, a page, a sharing link that names nothing, another kind of\nfile).",
+        "enum": [
+          "not-sharepoint",
+          "not-a-word-document"
+        ],
+        "title": "Refusal",
+        "type": "string"
+      },
       "RemoveOperation": {
         "additionalProperties": false,
         "description": "Take out what `path` names.",
@@ -1164,6 +1205,20 @@
           "fileId"
         ],
         "title": "Source",
+        "type": "object"
+      },
+      "SourceLinkCheck": {
+        "description": "A SharePoint link a maintainer gives for the document they upload.",
+        "properties": {
+          "link": {
+            "title": "Link",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link"
+        ],
+        "title": "SourceLinkCheck",
         "type": "object"
       },
       "StagedDocumentResponse": {
@@ -1741,6 +1796,53 @@
           }
         ],
         "summary": "Create Document",
+        "tags": [
+          "guides"
+        ]
+      }
+    },
+    "/guides/source-link-checks": {
+      "post": {
+        "description": "Whether the hub takes a link as where an upload came from, so the details screen\ncan say so before the upload is saved.",
+        "operationId": "check_source_link_guides_source_link_checks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceLinkCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckedSourceLink"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Check Source Link",
         "tags": [
           "guides"
         ]
