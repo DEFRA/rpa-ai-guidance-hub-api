@@ -239,7 +239,7 @@ class TestWhereALinkIs:
             (None, 1, "before"),
             ("1-introduction", 1, "one"),
             ("1-introduction", 2, "two"),
-            ("11-before-you-begin", 1, "three"),
+            ("1-1-before-you-begin", 1, "three"),
         ]
 
     def test_under_a_heading_repeated_is_in_its_numbered_section(self):
