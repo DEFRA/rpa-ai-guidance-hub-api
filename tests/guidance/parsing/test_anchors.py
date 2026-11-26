@@ -14,14 +14,16 @@ class TestSlugify:
     def test_a_heading_becomes_its_words_in_lower_case(self):
         assert anchors.slugify("Evidence Required") == "evidence-required"
 
-    def test_the_dot_in_a_section_number_is_dropped_not_replaced(self):
-        """This is the whole reason a number cannot be the anchor.
+    def test_a_dot_between_two_digits_becomes_a_hyphen(self):
+        """So "1.2" is not read as "12"."""
+        assert anchors.slugify("3.1 Overview") == "3-1-overview"
+        assert anchors.slugify("1.2.3 Steps") == "1-2-3-steps"
 
-        A renderer builds `#31-overview` from `### 3.1 Overview`, so a link written
-        to `#3.1` points at nothing whatever - which is what the stored document
-        used to carry.
-        """
-        assert anchors.slugify("3.1 Overview") == "31-overview"
+    def test_any_other_dot_is_dropped(self):
+        assert anchors.slugify("Steps, e.g. these.") == "steps-eg-these"
+
+    def test_a_hyphen_between_digits_stays(self):
+        assert anchors.slugify("2024-25 Claims") == "2024-25-claims"
 
     def test_punctuation_goes_and_hyphens_stay(self):
         """A hyphen is already what a space becomes, so it survives as itself and a

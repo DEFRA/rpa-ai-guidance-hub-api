@@ -1,21 +1,17 @@
 """The anchor a heading renders with, and so the target a cross-reference points at.
 
-A cross-reference has to name something a renderer can find. Word names a bookmark,
-which means nothing outside the .docx; the obvious replacement - the section's own
-number - means nothing to a renderer either, because GFM builds a heading's id from
-the words it prints. `### 3.1 Overview` is reachable at `#31-overview` and at nothing
-else, so `](#3.1)` is a link to a place that does not exist.
+A cross-reference has to name something the hub's pages can find. Word names a
+bookmark, which means nothing outside the .docx, so the anchor is the slug of the
+heading as it is rendered, and this module is the one place in the API that says what
+that slug is. `models` calls it to write a link and the reader calls it to recognise
+one, and a document round-trips only while both get the same answer. The UI and the
+search service make the same slug (`src/services/guide-sections.js`,
+`app/indexing/prepare/anchors.py`).
 
-So the anchor is the slug of the heading as it is rendered, and this module is the one
-place that says what that slug is. `models` calls it to write a link and the reader
-calls it to recognise one, and a document round-trips only while both get the same
-answer - which is the whole reason the rule is not written down twice.
-
-Slugification is not standardised: GitHub, GitLab, pandoc and python-markdown differ
-on punctuation, on case and on non-ASCII. The rule below is GitHub's, because it is
-the one a reader is most likely to be holding the document up against. A document
-stored under it resolves in renderers that share it and dangles in those that do not,
-and that is a property of the format rather than of this code.
+The rule is GitHub's, but for one thing: a dot between two digits becomes a hyphen, so
+`### 3.1 Overview` is `#3-1-overview`, and "1.2" is not read as "12". Anchors made
+before that dropped the dot (`#31-overview`), and guides converted then still carry
+them.
 """
 
 from __future__ import annotations
@@ -26,15 +22,28 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.guidance.parsing import models
 
-# Everything a slug drops. Word characters, spaces and hyphens survive; the rest -
-# the "." in "3.1", a colon, a comma - is removed rather than replaced, which is what
-# turns "3.1 Overview" into "31-overview" and not "3-1-overview".
+# Everything a slug drops. Word characters, spaces and hyphens survive; the rest - a
+# colon, a comma, a dot not between two digits - is removed rather than replaced.
 _DISCARDED = re.compile(r"[^\w\- ]", re.UNICODE)
+
+_DIGITS = frozenset("0123456789")
 
 
 def slugify(text: str) -> str:
-    """The anchor a renderer builds for a heading printing `text`."""
-    return _DISCARDED.sub("", text.lower()).replace(" ", "-")
+    """The anchor the hub gives a heading printing `text`."""
+    return _DISCARDED.sub("", _numbers_hyphenated(text).lower()).replace(" ", "-")
+
+
+def _numbers_hyphenated(text: str) -> str:
+    """`text` with each dot between two digits made a hyphen: "3.1" is "3-1"."""
+    return "".join(
+        "-" if char == "." and _between_digits(text, at) else char
+        for at, char in enumerate(text)
+    )
+
+
+def _between_digits(text: str, at: int) -> bool:
+    return 0 < at < len(text) - 1 and {text[at - 1], text[at + 1]} <= _DIGITS
 
 
 def of_document(sections: list[models.MarkdownSection]) -> dict[int, str]:

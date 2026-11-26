@@ -18,7 +18,7 @@ class TestASection:
 
         assert _texts(markdown) == [
             ("1-paying", "1 Paying\nPay on time."),
-            ("11-late", "1.1 Late\nPay late."),
+            ("1-1-late", "1.1 Late\nPay late."),
         ]
 
     def test_is_known_by_the_anchor_the_hub_gives_its_heading(self):
