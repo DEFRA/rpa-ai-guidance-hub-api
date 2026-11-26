@@ -131,6 +131,11 @@ class TestAVersionsLinks:
         assert await guide_links.links_of(database, version.document_id) == []
 
 
+class TestAGuideSavedBeforeLinksWereKept:
+    async def test_has_none(self, database):
+        assert await guide_links.links_of(database, ids.new_document_id()) == []
+
+
 class TestANewVersion:
     async def test_replaces_the_guides_links_with_its_own(self, database):
         first = _version()
