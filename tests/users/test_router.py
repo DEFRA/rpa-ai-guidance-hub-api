@@ -1297,6 +1297,19 @@ class TestASectionRemovedInALaterVersion:
 
         assert (pin["heading"], pin["removedInVersion"]) == ("3 Two and more", "3.0")
 
+    async def test_it_says_the_version_that_removed_it_though_a_later_version_is_latest(
+        self, client, database, content_url
+    ):
+        user_id = await _user(client)
+        guide = await _guide(database, "Claims", content_url=content_url)
+        await _patch(client, user_id, _add(guide, section="2-two", heading="2 Two"))
+        await _removing_two(database, guide, "2.0")
+        await _removing_two(database, guide, "3.0")
+
+        [pin] = (await client.get(f"/users/{user_id}")).json()["pinned"]
+
+        assert (pin["heading"], pin["removedInVersion"]) == ("2 Two", "2.0")
+
     async def test_a_section_the_latest_version_has_was_removed_by_none(
         self, client, database, content_url, mocker
     ):
