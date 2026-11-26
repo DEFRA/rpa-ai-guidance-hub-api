@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 import pymongo
 
 from app.common import mongo_timeouts
-from app.guidance import ids, link_targets, models, reading
+from app.guidance import ids, link_targets, models, reading, section_ids
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -82,22 +82,25 @@ class GuideLink:
         )
 
 
-def links_in(version: models.Version, markdown: str) -> list[GuideLink]:
-    """The version's links to named Word documents, in order."""
-    sections = version.sections or {}
+def links_in(
+    version: models.Version,
+    markdown: str,
+    sections: Mapping[str, ids.SectionId],
+) -> list[GuideLink]:
+    """The version's links to named Word documents, in order, each in its section,
+    whose id `sections` gives by its anchor."""
     found: list[GuideLink] = []
     for position, link in enumerate(reading.links_of(markdown), start=1):
         target = link_targets.target_of(link.destination)
         if target.kind != link_targets.Kind.WORD_DOCUMENT:
             continue
-        given = sections.get(link.section) if link.section is not None else None
         found.append(
             GuideLink(
                 id=f"{version.id}.{position}",
                 guide_id=version.document_id,
                 version_id=version.id,
                 position=position,
-                section_id=given.id if given else None,
+                section_id=None if link.section is None else sections.get(link.section),
                 order=link.order,
                 text=link.text,
                 source_link=link.destination,
@@ -125,7 +128,7 @@ async def keep(
 ) -> None:
     """Make the guide's links those of `version`, read from its Markdown."""
     collection = database[GUIDE_LINKS]
-    links = links_in(version, markdown)
+    links = links_in(version, markdown, await _section_ids(database, version, markdown))
     if links:
         await collection.bulk_write(
             [
@@ -137,6 +140,18 @@ async def keep(
     await collection.delete_many(
         {_GUIDE_ID: version.document_id, _VERSION_ID: {"$ne": version.id}}
     )
+
+
+async def _section_ids(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    version: models.Version,
+    markdown: str,
+) -> Mapping[str, ids.SectionId]:
+    """The version's section ids by anchor: those it keeps, or, for a guide's first
+    version, which keeps none until they are asked for, given now."""
+    if version.sections is not None:
+        return {anchor: given.id for anchor, given in version.sections.items()}
+    return await section_ids.of_content(database, version.id, markdown)
 
 
 @mongo_timeouts.mongo(mongo_timeouts.FAST)

@@ -6,11 +6,12 @@ All fixture text is invented.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 
 import pytest
 
-from app.guidance import guide_links, ids, models
+from app.guidance import guide_links, ids, models, records
 
 FORM = (
     "https://example.sharepoint.com/:w:/r/teams/Team1234/Claims/The%20Claim%20Form.docx"
@@ -70,6 +71,26 @@ class TestAVersionsLinks:
             (1, None, 1, "the guide index"),
             (2, INTRODUCTION, 1, "the claim form"),
             (7, CHECKS, 4, "the form again"),
+        ]
+
+    async def test_of_a_first_version_keep_the_section_ids_it_is_given_now(
+        self, database
+    ):
+        """A guide's first version has no section ids until they are asked for."""
+        version = dataclasses.replace(_version(), sections=None)
+        await database[records.VERSIONS].insert_one(version.to_document())
+
+        await guide_links.keep(database, version, MARKDOWN)
+
+        kept = models.Version.from_document(
+            await database[records.VERSIONS].find_one({"_id": version.id})
+        )
+        links = await guide_links.links_of(database, version.document_id)
+        assert kept.sections is not None, "the version was given no section ids"
+        assert [link.section_id for link in links] == [
+            None,
+            kept.sections["1-introduction"].id,
+            kept.sections["2-checks"].id,
         ]
 
     async def test_keep_the_link_as_written_and_its_canonical_form(self, database):

@@ -155,6 +155,17 @@ async def headings_of(
     return found
 
 
+async def of_content(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    version_id: ids.VersionId,
+    markdown: str,
+) -> dict[str, ids.SectionId]:
+    """Each section's id by its anchor, given now to the sections of `markdown`, the
+    version's content, if the version has none yet (`of_version`)."""
+    sections = list(reader.from_markdown(markdown).sections)
+    return await of_version(database, version_id, _anchors_of(sections))
+
+
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def of_version(
     database: pymongo.asynchronous.database.AsyncDatabase,
