@@ -186,6 +186,17 @@ class TestALinkNeverCanonicalised:
                 id="another site behind a safe link",
             ),
             pytest.param(
+                "https://[broken",
+                link_targets.Kind.EXTERNAL,
+                id="an address that cannot be read",
+            ),
+            pytest.param(
+                "https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2F"
+                "%5Bbroken&data=05%7C02",
+                link_targets.Kind.EXTERNAL,
+                id="an address that cannot be read behind a safe link",
+            ),
+            pytest.param(
                 "file://share.example.gov.uk/user/Shared/Draft%20Letter",
                 link_targets.Kind.NETWORK_SHARE,
                 id="a network share",

@@ -14,8 +14,9 @@ two forms are one document, and so each form is remapped on its own.
 A link is a **named Word document** when it is marked as Word, or not marked at all,
 and names a `.docx` file: by `file=`, by the path a viewer's `sourcedoc` holds, or by
 its own path. Any other SharePoint link - a folder, a page, a sharing link that names
-nothing, another kind of file - is another SharePoint item. A link to any other site
-is external, and a `file:` link names a network share; neither is canonicalised.
+nothing, another kind of file - is another SharePoint item. A link to any other site,
+or one whose address cannot be read, is external, and a `file:` link names a network
+share; neither is canonicalised.
 """
 
 from __future__ import annotations
@@ -57,13 +58,15 @@ _BY_PATH = "r"
 _DOCX = ".docx"
 _PAGE = ".aspx"
 
+_UNREADABLE = urllib.parse.urlsplit("")
+
 
 def target_of(link: str) -> Target:
     """What `link`, as written in a guide, points at."""
     if link.startswith("#"):
         return Target(Kind.INTERNAL)
 
-    parts = _unwrapped(urllib.parse.urlsplit(link.strip()))
+    parts = _unwrapped(_split(link))
     if parts.scheme.lower() == "file":
         return Target(Kind.NETWORK_SHARE)
     if not (parts.hostname or "").endswith(_SHAREPOINT):
@@ -76,7 +79,15 @@ def _unwrapped(parts: urllib.parse.SplitResult) -> urllib.parse.SplitResult:
     if not (parts.hostname or "").endswith(_SAFE_LINKS):
         return parts
     wrapped = dict(urllib.parse.parse_qsl(parts.query)).get("url")
-    return parts if wrapped is None else urllib.parse.urlsplit(wrapped.strip())
+    return parts if wrapped is None else _split(wrapped)
+
+
+def _split(link: str) -> urllib.parse.SplitResult:
+    """`link`'s parts, or none for an address that cannot be read (`https://[x`)."""
+    try:
+        return urllib.parse.urlsplit(link.strip())
+    except ValueError:
+        return _UNREADABLE
 
 
 def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
