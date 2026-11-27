@@ -64,7 +64,7 @@ from typing import TYPE_CHECKING, Any
 
 from docx.oxml.ns import qn
 
-from app.guidance.parsing import colours, images
+from app.guidance.parsing import colours, images, link_destinations
 from app.guidance.parsing.ooxml import W_VAL, is_toggle_on
 
 if TYPE_CHECKING:
@@ -86,7 +86,6 @@ _VERTICAL_TAGS = {"superscript": "sup", "subscript": "sub"}
 # Whitespace ends a bare Markdown link destination, so a target carrying any has to
 # be wrapped in <>. Parentheses do not: CommonMark allows them bare while they
 # balance, which the addresses that carry them - a filename in a path - always do.
-_HAS_WHITESPACE = re.compile(r"\s")
 
 # Word spells a UNC address `file:///\\host\share` and a local one `file:///C:\dir`,
 # both with the separator CommonMark reserves for escapes. `file:` is stripped before
@@ -625,33 +624,5 @@ def _marked_up(text: str, marks: _Marks) -> str:
     if marks.colour:
         text = colours.marked_up(text, marks.colour)
     if marks.link:
-        text = f"[{text}]({_destination(marks.link)})"
+        text = f"[{text}]({link_destinations.written(marks.link)})"
     return text
-
-
-def _destination(target: str) -> str:
-    """A link target, wrapped in <> only where bare would not parse.
-
-    Wrapping every target holding a parenthesis would be the easier rule and is the
-    wrong one, because the editor writes a balanced target bare: a document written
-    the cautious way is rewritten by the first save, and a table holding such a link
-    is re-measured and re-padded whole. Asking the real question - would this be
-    misread bare? - agrees with the editor without conceding anything, since the
-    targets it declines to wrap are exactly the ones that do not need it.
-    """
-    return f"<{target}>" if _needs_brackets(target) else target
-
-
-def _needs_brackets(target: str) -> bool:
-    """Whether a bare destination would be read as something other than itself."""
-    if _HAS_WHITESPACE.search(target):
-        return True
-
-    depth = 0
-    for character in target:
-        depth += (character == "(") - (character == ")")
-        if depth < 0:
-            # A close before its open ends the destination early, taking the rest
-            # of the address out of the link with it.
-            return True
-    return depth != 0

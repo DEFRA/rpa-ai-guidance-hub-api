@@ -5,9 +5,11 @@ guide's versions (`records.guides_known_by`). Only its address changes, to the h
 page for the guide, which shows its latest version; its words and the rest of the
 guide stay as written.
 
-The address is changed where it is written as `](address)`, which is how the Word
-converter writes every link. The same text anywhere else, such as in code, would
-change too; the converter writes none.
+The address is changed where it is written as the Word converter writes it
+(`link_destinations.written`: bare, or in angle brackets where bare would be
+misread). The
+same text anywhere else, such as in code, would change too; the converter writes
+none.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from app.guidance import link_targets, reading
+from app.guidance.parsing import link_destinations
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -55,5 +58,8 @@ def pointed_at(
         if link.canonical_link in guides
     }
     for destination, page in pages.items():
-        markdown = markdown.replace(f"]({destination})", f"]({page})")
+        markdown = markdown.replace(
+            f"]({link_destinations.written(destination)})",
+            f"]({link_destinations.written(page)})",
+        )
     return markdown
