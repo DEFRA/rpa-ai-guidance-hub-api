@@ -168,7 +168,7 @@ class TestADocumentIdLink:
         """So one document has one canonical link, however it is linked by its ID."""
         link = f"{DOCUMENT_ID_LINK}&file=Old%20Name.docx&sourcedoc=%7BAB12%7D"
 
-        assert _target(link) == _target(DOCUMENT_ID_LINK)
+        assert _target(link).canonical_link == _target(DOCUMENT_ID_LINK).canonical_link
 
     def test_behind_a_safe_link_is_the_link_it_wraps(self):
         link = (
@@ -178,6 +178,14 @@ class TestADocumentIdLink:
         )
 
         assert _target(link) == _target(DOCUMENT_ID_LINK)
+
+    def test_naming_a_word_file_keeps_its_name(self):
+        target = _target(f"{DOCUMENT_ID_LINK}&file=Claim%20Form.docx")
+
+        assert (target.kind, target.file_name) == (
+            link_targets.Kind.DOCUMENT_ID,
+            "Claim Form.docx",
+        )
 
     def test_of_the_same_name_outside_the_layouts_folder_is_another_sharepoint_item(
         self,

@@ -37,10 +37,16 @@ class Kind(enum.StrEnum):
     NETWORK_SHARE = "network-share"
 
 
+# The kinds of link that name a document for certain: a guide keeps them, and a
+# source link must be one.
+NAMING_A_DOCUMENT = (Kind.WORD_DOCUMENT, Kind.DOCUMENT_ID)
+
+
 @dataclasses.dataclass(frozen=True)
 class Target:
     """What a link points at. Only a SharePoint item has a canonical link, and only
-    a named Word document a file name, as the link gives it."""
+    a named Word document, or a Document ID link naming a Word file, a file name, as
+    the link gives it."""
 
     kind: Kind
     canonical_link: str | None = None
@@ -114,11 +120,13 @@ def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
     query = _identifying(parts.query)
 
     host = parts.hostname or ""
-    if _is_document_id_handler(path) and query.get("id"):
-        return Target(Kind.DOCUMENT_ID, _canonical(host, path, {"id": query["id"]}))
-
     named = _file_name(path, query)
-    is_word = marker in ("", _WORD) and named is not None and _is_docx(named)
+    word_file = named if named is not None and _is_docx(named) else None
+    if _is_document_id_handler(path) and query.get("id"):
+        canonical = _canonical(host, path, {"id": query["id"]})
+        return Target(Kind.DOCUMENT_ID, canonical, word_file)
+
+    is_word = marker in ("", _WORD) and word_file is not None
     return Target(
         Kind.WORD_DOCUMENT if is_word else Kind.SHAREPOINT_OTHER,
         _canonical(host, path, query),

@@ -13,8 +13,7 @@ import enum
 
 from app.guidance import link_targets
 
-_NAMING_A_DOCUMENT = (link_targets.Kind.WORD_DOCUMENT, link_targets.Kind.DOCUMENT_ID)
-_SHAREPOINT = (*_NAMING_A_DOCUMENT, link_targets.Kind.SHAREPOINT_OTHER)
+_SHAREPOINT = (*link_targets.NAMING_A_DOCUMENT, link_targets.Kind.SHAREPOINT_OTHER)
 
 
 class Refusal(enum.StrEnum):
@@ -47,7 +46,7 @@ def checked(link: str) -> SourceLink:
         RefusedSourceLinkError: if it does not name a Word document for certain.
     """
     target = link_targets.target_of(link)
-    if target.kind in _NAMING_A_DOCUMENT:
+    if target.kind in link_targets.NAMING_A_DOCUMENT:
         return SourceLink(link, str(target.canonical_link))
     raise RefusedSourceLinkError(
         Refusal.NOT_A_WORD_DOCUMENT

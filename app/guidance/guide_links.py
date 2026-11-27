@@ -2,8 +2,9 @@
 guide in `guide_links`, so the guides that link to a document can be found by its
 canonical link.
 
-Only a link that `link_targets` finds to be a named Word document is kept: any other
-link cannot be matched to a document for certain.
+Only a link that `link_targets` finds names a document for certain is kept: a named
+Word document, or a document by its SharePoint Document ID (`NAMING_A_DOCUMENT`). Any
+other link cannot be matched to a document for certain.
 
 A guide's record is replaced whole, in one write, so a reader never sees two versions'
 links, and two saves cannot each remove the other's. It holds the links of the version
@@ -42,10 +43,10 @@ _CANONICAL_LINK = "canonicalLink"
 
 @dataclasses.dataclass(frozen=True)
 class GuideLink:
-    """One link to a named Word document in a guide's latest version: where it is
-    (its place among all the guide's links; its section's id, None before the first
-    section, and its order there), its words, the link as written, its canonical link
-    and the file it names."""
+    """One link to a document in a guide's latest version: where it is (its place
+    among all the guide's links; its section's id, None before the first section,
+    and its order there), its words, the link as written, its canonical link and the
+    file it names, None for a Document ID link that names none."""
 
     guide_id: ids.DocumentId
     version_id: ids.VersionId
@@ -55,7 +56,7 @@ class GuideLink:
     text: str
     source_link: str
     canonical_link: str
-    file_name: str
+    file_name: str | None
 
     def to_entry(self) -> dict[str, Any]:
         """The link in its guide's record, which holds its guide and version."""
@@ -91,12 +92,12 @@ def links_in(
     markdown: str,
     sections: Mapping[str, ids.SectionId],
 ) -> list[GuideLink]:
-    """The version's links to named Word documents, in order, each in its section,
-    whose id `sections` gives by its anchor."""
+    """The version's links that name a document, in order, each in its section, whose
+    id `sections` gives by its anchor."""
     found: list[GuideLink] = []
     for position, link in enumerate(reading.links_of(markdown), start=1):
         target = link_targets.target_of(link.destination)
-        if target.kind != link_targets.Kind.WORD_DOCUMENT:
+        if target.kind not in link_targets.NAMING_A_DOCUMENT:
             continue
         found.append(
             GuideLink(
@@ -108,7 +109,7 @@ def links_in(
                 text=link.text,
                 source_link=link.destination,
                 canonical_link=str(target.canonical_link),
-                file_name=str(target.file_name),
+                file_name=target.file_name,
             )
         )
     return found
