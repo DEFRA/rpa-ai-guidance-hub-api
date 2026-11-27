@@ -19,7 +19,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from app import config
 from app.common import mongo, s3, tracing
-from app.guidance import conversion, ids, records, schemas, service
+from app.guidance import conversion, ids, linked_guides, records, schemas, service
 from app.guidance.documents import store
 from app.guidance.documents.staging import models as staging_models
 from app.guidance.documents.staging import router as staging_router
@@ -298,7 +298,8 @@ async def read_content(
     database: Database,
     s3_client: S3Client,
 ) -> str:
-    """The Markdown of a document's newest version, as it is stored.
+    """The Markdown of a document's newest version, as it is stored, but for each link
+    to a guide in the hub, which goes to that guide's page (`linked_guides`).
 
     Answered as it was written rather than re-rendered. What it says about its
     pictures is `../assets/...`, which resolves against the URL this content was read
@@ -324,7 +325,12 @@ async def read_content(
             detail=f"Document {document_id} is recorded but its content is missing",
         )
 
-    return content.decode("utf-8")
+    markdown = content.decode("utf-8")
+    links = await run_in_threadpool(linked_guides.document_links, markdown)
+    known = await records.guides_known_by(
+        database, {link.canonical_link for link in links}
+    )
+    return linked_guides.pointed_at(markdown, links, known)
 
 
 @router.get("/{document_id}/assets/{name}")
