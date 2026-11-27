@@ -6,6 +6,7 @@ All fixture text is invented.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 
@@ -288,3 +289,89 @@ class TestFindingGuidesByTitleInTheSearchService:
 def _refused(request: httpx2.Request) -> httpx2.Response:
     message = "Connection refused"
     raise httpx2.ConnectError(message, request=request)
+
+
+def _resetting(handler) -> search_service.SearchServiceAdmin:
+    return search_service.SearchServiceAdmin(
+        BASE_URL,
+        open_client=lambda: httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+    )
+
+
+class TestResettingTheSearchService:
+    async def test_posts_to_the_reset_route(self):
+        asked: list[httpx2.Request] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            asked.append(request)
+            return httpx2.Response(200, json=answers.reset_result(0, 0))
+
+        resetting = _resetting(handler)
+
+        await resetting.reset()
+
+        [request] = asked
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{BASE_URL}/admin/index/reset",
+        )
+
+    async def test_gives_what_it_deleted(self):
+        resetting = _resetting(
+            lambda _request: httpx2.Response(200, json=answers.reset_result(12, 3))
+        )
+
+        assert await resetting.reset() == search_service.ResetResult(
+            deleted_objects=12, deleted_state_records=3
+        )
+
+    async def test_fails_to_be_tried_again_when_the_search_service_fails(self):
+        resetting = _resetting(lambda _request: httpx2.Response(503))
+
+        with pytest.raises(search_service.SearchServiceError):
+            await resetting.reset()
+
+    async def test_fails_to_be_tried_again_when_the_search_service_does_not_answer(
+        self,
+    ):
+        resetting = _resetting(_refused)
+
+        with pytest.raises(search_service.SearchServiceError, match="did not answer"):
+            await resetting.reset()
+
+    async def test_waits_longer_than_for_a_search_by_default(self):
+        resetting = search_service.SearchServiceAdmin(BASE_URL)
+
+        async with resetting._open_client() as client:  # noqa: SLF001 - its timeout
+            assert client.timeout.read > 30  # noqa: PLR2004 - the default for a search
+
+    async def test_fails_when_the_whole_reset_takes_longer_than_its_deadline(
+        self, monkeypatch
+    ):
+        async def slow(_request: httpx2.Request) -> httpx2.Response:
+            await asyncio.sleep(1)
+            return httpx2.Response(200, json=answers.reset_result(0, 0))
+
+        monkeypatch.setattr(search_service, "_RESET_TIMEOUT_SECONDS", 0.01)
+        resetting = _resetting(slow)
+
+        with pytest.raises(search_service.SearchServiceError, match="did not finish"):
+            await resetting.reset()
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            httpx2.Response(200, content=b"not json"),
+            httpx2.Response(200, json={"deletedObjects": 1}),
+            httpx2.Response(
+                200, json={"deletedObjects": "many", "deletedStateRecords": 1}
+            ),
+            httpx2.Response(200, json=[1, 2]),
+        ],
+        ids=["invalid-json", "missing-count", "invalid-count", "not-an-object"],
+    )
+    async def test_fails_when_the_reset_answer_is_not_understood(self, response):
+        resetting = _resetting(lambda _request: response)
+
+        with pytest.raises(search_service.SearchServiceError, match="not understood"):
+            await resetting.reset()

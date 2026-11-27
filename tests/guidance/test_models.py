@@ -5,6 +5,7 @@ All fixture text is invented, as everywhere in this package.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 
 from app.guidance import models
@@ -103,3 +104,42 @@ class TestAVersionAsStored:
 
         assert anonymous.to_document()["createdBy"] is None
         assert models.Version.from_document(anonymous.to_document()) == anonymous
+
+
+class TestTheDetailsSearchIsGiven:
+    def test_a_version_gives_its_own_details(self):
+        version = dataclasses.replace(VERSION, metadata={"schemes": ["SFI"]})
+
+        assert models.search_details(DOCUMENT, version) == {
+            "schemeYear": 2026,
+            "schemes": ["SFI"],
+        }
+
+    def test_a_version_saved_before_versions_kept_their_own_gives_its_documents(self):
+        assert VERSION.metadata is None
+
+        assert models.search_details(DOCUMENT, VERSION) == {
+            "schemeYear": 2026,
+            **DOCUMENT.metadata,
+        }
+
+    def test_a_version_with_empty_details_does_not_fall_back_to_its_documents(self):
+        version = dataclasses.replace(VERSION, metadata={})
+
+        assert models.search_details(DOCUMENT, version) == {"schemeYear": 2026}
+
+    def test_details_are_given_as_they_are_read_now(self):
+        version = dataclasses.replace(
+            VERSION,
+            metadata={"schemes": [models.NOT_SCHEME_SPECIFIC], "schemeYear": 2027},
+        )
+
+        assert models.search_details(DOCUMENT, version) == {
+            "schemes": [],
+            "schemeYear": 2027,
+        }
+
+    def test_neither_having_details_gives_only_the_scheme_year(self):
+        document = dataclasses.replace(DOCUMENT, metadata=None)
+
+        assert models.search_details(document, VERSION) == {"schemeYear": 2026}

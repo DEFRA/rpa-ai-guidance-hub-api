@@ -11,6 +11,8 @@ import pymongo.asynchronous.database
 import uvicorn
 
 from app import config as app_config
+from app.admin import router as admin_router
+from app.admin import tasks as admin_tasks
 from app.auth import service as auth_service
 from app.background import consumer, sqs
 from app.common import aws, log_utils, mongo, mongo_timeouts, s3, tracing
@@ -51,6 +53,8 @@ async def lifespan(application: fastapi.FastAPI) -> AsyncGenerator[None]:
     try:
         yield
     finally:
+        # Before Mongo closes: a rebuild reads from it.
+        await admin_tasks.cancel_all()
         await working.stop()
         if client:
             await client.close()
@@ -125,6 +129,7 @@ protected_routes.include_router(users_router.router)
 protected_routes.include_router(preferences_router.router)
 protected_routes.include_router(search_router.router)
 protected_routes.include_router(search_router.titles_router)
+protected_routes.include_router(admin_router.router)
 
 app.include_router(health_router.router)
 app.include_router(staging_router.callback_router)

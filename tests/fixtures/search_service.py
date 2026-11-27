@@ -51,3 +51,13 @@ def accepted(document_id: str, version_id: str) -> dict[str, Any]:
         "status": "published",
         "operation": "index",
     }
+
+
+def reset_result(deleted_objects: int, deleted_state_records: int) -> dict[str, Any]:
+    """`POST /admin/index/reset`, as the search service's `ResetResult`. Written from
+    its plan (`admin-search-index-rebuild/search.md`): check it against its
+    `docs/openapi.json` once that route is merged."""
+    return {
+        "deletedObjects": deleted_objects,
+        "deletedStateRecords": deleted_state_records,
+    }

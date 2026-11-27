@@ -50,6 +50,15 @@ def details_as_now(details: dict[str, Any]) -> dict[str, Any]:
     return {"schemeYear": FIRST_SCHEME_YEAR, **details}
 
 
+def search_details(document: Document, version: Version) -> dict[str, Any]:
+    """The details search is given with a version, as they are answered: the
+    version's own, or its document's for a version saved before versions kept their
+    own. A save and a rebuild both give search these, so a rebuilt guide is the
+    guide as it was saved."""
+    details = document.metadata if version.metadata is None else version.metadata
+    return details_as_now(dict(details or {}))
+
+
 @dataclasses.dataclass(frozen=True)
 class Document:
     """What a document is to the people using it, and the upload it came from.

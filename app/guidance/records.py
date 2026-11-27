@@ -66,6 +66,7 @@ _OR = "$or"
 _FIRST = "$first"
 _LIMIT = "$limit"
 _PROJECT = "$project"
+_LOOKUP = "$lookup"
 
 
 async def ensure_indexes(
@@ -283,7 +284,7 @@ def _latest_details() -> list[dict[str, Any]]:
     that version kept none: one saved before versions kept their own."""
     return [
         {
-            "$lookup": {
+            _LOOKUP: {
                 "from": VERSIONS,
                 "localField": "_id",
                 "foreignField": DOCUMENT_ID,
@@ -337,7 +338,7 @@ def _updated_at() -> list[dict[str, Any]]:
     version was made, or, with none, when it was recorded."""
     return [
         {
-            "$lookup": {
+            _LOOKUP: {
                 "from": VERSIONS,
                 "localField": "_id",
                 "foreignField": DOCUMENT_ID,
@@ -465,6 +466,42 @@ async def latest_titles(
     ]
     cursor = await database[VERSIONS].aggregate(pipeline)
     return {group["_id"]: group[_TITLE] async for group in cursor}
+
+
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
+async def every_latest_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> list[tuple[models.Document, models.Version]]:
+    """Every document that has a version, as its record, with its newest version, in
+    a single query.
+
+    The document is as it is recorded, not as a read answers it (see `find_many`): its
+    details are the ones a version saved before versions kept their own falls back to.
+    A document with no version is left out: its first conversion failed, and there is
+    nothing of it to give anyone.
+    """
+    pipeline: list[dict[str, Any]] = [
+        # Document first, to follow the (documentId, createdAt) index.
+        {_SORT: {DOCUMENT_ID: 1, **dict(_NEWEST)}},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {_FIRST: "$$ROOT"}}},
+        {
+            _LOOKUP: {
+                "from": DOCUMENTS,
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "document",
+            }
+        },
+        {"$unwind": "$document"},
+    ]
+    cursor = await database[VERSIONS].aggregate(pipeline)
+    return [
+        (
+            models.Document.from_document(group["document"]),
+            models.Version.from_document(group["newest"]),
+        )
+        async for group in cursor
+    ]
 
 
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)

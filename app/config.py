@@ -183,6 +183,11 @@ class AppConfig(pydantic_settings.BaseSettings):
         ...,
         description="The search service's address, for each search a FEATURE_SEARCH_* setting sends there",
     )
+    search_rebuild_concurrency: int = pydantic.Field(
+        default=4,
+        ge=1,
+        description="How many guides a rebuild of the search index gives the search service at once",
+    )
     tracing_header: str = "x-cdp-request-id"
     staging_retention_seconds: int = pydantic.Field(
         default=14400,  # 4 hours in seconds
