@@ -193,6 +193,13 @@ class TestTheText:
 
         assert _texts(markdown) == [("steps", "Steps\nHow\nApply\nRecord")]
 
+    def test_has_a_table_cell_as_one_line_when_underline_with_attributes_runs_on(
+        self,
+    ):
+        markdown = '## Steps\n\n| How |\n| --- |\n| <u class="x">Intro<br>- Apply</u> |'
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply")]
+
     def test_has_a_list_in_a_table_cell_after_bold_closed_before_its_marks(self):
         markdown = "## Steps\n\n| How |\n| --- |\n| **Intro**<br>- Apply<br>- Record |"
 

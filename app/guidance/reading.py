@@ -214,18 +214,18 @@ def _cell_lines(token: md_token.Token) -> list[str]:
 
 
 def _tag_nesting(token: md_token.Token) -> int:
-    """1 for an underline, superscript or subscript tag that opens, -1 for one that
-    closes, else 0: the parser gives these no nesting of their own."""
+    """1 for an underline, superscript or subscript tag that opens, with or without
+    attributes, -1 for one that closes, else 0: the parser gives these no nesting of
+    their own."""
     if token.type != "html_inline":
         return 0
-    tag = token.content.lower()
-    if tag in _STYLE_TAGS:
-        return 1
-    return -1 if tag in _STYLE_CLOSES else 0
+    tag = token.content.strip("<>/ ").split(maxsplit=1)[0].lower()
+    if tag not in _STYLE_TAGS:
+        return 0
+    return -1 if token.content.startswith("</") else 1
 
 
-_STYLE_TAGS = ("<u>", "<sup>", "<sub>")
-_STYLE_CLOSES = ("</u>", "</sup>", "</sub>")
+_STYLE_TAGS = ("u", "sup", "sub")
 
 
 def _is_item(part: list[md_token.Token]) -> bool:
