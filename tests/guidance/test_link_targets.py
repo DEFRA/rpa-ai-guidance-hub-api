@@ -55,6 +55,17 @@ class TestANamedWordDocument:
 
         assert _target(link).canonical_link == WORD_BY_ID_CANONICAL
 
+    def test_with_its_query_in_another_order_has_the_same_canonical_link(self):
+        """What identifies it is kept in one order, whatever order the link gives, so
+        two links match by plain equality."""
+        link = (
+            "https://example.sharepoint.com/:w:/r/teams/Team1234/_layouts/15/Doc.aspx"
+            "?action=default&file=2016%20Basic%20Navigation%20Guide.docx"
+            f"&sourcedoc={DOC_ID}"
+        )
+
+        assert _target(link).canonical_link == WORD_BY_ID_CANONICAL
+
     def test_by_its_path_keeps_only_the_path(self):
         target = _target(WORD_BY_PATH)
 
