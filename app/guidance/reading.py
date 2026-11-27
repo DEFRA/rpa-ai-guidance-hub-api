@@ -178,23 +178,47 @@ def _one_line(token: md_token.Token) -> list[str]:
 
 def _cell_lines(token: md_token.Token) -> list[str]:
     """A table cell's lines, as the guide page shows them. Its parts between `<br>`s
-    are a list from the first that starts with an unmarked "- ", when each part after
+    are a list from the first that starts with an unstyled "- ", when each part after
     it does too: each item a line of its own, without its mark, after the parts
     before it as one line. Otherwise the cell is one line (the UI's
-    `tiptap/tables.js`, `promote`)."""
+    `tiptap/tables.js`, `promote`). A part is unstyled when no formatting opened
+    before it is still open: bold, a link and the like, and `<u>`, `<sup>`, `<sub>`."""
     parts: list[list[md_token.Token]] = [[]]
+    styled = [False]
+    open_marks = 0
     for child in token.children or []:
         if child.type == "html_inline" and _is_break(child.content):
             parts.append([])
+            styled.append(open_marks > 0)
         else:
             parts[-1].append(child)
-    first = next((at for at, part in enumerate(parts) if _is_item(part)), None)
-    if first is None or not all(_is_item(part) for part in parts[first:]):
+            open_marks += child.nesting + _tag_nesting(child)
+    starts_item = [
+        not is_styled and _is_item(part)
+        for part, is_styled in zip(parts, styled, strict=True)
+    ]
+    first = next((at for at, item in enumerate(starts_item) if item), None)
+    if first is None or not all(starts_item[first:]):
         return _one_line(token)
     lead = " ".join(_words_of(part) for part in parts[:first])
     items = [_words_of(part).removeprefix(_ITEM_MARK) for part in parts[first:]]
     found = (" ".join(line.split()) for line in [lead, *items])
     return [line for line in found if line]
+
+
+def _tag_nesting(token: md_token.Token) -> int:
+    """1 for an underline, superscript or subscript tag that opens, -1 for one that
+    closes, else 0: the parser gives these no nesting of their own."""
+    if token.type != "html_inline":
+        return 0
+    tag = token.content.lower()
+    if tag in _STYLE_TAGS:
+        return 1
+    return -1 if tag in _STYLE_CLOSES else 0
+
+
+_STYLE_TAGS = ("<u>", "<sup>", "<sub>")
+_STYLE_CLOSES = ("</u>", "</sup>", "</sub>")
 
 
 def _is_item(part: list[md_token.Token]) -> bool:

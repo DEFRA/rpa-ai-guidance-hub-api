@@ -141,6 +141,23 @@ class TestTheText:
 
         assert _texts(markdown) == [("steps", "Steps\nHow\n1. Apply 2. Record")]
 
+    def test_has_a_table_cell_as_one_line_when_bold_runs_on_across_its_marks(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| **Intro<br>- Apply<br>- Record** |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply - Record")]
+
+    def test_has_a_table_cell_as_one_line_when_a_link_runs_on_across_its_marks(self):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| [Intro<br>- Apply<br>- Record](#a) |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply - Record")]
+
+    def test_has_a_list_in_a_table_cell_after_bold_closed_before_its_marks(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| **Intro**<br>- Apply<br>- Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
     def test_has_one_space_between_words_where_a_paragraph_wraps(self):
         assert _texts("## Paying\n\nPay the\nclaim   in full.") == [
             ("paying", "Paying\nPay the claim in full.")
