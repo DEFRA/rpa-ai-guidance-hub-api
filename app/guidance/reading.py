@@ -229,10 +229,15 @@ _STYLE_CLOSES = ("</u>", "</sup>", "</sub>")
 
 
 def _is_item(part: list[md_token.Token]) -> bool:
-    """Whether a part of a cell starts with an unmarked "- "."""
-    return (
-        bool(part) and part[0].type == "text" and part[0].content.startswith(_ITEM_MARK)
-    )
+    """Whether a part of a cell starts with an unmarked "- ", however its dash is
+    written: plain, escaped or as an entity, which the parser gives a token of its
+    own."""
+    leading = ""
+    for token in part:
+        if token.type not in ("text", "text_special"):
+            break
+        leading += token.content
+    return leading.startswith(_ITEM_MARK)
 
 
 def _words_of(part: list[md_token.Token]) -> str:

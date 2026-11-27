@@ -183,6 +183,16 @@ class TestTheText:
 
         assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
 
+    def test_has_a_list_in_a_table_cell_whose_marks_are_escaped(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| \\- Apply<br>\\- Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nApply\nRecord")]
+
+    def test_has_a_list_in_a_table_cell_whose_marks_are_entities(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| &#45; Apply<br>&#45; Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nApply\nRecord")]
+
     def test_has_a_list_in_a_table_cell_after_bold_closed_before_its_marks(self):
         markdown = "## Steps\n\n| How |\n| --- |\n| **Intro**<br>- Apply<br>- Record |"
 
