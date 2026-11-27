@@ -96,6 +96,30 @@ def links_of(markdown: str) -> list[Link]:
     return links
 
 
+@dataclasses.dataclass(frozen=True)
+class LinkLines:
+    """Where a link goes, as written, and the lines of the block it is in: from
+    `first` up to, not including, `end`, counting from 0."""
+
+    destination: str
+    first: int
+    end: int
+
+
+def link_lines(markdown: str) -> list[LinkLines]:
+    """Every link in the guide, in order, with the lines of its block."""
+    found: list[LinkLines] = []
+    for token in _reader().parse(markdown):
+        if token.map is None:
+            continue
+        first, end = token.map
+        found.extend(
+            LinkLines(destination, first, end)
+            for destination, _ in _links_in(token.children or [])
+        )
+    return found
+
+
 def _links_in(children: list[md_token.Token]) -> list[tuple[str, str]]:
     """Each link in a run of inline tokens: where it goes, and its words."""
     found: list[tuple[str, str]] = []

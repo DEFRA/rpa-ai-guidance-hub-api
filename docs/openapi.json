@@ -2082,7 +2082,7 @@
     },
     "/guides/{document_id}/content": {
       "get": {
-        "description": "The Markdown of a document's newest version, as it is stored.\n\nAnswered as it was written rather than re-rendered. What it says about its\npictures is `../assets/...`, which resolves against the URL this content was read\nfrom - so a caller that keeps that URL can reach them, and `store.resolved` is\nwhat turns one into an address.",
+        "description": "The Markdown of a document's newest version, as it is stored, but for each link\nto a guide in the hub, which goes to that guide's page (`linked_guides`).\n\nAnswered as it was written rather than re-rendered. What it says about its\npictures is `../assets/...`, which resolves against the URL this content was read\nfrom - so a caller that keeps that URL can reach them, and `store.resolved` is\nwhat turns one into an address.",
         "operationId": "read_content_guides__document_id__content_get",
         "parameters": [
           {

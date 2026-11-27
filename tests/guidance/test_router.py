@@ -1030,6 +1030,27 @@ class TestReadingADocumentBack:
         assert response.status_code == 200
         assert response.text == "# CS Revenue Claims"
 
+    def test_a_link_in_its_content_to_a_guide_in_the_hub_points_at_its_page(
+        self, client, mocker
+    ):
+        """Named by the source link of one of that guide's versions, a link opens the
+        guide in the hub rather than the document in SharePoint."""
+        linked = uuid.uuid4()
+        form = "https://example.sharepoint.com/:w:/r/teams/Team1234/Form.docx?d=w1"
+        canonical = "https://example.sharepoint.com/teams/team1234/form.docx"
+        client.post("/guides", json=_request())
+        mocker.patch.object(
+            router.store, "read", return_value=f"Fill in [the form]({form}).".encode()
+        )
+        known = mocker.patch.object(
+            records, "guides_known_by", return_value={canonical: linked}
+        )
+
+        response = client.get(f"/guides/{DOCUMENT}/content")
+
+        assert response.text == f"Fill in [the form](/guides/{linked})."
+        assert known.await_args.args[1] == {canonical}
+
     def test_the_content_of_a_document_that_never_was(self, client):
         assert client.get(f"/guides/{uuid.uuid4()}/content").status_code == 404
 
