@@ -224,6 +224,17 @@ class TestALinkNeverCanonicalised:
                 id="a safe link reached by neither http nor https",
             ),
             pytest.param(
+                "https://attacker.invalid\\@example.sharepoint.com/Guide.docx",
+                link_targets.Kind.EXTERNAL,
+                id="a backslash before the host, which a browser reads as a slash",
+            ),
+            pytest.param(
+                "https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2F"
+                "attacker.invalid%5C%40example.sharepoint.com%2FGuide.docx",
+                link_targets.Kind.EXTERNAL,
+                id="the same behind a safe link",
+            ),
+            pytest.param(
                 "https://[broken",
                 link_targets.Kind.EXTERNAL,
                 id="an address that cannot be read",
