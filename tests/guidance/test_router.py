@@ -64,6 +64,15 @@ SOURCE_LINK = (
 SOURCE_CANONICAL = (
     "https://example.sharepoint.com/teams/team1234/claims/cs%20revenue%20claims.docx"
 )
+# Where the maintainer says the next version came from: another edition's file.
+NEXT_SOURCE_LINK = (
+    "https://example.sharepoint.com/:w:/r/teams/Team1234/Claims/2026/"
+    "CS%20Revenue%20Claims%202026.docx?d=w2&web=1"
+)
+NEXT_SOURCE_CANONICAL = (
+    "https://example.sharepoint.com/teams/team1234/claims/2026/"
+    "cs%20revenue%20claims%202026.docx"
+)
 
 # A second upload: a new version of the document the first one made.
 NEXT_UPLOAD = "6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24"
@@ -354,7 +363,19 @@ def document(client, staging, converts, mocker):
     Its sections' ids are not what the version cases are about, and need the
     versions' content and a real database: see the conversion's cases.
     """
-    client.post("/guides", json=_request())
+    return _made_with_next_staged(client, staging, converts, mocker, _request())
+
+
+@pytest.fixture
+def linked_document(client, staging, converts, mocker):
+    """As `document`, with the first version's source link given."""
+    return _made_with_next_staged(
+        client, staging, converts, mocker, _request(sourceLink=SOURCE_LINK)
+    )
+
+
+def _made_with_next_staged(client, staging, converts, mocker, first):
+    client.post("/guides", json=first)
     mocker.patch.object(conversion.section_ids, "of_new_version", return_value={})
     staging.minted = OTHER_DOCUMENT
     staging.stage(
@@ -1189,6 +1210,44 @@ class TestAddingAVersionToADocument:
 
         assert response.status_code == 422
         assert len(submitter.sent) == 1
+
+    def test_each_version_keeps_its_own_source_link(
+        self, client, linked_document, versions
+    ):
+        client.post(
+            f"/guides/{linked_document}/versions",
+            json=self._next(sourceLink=NEXT_SOURCE_LINK),
+        )
+
+        stored = {version["_id"]: version for version in versions.documents}
+        body = client.get(f"/guides/{linked_document}").json()
+
+        assert stored[NEXT_VERSION]["sourceLink"] == {
+            "link": NEXT_SOURCE_LINK,
+            "canonicalLink": NEXT_SOURCE_CANONICAL,
+        }
+        assert stored[VERSION]["sourceLink"] == {
+            "link": SOURCE_LINK,
+            "canonicalLink": SOURCE_CANONICAL,
+        }
+        assert [version["sourceLink"] for version in body["versions"]] == [
+            NEXT_SOURCE_LINK,
+            SOURCE_LINK,
+        ]
+
+    def test_a_version_without_a_source_link_does_not_take_the_one_before(
+        self, client, linked_document, versions
+    ):
+        client.post(f"/guides/{linked_document}/versions", json=self._next())
+
+        stored = {version["_id"]: version for version in versions.documents}
+        body = client.get(f"/guides/{linked_document}").json()
+
+        assert "sourceLink" not in stored[NEXT_VERSION]
+        assert [version["sourceLink"] for version in body["versions"]] == [
+            None,
+            SOURCE_LINK,
+        ]
 
     def test_a_version_with_a_blank_title_is_refused(self, client, document, submitter):
         response = client.post(
