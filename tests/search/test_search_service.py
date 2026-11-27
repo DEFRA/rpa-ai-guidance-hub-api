@@ -6,6 +6,7 @@ All fixture text is invented.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 
@@ -343,3 +344,34 @@ class TestResettingTheSearchService:
 
         async with resetting._open_client() as client:  # noqa: SLF001 - its timeout
             assert client.timeout.read > 30  # noqa: PLR2004 - the default for a search
+
+    async def test_fails_when_the_whole_reset_takes_longer_than_its_deadline(
+        self, monkeypatch
+    ):
+        async def slow(_request: httpx2.Request) -> httpx2.Response:
+            await asyncio.sleep(1)
+            return httpx2.Response(200, json=answers.reset_result(0, 0))
+
+        monkeypatch.setattr(search_service, "_RESET_TIMEOUT_SECONDS", 0.01)
+        resetting = _resetting(slow)
+
+        with pytest.raises(search_service.SearchServiceError, match="did not finish"):
+            await resetting.reset()
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            httpx2.Response(200, content=b"not json"),
+            httpx2.Response(200, json={"deletedObjects": 1}),
+            httpx2.Response(
+                200, json={"deletedObjects": "many", "deletedStateRecords": 1}
+            ),
+            httpx2.Response(200, json=[1, 2]),
+        ],
+        ids=["invalid-json", "missing-count", "invalid-count", "not-an-object"],
+    )
+    async def test_fails_when_the_reset_answer_is_not_understood(self, response):
+        resetting = _resetting(lambda _request: response)
+
+        with pytest.raises(search_service.SearchServiceError, match="not understood"):
+            await resetting.reset()

@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from app.search import search_service
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from app.guidance import models
-    from app.search import search_service
 
 
 class InMemorySearchIndex:

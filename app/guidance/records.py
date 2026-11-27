@@ -66,6 +66,7 @@ _OR = "$or"
 _FIRST = "$first"
 _LIMIT = "$limit"
 _PROJECT = "$project"
+_LOOKUP = "$lookup"
 
 
 async def ensure_indexes(
@@ -283,7 +284,7 @@ def _latest_details() -> list[dict[str, Any]]:
     that version kept none: one saved before versions kept their own."""
     return [
         {
-            "$lookup": {
+            _LOOKUP: {
                 "from": VERSIONS,
                 "localField": "_id",
                 "foreignField": DOCUMENT_ID,
@@ -337,7 +338,7 @@ def _updated_at() -> list[dict[str, Any]]:
     version was made, or, with none, when it was recorded."""
     return [
         {
-            "$lookup": {
+            _LOOKUP: {
                 "from": VERSIONS,
                 "localField": "_id",
                 "foreignField": DOCUMENT_ID,
@@ -480,10 +481,11 @@ async def every_latest_version(
     nothing of it to give anyone.
     """
     pipeline: list[dict[str, Any]] = [
-        {_SORT: dict(_NEWEST)},
+        # Document first, to follow the (documentId, createdAt) index.
+        {_SORT: {DOCUMENT_ID: 1, **dict(_NEWEST)}},
         {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {_FIRST: "$$ROOT"}}},
         {
-            "$lookup": {
+            _LOOKUP: {
                 "from": DOCUMENTS,
                 "localField": "_id",
                 "foreignField": "_id",

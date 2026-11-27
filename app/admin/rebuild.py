@@ -79,7 +79,7 @@ async def _send(
             try:
                 await search.index(version, models.search_details(document, version))
             except search_service.IndexRefusedError as refused:
-                logger.error(  # noqa: TRY400 - the refusal's text says why
+                logger.exception(
                     "Search refused document %s version %s: %s",
                     document.id,
                     version.id,
@@ -90,7 +90,7 @@ async def _send(
                 if attempt < _RETRIES:
                     await asyncio.sleep(retry_after * (attempt + 1))
                     continue
-                logger.error(  # noqa: TRY400 - the failure's text says why
+                logger.exception(
                     "Search could not be given document %s version %s: %s",
                     document.id,
                     version.id,

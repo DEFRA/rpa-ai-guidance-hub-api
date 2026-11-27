@@ -12,6 +12,7 @@ refuses a version.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import datetime as dt
 import functools
@@ -200,14 +201,33 @@ class SearchServiceAdmin:
             SearchServiceError: if it does not answer, or fails, so that it can be
                 tried again.
         """
-        response = await _asked(
-            self._open_client, "POST", f"{self._base_url}/admin/index/reset"
-        )
-        body = _successful(response).json()
-        return ResetResult(
-            deleted_objects=body["deletedObjects"],
-            deleted_state_records=body["deletedStateRecords"],
-        )
+        try:
+            async with asyncio.timeout(_RESET_TIMEOUT_SECONDS):
+                response = await _asked(
+                    self._open_client, "POST", f"{self._base_url}/admin/index/reset"
+                )
+        except TimeoutError as error:
+            message = (
+                f"The search service did not finish resetting in "
+                f"{_RESET_TIMEOUT_SECONDS} seconds"
+            )
+            raise SearchServiceError(message) from error
+        try:
+            body = _successful(response).json()
+            return ResetResult(
+                deleted_objects=_count(body["deletedObjects"]),
+                deleted_state_records=_count(body["deletedStateRecords"]),
+            )
+        except (ValueError, KeyError, TypeError) as error:
+            message = f"The search service's reset answer was not understood: {error}"
+            raise SearchServiceError(message) from error
+
+
+def _count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        message = f"not a count: {value!r}"
+        raise TypeError(message)
+    return value
 
 
 def _index_request(
