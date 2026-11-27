@@ -30,6 +30,10 @@ def test_lifespan(mocker):
     ensure_user_indexes = mocker.patch(
         "app.users.records.ensure_indexes", mocker.AsyncMock()
     )
+    # And the ones the guides' links to SharePoint documents are found by.
+    ensure_link_indexes = mocker.patch(
+        "app.guidance.guide_links.ensure_indexes", mocker.AsyncMock()
+    )
     # And pins kept as guide ids become pins, before a request reads one.
     convert_pins = mocker.patch(
         "app.users.records.convert_pins_kept_as_ids", mocker.AsyncMock()
@@ -39,6 +43,7 @@ def test_lifespan(mocker):
         mock_get_mongo.assert_called_once()
         ensure_indexes.assert_awaited_once()
         ensure_user_indexes.assert_awaited_once()
+        ensure_link_indexes.assert_awaited_once()
         convert_pins.assert_awaited_once()
 
     mock_mongo_client.close.assert_awaited_once()
@@ -51,6 +56,7 @@ def _a_lifespan_with_no_database(mocker):
     )
     mocker.patch("app.guidance.records.ensure_indexes", mocker.AsyncMock())
     mocker.patch("app.users.records.ensure_indexes", mocker.AsyncMock())
+    mocker.patch("app.guidance.guide_links.ensure_indexes", mocker.AsyncMock())
     mocker.patch("app.users.records.convert_pins_kept_as_ids", mocker.AsyncMock())
 
 

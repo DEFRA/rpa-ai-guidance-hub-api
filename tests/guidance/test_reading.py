@@ -141,3 +141,117 @@ class TestTheText:
         markdown = "## Charts\n\n![A chart of payments](assets/chart.png)\n\nSee above."
 
         assert _texts(markdown) == [("charts", "Charts\nSee above.")]
+
+
+def _only_link(markdown: str) -> reading.Link:
+    (link,) = reading.links_of(markdown)
+    return link
+
+
+class TestALink:
+    def test_is_its_text_and_where_it_goes_as_written(self):
+        link = _only_link("See [the eligibility rules](https://example.com/rules).")
+
+        assert link.text == "the eligibility rules"
+        assert link.destination == "https://example.com/rules"
+
+    def test_keeps_brackets_in_where_it_goes(self):
+        """A pattern stops at the first `)`."""
+        link = _only_link(
+            "[Matrix](https://example.sharepoint.com/Doc.aspx?file=Matrix%20(2021%20Onwards).xlsx)"
+        )
+
+        assert link.destination == (
+            "https://example.sharepoint.com/Doc.aspx?file=Matrix%20(2021%20Onwards).xlsx"
+        )
+
+    def test_in_angle_brackets_keeps_its_spaces(self):
+        link = _only_link("[The form](<https://example.com/some path/The form.docx>)")
+
+        assert link.destination == "https://example.com/some path/The form.docx"
+
+    def test_has_plain_text_without_its_marks_or_escapes(self):
+        link = _only_link(
+            "[**Read** *the* \\[draft\\] ~~now~~ <u>here</u>](https://example.com)"
+        )
+
+        assert link.text == "Read the [draft] now here"
+
+    def test_to_a_network_share_is_read_as_a_link(self):
+        link = _only_link(
+            "[Draft Letter](file://share.example.gov.uk/user/Shared/Draft%20Letter)"
+        )
+
+        assert (
+            link.destination == "file://share.example.gov.uk/user/Shared/Draft%20Letter"
+        )
+
+    def test_to_a_script_is_not_a_link(self):
+        assert reading.links_of("[Click](javascript:alert(1))") == []
+
+    def test_within_the_guide_is_a_link_to_its_anchor(self):
+        link = _only_link("[see section 3.1](#31-overview)")
+
+        assert link.destination == "#31-overview"
+
+    def test_in_a_table_cell_is_read(self):
+        link = _only_link(
+            "| Form | Use |\n|---|---|\n| [The form](https://example.com/f.docx)<br>new | Claims |"
+        )
+
+        assert link.text == "The form"
+
+    def test_a_picture_is_not_a_link(self):
+        assert reading.links_of("![](a3f9.png)") == []
+
+
+class TestAColourSpanAndALink:
+    def test_a_colour_span_is_not_a_link(self):
+        assert reading.links_of("A [linked case]{.red} is open.") == []
+
+    def test_a_colour_span_in_a_link_s_text_leaves_the_link_whole(self):
+        link = _only_link("[[**Draft letter**]{.red}](https://example.com/letter.docx)")
+
+        assert link.text == "Draft letter"
+        assert link.destination == "https://example.com/letter.docx"
+
+    def test_a_colour_span_holding_a_link_leaves_the_link_whole(self):
+        link = _only_link("[Use [the form](https://example.com/f.docx) first]{.blue}")
+
+        assert link.text == "the form"
+        assert link.destination == "https://example.com/f.docx"
+
+
+class TestWhereALinkIs:
+    def test_is_the_section_it_is_in_and_its_order_there(self):
+        markdown = (
+            "[before](https://example.com/0)\n\n"
+            "# Claims guide\n\n"
+            "## 1 Introduction\n\n"
+            "[one](https://example.com/1) and [two](https://example.com/2)\n\n"
+            "### 1.1 Before you begin\n\n"
+            "- [three](https://example.com/3)\n"
+        )
+
+        assert [
+            (link.section, link.order, link.text) for link in reading.links_of(markdown)
+        ] == [
+            (None, 1, "before"),
+            ("1-introduction", 1, "one"),
+            ("1-introduction", 2, "two"),
+            ("1-1-before-you-begin", 1, "three"),
+        ]
+
+    def test_under_a_heading_repeated_is_in_its_numbered_section(self):
+        markdown = (
+            "## Notes\n\n[one](https://example.com/1)\n\n"
+            "## Notes\n\n[two](https://example.com/2)\n"
+        )
+
+        assert [link.section for link in reading.links_of(markdown)] == [
+            "notes",
+            "notes-1",
+        ]
+
+    def test_is_not_found_in_a_code_block(self):
+        assert reading.links_of("```\n[not](https://example.com)\n```") == []

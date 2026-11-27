@@ -24,7 +24,15 @@ import fastapi.concurrency
 import pydantic
 
 from app.common import tracing
-from app.guidance import ids, models, records, schemas, section_ids, service
+from app.guidance import (
+    guide_links,
+    ids,
+    models,
+    records,
+    schemas,
+    section_ids,
+    service,
+)
 from app.guidance.parsing import errors
 from app.search import search_service
 
@@ -123,7 +131,8 @@ class ConversionHandler:
         self._staging = staging
         self._guidance = guidance
         self._search = search
-        # Where the version before's content is read from, to carry its sections' ids.
+        # Where each version's content is read from: the version before's, to carry its
+        # sections' ids, and the version's own, to keep its links.
         self._s3 = s3_client
 
     async def __call__(self, body: str, *, last_delivery: bool) -> None:
@@ -137,7 +146,8 @@ class ConversionHandler:
 
     async def _work(self, job: ConversionJob, *, last_delivery: bool) -> None:
         try:
-            document = await self._save(job)
+            document, version = await self._save(job)
+            await guide_links.keep_stored(self._database, version, self._s3)
             await self._give_to_search(job, document)
             await self._staging.promote(job.file_id)
         except _UNFIXABLE as unfixable:
@@ -148,10 +158,10 @@ class ConversionHandler:
                 await self._staging.fail_saving(job.file_id, str(failure))
             raise
 
-    async def _save(self, job: ConversionJob) -> models.Document:
+    async def _save(self, job: ConversionJob) -> tuple[models.Document, models.Version]:
         """Convert the upload and record its version, unless an earlier delivery did,
-        then its document, unless that is there already: the document, as it is
-        recorded.
+        then its document, unless that is there already: the document and the version,
+        as they are recorded.
 
         Bottom up. The version is recorded only once its content is wholly stored, and
         the document last: until it exists nothing can reach the version, and once it
@@ -162,10 +172,11 @@ class ConversionHandler:
         )
         if version is None:
             version = await self._converted(job)
-        return await records.create(
+        document = await records.create(
             self._database,
             job.request.document_for(job.document_id, version.created_at),
         )
+        return document, version
 
     async def _converted(self, job: ConversionJob) -> models.Version:
         """Convert the upload, and record the version it makes, with its sections' ids

@@ -1,5 +1,5 @@
 """The words a reader sees in each section of a guide: the text a search matches, and
-in which its matches are placed.
+in which its matches are placed; and the links in each section.
 
 A section starts at a heading of two or more `#`s that stands on its own, not in a
 quote, a list or a code block, and runs to the next such heading; the hub's pages
@@ -65,6 +65,50 @@ def sections_of(markdown: str) -> list[SectionText]:
 
     found = [SectionText(None, "\n".join(introduction))] if introduction else []
     return found + [SectionText(anchor, "\n".join(text)) for anchor, text in sections]
+
+
+@dataclasses.dataclass(frozen=True)
+class Link:
+    """A link in a guide: its section's anchor (None before the first section), its
+    order there counting from 1, its words, and where it goes, as written."""
+
+    section: str | None
+    order: int
+    text: str
+    destination: str
+
+
+def links_of(markdown: str) -> list[Link]:
+    """Every link in the guide, in order. A picture is not a link."""
+    tokens = _reader().parse(markdown)
+    section: str | None = None
+    seen: dict[str, int] = {}
+    counts: dict[str | None, int] = {}
+    links: list[Link] = []
+
+    for at, token in enumerate(tokens):
+        if _starts_section(token):
+            section = _numbered(_as_named(tokens[at + 1]), seen)
+        for destination, text in _links_in(token.children or []):
+            counts[section] = counts.get(section, 0) + 1
+            links.append(Link(section, counts[section], text, destination))
+
+    return links
+
+
+def _links_in(children: list[md_token.Token]) -> list[tuple[str, str]]:
+    """Each link in a run of inline tokens: where it goes, and its words."""
+    found: list[tuple[str, str]] = []
+    for at, child in enumerate(children):
+        if child.type == "link_open":
+            close = next(
+                end
+                for end in range(at + 1, len(children))
+                if children[end].type == "link_close"
+            )
+            words = "".join(_words(token) for token in children[at + 1 : close])
+            found.append((str(child.attrGet("href")), " ".join(words.split())))
+    return found
 
 
 def _starts_section(token: md_token.Token) -> bool:
@@ -149,12 +193,16 @@ def _is_break(tag: str) -> bool:
 
 class _Reader(markdown_it.MarkdownIt):
     """A parser that reads a `file:` link, a network share, as a link like any
-    other, so that its address is not read as words."""
+    other, so that its address is not read as words; and keeps each link where it
+    goes as the author wrote it, not encoded again."""
 
     def validateLink(self, url: str) -> bool:  # noqa: N802 - markdown-it's name
         return url.strip().lower().startswith("file:") or normalize_url.validateLink(
             url
         )
+
+    def normalizeLink(self, url: str) -> str:  # noqa: N802 - markdown-it's name
+        return url
 
 
 @functools.cache
