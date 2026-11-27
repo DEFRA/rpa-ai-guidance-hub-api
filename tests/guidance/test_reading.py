@@ -171,6 +171,18 @@ class TestTheText:
 
         assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
 
+    def test_has_a_list_in_a_table_cell_after_bold_closed_just_after_a_break(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| **Intro<br>**- Apply<br>- Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
+    def test_has_a_list_in_a_table_cell_after_a_link_closed_just_after_a_break(self):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| [Intro<br>](#a)- Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
     def test_has_a_list_in_a_table_cell_after_bold_closed_before_its_marks(self):
         markdown = "## Steps\n\n| How |\n| --- |\n| **Intro**<br>- Apply<br>- Record |"
 

@@ -182,7 +182,9 @@ def _cell_lines(token: md_token.Token) -> list[str]:
     it does too: each item a line of its own, without its mark, after the parts
     before it as one line. Otherwise the cell is one line (the UI's
     `tiptap/tables.js`, `promote`). A part is unstyled when no formatting opened
-    before it is still open: bold, a link and the like, and `<u>`, `<sup>`, `<sub>`."""
+    before it is still open: bold, a link and the like, and `<u>`, `<sup>`, `<sub>`.
+    Formatting that closes at the very start of a part closes before its words, so it
+    goes with the part before."""
     parts: list[list[md_token.Token]] = [[]]
     styled = [False]
     open_marks = 0
@@ -190,9 +192,14 @@ def _cell_lines(token: md_token.Token) -> list[str]:
         if child.type == "html_inline" and _is_break(child.content):
             parts.append([])
             styled.append(open_marks > 0)
+            continue
+        change = child.nesting + _tag_nesting(child)
+        open_marks += change
+        if len(parts) > 1 and not parts[-1] and change < 0:
+            parts[-2].append(child)
+            styled[-1] = open_marks > 0
         else:
             parts[-1].append(child)
-            open_marks += child.nesting + _tag_nesting(child)
     starts_item = [
         not is_styled and _is_item(part)
         for part, is_styled in zip(parts, styled, strict=True)
