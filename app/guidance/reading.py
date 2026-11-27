@@ -59,9 +59,8 @@ def sections_of(markdown: str) -> list[SectionText]:
         if _starts_section(token):
             lines = []
             sections.append((_numbered(_as_named(tokens[at + 1]), seen), lines))
-        line = _readable(token)
-        if line:
-            lines.append(line)
+        in_cell = at > 0 and tokens[at - 1].type in _CELL_OPENS
+        lines.extend(_cell_lines(token) if in_cell else _one_line(token))
 
     found = [SectionText(None, "\n".join(introduction))] if introduction else []
     return found + [SectionText(anchor, "\n".join(text)) for anchor, text in sections]
@@ -163,6 +162,51 @@ def _numbered(heading: str, seen: dict[str, int]) -> str:
     count = seen.get(base, 0)
     seen[base] = count + 1
     return base if count == 0 else f"{base}-{count}"
+
+
+# What opens a table cell, whose inline token follows it.
+_CELL_OPENS = ("td_open", "th_open")
+# What starts an item of a list in a table cell, as the guide page reads it.
+_ITEM_MARK = "- "
+
+
+def _one_line(token: md_token.Token) -> list[str]:
+    """A block token's words as its one line, or none when it has none."""
+    line = _readable(token)
+    return [line] if line else []
+
+
+def _cell_lines(token: md_token.Token) -> list[str]:
+    """A table cell's lines, as the guide page shows them. Its parts between `<br>`s
+    are a list from the first that starts with an unmarked "- ", when each part after
+    it does too: each item a line of its own, without its mark, after the parts
+    before it as one line. Otherwise the cell is one line (the UI's
+    `tiptap/tables.js`, `promote`)."""
+    parts: list[list[md_token.Token]] = [[]]
+    for child in token.children or []:
+        if child.type == "html_inline" and _is_break(child.content):
+            parts.append([])
+        else:
+            parts[-1].append(child)
+    first = next((at for at, part in enumerate(parts) if _is_item(part)), None)
+    if first is None or not all(_is_item(part) for part in parts[first:]):
+        return _one_line(token)
+    lead = " ".join(_words_of(part) for part in parts[:first])
+    items = [_words_of(part).removeprefix(_ITEM_MARK) for part in parts[first:]]
+    found = (" ".join(line.split()) for line in [lead, *items])
+    return [line for line in found if line]
+
+
+def _is_item(part: list[md_token.Token]) -> bool:
+    """Whether a part of a cell starts with an unmarked "- "."""
+    return (
+        bool(part) and part[0].type == "text" and part[0].content.startswith(_ITEM_MARK)
+    )
+
+
+def _words_of(part: list[md_token.Token]) -> str:
+    """The words a part of a cell shows, as written."""
+    return "".join(_words(child) for child in part)
 
 
 def _readable(token: md_token.Token) -> str:

@@ -115,6 +115,32 @@ class TestTheText:
 
         assert _texts(markdown) == [("steps", "\n".join(lines))]
 
+    def test_has_a_line_for_each_item_of_a_list_in_a_table_cell_without_its_mark(
+        self,
+    ):
+        markdown = (
+            "## Steps\n\n| Do | How |\n| --- | --- |\n| Pay | - Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nDo\nHow\nPay\nApply\nRecord")]
+
+    def test_has_the_lines_before_a_list_in_a_table_cell_as_one_line(self):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| Then:<br>first<br>- Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nThen: first\nApply\nRecord")]
+
+    def test_has_a_table_cell_as_one_line_when_a_line_after_a_mark_has_none(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| - Apply<br>then record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\n- Apply then record")]
+
+    def test_has_a_number_in_a_table_cell_as_words_not_as_a_mark(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| 1. Apply<br>2. Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\n1. Apply 2. Record")]
+
     def test_has_one_space_between_words_where_a_paragraph_wraps(self):
         assert _texts("## Paying\n\nPay the\nclaim   in full.") == [
             ("paying", "Paying\nPay the claim in full.")
