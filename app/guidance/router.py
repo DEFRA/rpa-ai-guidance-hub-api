@@ -326,10 +326,11 @@ async def read_content(
         )
 
     markdown = content.decode("utf-8")
+    links = await run_in_threadpool(linked_guides.document_links, markdown)
     known = await records.guides_known_by(
-        database, linked_guides.canonical_links_in(markdown)
+        database, {link.canonical_link for link in links}
     )
-    return linked_guides.pointed_at(markdown, known)
+    return linked_guides.pointed_at(markdown, links, known)
 
 
 @router.get("/{document_id}/assets/{name}")

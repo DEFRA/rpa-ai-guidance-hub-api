@@ -20,17 +20,25 @@ PAGE = f"/guides/{GUIDE}"
 
 
 def _pointed(markdown: str) -> str:
-    return linked_guides.pointed_at(markdown, {FORM_CANONICAL: GUIDE})
+    links = linked_guides.document_links(markdown)
+    return linked_guides.pointed_at(markdown, links, {FORM_CANONICAL: GUIDE})
 
 
-class TestTheCanonicalLinksInAGuide:
-    def test_are_those_of_its_links_that_name_a_document(self):
+class TestTheLinksToDocumentsInAGuide:
+    def test_are_those_of_its_links_that_name_a_document_by_their_canonical_links(
+        self,
+    ):
         markdown = (
             f"See [the form]({FORM}), [the rules](https://www.gov.uk/rules), "
             f"[section 2](#2-checks) and [the form again]({FORM}).\n"
         )
 
-        assert linked_guides.canonical_links_in(markdown) == {FORM_CANONICAL}
+        links = linked_guides.document_links(markdown)
+
+        assert [link.canonical_link for link in links] == [
+            FORM_CANONICAL,
+            FORM_CANONICAL,
+        ]
 
 
 class TestALinkToAGuideInTheHub:
@@ -101,4 +109,6 @@ class TestWhatIsLeftAsItIs:
     def test_a_guide_with_no_guides_to_point_at(self):
         markdown = f"Fill in [the form]({FORM}).\n"
 
-        assert linked_guides.pointed_at(markdown, {}) == markdown
+        links = linked_guides.document_links(markdown)
+
+        assert linked_guides.pointed_at(markdown, links, {}) == markdown

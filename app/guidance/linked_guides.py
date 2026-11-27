@@ -9,33 +9,52 @@ the parser finds the link in, so the same text in a code block is left alone.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from app.guidance import link_targets, reading
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from app.guidance import ids
 
 
-def canonical_links_in(markdown: str) -> set[str]:
-    """The canonical link of each link in the guide that names a document."""
-    found = {_canonical(link.destination) for link in reading.link_lines(markdown)}
-    return {canonical for canonical in found if canonical is not None}
+@dataclasses.dataclass(frozen=True)
+class DocumentLink:
+    """A link in a guide that names a document: where it is, and its canonical link."""
+
+    lines: reading.LinkLines
+    canonical_link: str
 
 
-def pointed_at(markdown: str, guides: Mapping[str, ids.DocumentId]) -> str:
-    """`markdown`, with each link whose canonical link `guides` holds pointed at the
-    page of the guide it names."""
-    lines = _lines(markdown)
+def document_links(markdown: str) -> list[DocumentLink]:
+    """The guide's links that name a document, in order."""
+    found: list[DocumentLink] = []
     for link in reading.link_lines(markdown):
-        canonical = _canonical(link.destination)
-        guide = None if canonical is None else guides.get(canonical)
+        target = link_targets.target_of(link.destination)
+        if target.kind in link_targets.NAMING_A_DOCUMENT:
+            found.append(DocumentLink(link, str(target.canonical_link)))
+    return found
+
+
+def pointed_at(
+    markdown: str,
+    links: Sequence[DocumentLink],
+    guides: Mapping[str, ids.DocumentId],
+) -> str:
+    """`markdown`, with each of its `links` whose canonical link `guides` holds
+    pointed at the page of the guide it names."""
+    if not guides:
+        return markdown
+    lines = _lines(markdown)
+    for link in links:
+        guide = guides.get(link.canonical_link)
         if guide is None:
             continue
-        for at in range(link.first, link.end):
-            lines[at] = _readdressed(lines[at], link.destination, f"/guides/{guide}")
+        page = f"/guides/{guide}"
+        for at in range(link.lines.first, link.lines.end):
+            lines[at] = _readdressed(lines[at], link.lines.destination, page)
     return "".join(lines)
 
 
@@ -53,14 +72,6 @@ def _lines(text: str) -> list[str]:
         start = at
     lines.append(text[start:])
     return lines
-
-
-def _canonical(destination: str) -> str | None:
-    """The canonical link of a link that names a document, or None."""
-    target = link_targets.target_of(destination)
-    if target.kind not in link_targets.NAMING_A_DOCUMENT:
-        return None
-    return str(target.canonical_link)
 
 
 def _readdressed(line: str, destination: str, page: str) -> str:
