@@ -207,10 +207,7 @@ class SearchServiceAdmin:
                     self._open_client, "POST", f"{self._base_url}/admin/index/reset"
                 )
         except TimeoutError as error:
-            message = (
-                f"The search service did not finish resetting in "
-                f"{_RESET_TIMEOUT_SECONDS} seconds"
-            )
+            message = f"Search did not finish resetting in {_RESET_TIMEOUT_SECONDS}s"
             raise SearchServiceError(message) from error
         try:
             body = _successful(response).json()

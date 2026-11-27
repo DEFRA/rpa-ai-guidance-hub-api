@@ -88,7 +88,7 @@ async def _send(
                 return False
             except search_service.SearchServiceError as failed:
                 if attempt < _RETRIES:
-                    await asyncio.sleep(retry_after * (attempt + 1))
+                    await asyncio.sleep(retry_after + retry_after * attempt)
                     continue
                 logger.exception(
                     "Search could not be given document %s version %s: %s",
