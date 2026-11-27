@@ -1,6 +1,6 @@
 services:
   floci:
-    image: floci/floci@sha256:b604da97e8c481c407f8e8d3300a8317d68058ac757dfa2af15fd6c4e9d25c59 # 1.5.19-compat
+    image: floci/floci@sha256:a0fbf944d7f338cc0856f1ef83831ea749ff2be71956eb7a7fce08fc21458e19 # 1.5.19-compat
     ports:
       - '4566:4566'
     env_file:
@@ -20,7 +20,7 @@ services:
       - cdp-tenant
 
   mongodb:
-    image: mongo@sha256:452bdaf2127b8ff851e31410a267809b9829eded219979f2210e7c7efb85a058 # 7.0.28
+    image: mongo@sha256:b0c835c26e5997413e985000f1013c275377cd9607761c1784d486f6dd620b7f # 7.0.28
     networks:
       - cdp-tenant
     ports:
