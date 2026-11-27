@@ -79,6 +79,13 @@ class TestALinkToAGuideInTheHub:
             _pointed(markdown) == f"[the form]({PAGE})\n\n- [the form again]({PAGE})\n"
         )
 
+    def test_after_lines_ended_by_a_carriage_return_alone_keeps_each_ending(self):
+        markdown = f"## Claims\r\rForms\r\n\r\nFill in [the form]({FORM}).\n"
+
+        assert _pointed(markdown) == (
+            f"## Claims\r\rForms\r\n\r\nFill in [the form]({PAGE}).\n"
+        )
+
 
 class TestWhatIsLeftAsItIs:
     def test_a_link_to_a_document_that_is_no_guide_in_the_hub(self):

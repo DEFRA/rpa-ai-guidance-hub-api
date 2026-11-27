@@ -28,8 +28,7 @@ def canonical_links_in(markdown: str) -> set[str]:
 def pointed_at(markdown: str, guides: Mapping[str, ids.DocumentId]) -> str:
     """`markdown`, with each link whose canonical link `guides` holds pointed at the
     page of the guide it names."""
-    # Split as the parser counts lines, so that a link's lines are these.
-    lines = markdown.split("\n")
+    lines = _lines(markdown)
     for link in reading.link_lines(markdown):
         canonical = _canonical(link.destination)
         guide = None if canonical is None else guides.get(canonical)
@@ -37,7 +36,23 @@ def pointed_at(markdown: str, guides: Mapping[str, ids.DocumentId]) -> str:
             continue
         for at in range(link.first, link.end):
             lines[at] = _readdressed(lines[at], link.destination, f"/guides/{guide}")
-    return "\n".join(lines)
+    return "".join(lines)
+
+
+def _lines(text: str) -> list[str]:
+    """`text` in lines as the parser counts them, each with its ending: a line ends at
+    `\r\n`, `\r` or `\n`. The text after the last ending is a line too."""
+    lines: list[str] = []
+    start = at = 0
+    while at < len(text):
+        if text[at] not in "\r\n":
+            at += 1
+            continue
+        at += 2 if text.startswith("\r\n", at) else 1
+        lines.append(text[start:at])
+        start = at
+    lines.append(text[start:])
+    return lines
 
 
 def _canonical(destination: str) -> str | None:
