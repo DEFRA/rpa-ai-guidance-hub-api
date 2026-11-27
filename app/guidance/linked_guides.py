@@ -7,9 +7,10 @@ guide stay as written.
 
 The address is changed where it is written as the Word converter writes it
 (`link_destinations.written`: bare, or in angle brackets where bare would be
-misread). The
-same text anywhere else, such as in code, would change too; the converter writes
-none.
+misread). The same text anywhere else would change too: in code, which the converter
+does not write, or in escaped brackets (`\\[words\\](address)`), which it writes only
+where an author typed brackets, and so only by chance beside a real link to the same
+address.
 """
 
 from __future__ import annotations
