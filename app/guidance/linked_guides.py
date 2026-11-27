@@ -4,7 +4,9 @@ A link names a guide when its canonical link is the source link of one of the
 guide's versions (`records.guides_known_by`). Only its address changes, to the hub's
 page for the guide, which shows its latest version; its words, its title and the rest
 of the guide stay as written. The address is changed only in the lines of the block
-the parser finds the link in, so the same text in a code block is left alone.
+the parser finds the link in, and only where the parser then finds one more link to
+the page, so text that only looks like a link (in code, or in escaped brackets) is
+left alone.
 """
 
 from __future__ import annotations
@@ -52,9 +54,12 @@ def pointed_at(
         guide = guides.get(link.canonical_link)
         if guide is None:
             continue
-        page = f"/guides/{guide}"
-        for at in range(link.lines.first, link.lines.end):
-            lines[at] = _readdressed(lines[at], link.lines.destination, page)
+        first, end = link.lines.first, link.lines.end
+        block = "".join(lines[first:end])
+        lines[first:end] = [
+            _readdressed(block, link.lines.destination, f"/guides/{guide}"),
+            *[""] * (end - first - 1),
+        ]
     return "".join(lines)
 
 
@@ -74,13 +79,28 @@ def _lines(text: str) -> list[str]:
     return lines
 
 
-def _readdressed(line: str, destination: str, page: str) -> str:
-    """`line`, with each link to `destination` going to `page`: written in angle
-    brackets, on its own, or before a title."""
+def _readdressed(block: str, destination: str, page: str) -> str:
+    """`block`, with each link to `destination` going to `page`: written in angle
+    brackets, on its own, or before a title. Each place is changed on its own, and
+    kept only when the parser then finds one more link to `page`."""
     for before, after in (
         (f"](<{destination}>", f"](<{page}>"),
         (f"]({destination})", f"]({page})"),
         (f"]({destination} ", f"]({page} "),
     ):
-        line = line.replace(before, after)
-    return line
+        start = block.find(before)
+        while start >= 0:
+            changed = block[:start] + after + block[start + len(before) :]
+            if _links_to(changed, page) > _links_to(block, page):
+                block, start = changed, start + len(after)
+            else:
+                start += len(before)
+            start = block.find(before, start)
+    return block
+
+
+def _links_to(block: str, page: str) -> int:
+    """How many links in `block` the parser finds going to `page`. Read without each
+    line's indent, which out of its list would make the block code."""
+    text = "".join(line.lstrip(" \t") for line in _lines(block))
+    return sum(link.destination == page for link in reading.link_lines(text))

@@ -80,6 +80,13 @@ class TestALinkToAGuideInTheHub:
 
         assert _pointed(markdown) == f"Fill in [the form](<{PAGE}>).\n"
 
+    def test_in_a_list_items_indented_paragraph_points_at_the_guides_page(self):
+        markdown = f"1. Check the claim.\n\n    Then fill in [the form]({FORM}).\n"
+
+        assert _pointed(markdown) == (
+            f"1. Check the claim.\n\n    Then fill in [the form]({PAGE}).\n"
+        )
+
     def test_written_twice_points_at_the_guides_page_each_time(self):
         markdown = f"[the form]({FORM})\n\n- [the form again]({FORM})\n"
 
@@ -105,6 +112,20 @@ class TestWhatIsLeftAsItIs:
         markdown = f"```\n[the form]({FORM})\n```\n"
 
         assert _pointed(markdown) == markdown
+
+    def test_the_same_link_as_inline_code_beside_it(self):
+        markdown = f"Write `[the form]({FORM})` to link [the form]({FORM}).\n"
+
+        assert _pointed(markdown) == (
+            f"Write `[the form]({FORM})` to link [the form]({PAGE}).\n"
+        )
+
+    def test_the_same_link_in_escaped_brackets_beside_it(self):
+        markdown = f"Not \\[the form\\]({FORM}) but [the form]({FORM}).\n"
+
+        assert _pointed(markdown) == (
+            f"Not \\[the form\\]({FORM}) but [the form]({PAGE}).\n"
+        )
 
     def test_a_guide_with_no_guides_to_point_at(self):
         markdown = f"Fill in [the form]({FORM}).\n"
