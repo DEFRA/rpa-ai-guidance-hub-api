@@ -124,11 +124,14 @@ def _document_id_link(document: docx.document.Document) -> str | None:
 
 def _custom_properties(document: docx.document.Document) -> list[Any]:
     """The file's custom properties, read without resolving entities; none for a file
-    that has no such part, or one that cannot be read. They are SharePoint's, not the
-    author's, so they never stop the file being read."""
+    that has no such part, or one outside it, or one that cannot be read. They are
+    SharePoint's, not the author's, so they never stop the file being read."""
     package = document.part.package
     for relationship in package.rels.values():
-        if relationship.reltype == opc_constants.RELATIONSHIP_TYPE.CUSTOM_PROPERTIES:
+        if (
+            relationship.reltype == opc_constants.RELATIONSHIP_TYPE.CUSTOM_PROPERTIES
+            and not relationship.is_external
+        ):
             try:
                 properties = oxml_parser.parse_xml(relationship.target_part.blob)
             except lxml.etree.XMLSyntaxError:

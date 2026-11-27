@@ -83,3 +83,18 @@ def with_custom_properties(part: str) -> bytes:
             target.writestr(item, added.get(item.filename, lambda b: b)(blob))
         target.writestr("docProps/custom.xml", part)
     return buffer.getvalue()
+
+
+def with_external_custom_properties() -> bytes:
+    """The smallest valid .docx, whose custom properties relationship points outside
+    the package (`TargetMode="External"`), so it has no part to read."""
+    return with_part(
+        "_rels/.rels",
+        lambda blob: blob.replace(
+            b"</Relationships>",
+            b'<Relationship Id="rIdCustom" Type="http://schemas.openxmlformats.org/'
+            b'officeDocument/2006/relationships/custom-properties" '
+            b'Target="https://example.com/custom.xml" TargetMode="External"/>'
+            b"</Relationships>",
+        ),
+    )

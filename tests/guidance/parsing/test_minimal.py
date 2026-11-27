@@ -61,6 +61,11 @@ class TestParseMinimal:
 
         assert parser.parse_minimal(source).document_id_link is None
 
+    def test_a_file_whose_custom_properties_are_outside_it_has_none(self):
+        source = word_documents.with_external_custom_properties()
+
+        assert parser.parse_minimal(source).document_id_link is None
+
     def test_a_file_with_no_document_id_link_has_none(self, docx_bytes):
         assert parser.parse_minimal(docx_bytes()).document_id_link is None
 
