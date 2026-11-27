@@ -14,7 +14,7 @@ import uuid
 import pymongo.errors
 import pytest
 
-from app.guidance import ids, models, records
+from app.guidance import ids, models, records, source_links
 
 
 @pytest.fixture
@@ -341,3 +341,121 @@ class TestIndexes:
         keys = {name for index in indexes.values() for name, _ in index["key"]}
 
         assert {f"metadata.{key}" for key in models.FILTERABLE_METADATA} <= keys
+
+
+SAVED = dt.datetime(2026, 11, 27, 9, 0, tzinfo=dt.UTC)
+
+
+def _canonical() -> str:
+    """A canonical link to a Word document of its own, so that no other case's
+    versions name it."""
+    return f"https://example.sharepoint.com/teams/team1234/claims/{uuid.uuid4()}.docx"
+
+
+async def _saved(
+    database, guide: ids.DocumentId, minutes: int, canonical: str | None
+) -> None:
+    """A version of `guide` saved `minutes` after SAVED, from `canonical`, or from no
+    source link."""
+    await records.create_version(
+        database,
+        models.Version(
+            id=ids.new_version_id(),
+            document_id=guide,
+            content_url="s3://docs/content.md",
+            created_at=SAVED + dt.timedelta(minutes=minutes),
+            source_link=(
+                None
+                if canonical is None
+                else source_links.SourceLink(f"{canonical}?d=w1&web=1", canonical)
+            ),
+        ),
+    )
+
+
+class TestGuidesKnownBySourceLinks:
+    async def test_a_guide_is_known_by_its_latest_versions_source_link(self, database):
+        guide, form = ids.new_document_id(), _canonical()
+        await _saved(database, guide, 0, form)
+
+        known = await records.guides_known_by(database, [form, _canonical()])
+
+        assert known == {form: guide}
+
+    async def test_a_guide_is_known_by_an_earlier_versions_source_link_too(
+        self, database
+    ):
+        guide, before, after = ids.new_document_id(), _canonical(), _canonical()
+        await _saved(database, guide, 0, before)
+        await _saved(database, guide, 1, after)
+
+        known = await records.guides_known_by(database, [before, after])
+
+        assert known == {before: guide, after: guide}
+
+    async def test_a_guide_is_known_by_an_earlier_source_link_when_its_latest_has_none(
+        self, database
+    ):
+        guide, form = ids.new_document_id(), _canonical()
+        await _saved(database, guide, 0, form)
+        await _saved(database, guide, 1, None)
+
+        known = await records.guides_known_by(database, [form])
+
+        assert known == {form: guide}
+
+    async def test_a_link_names_the_guide_whose_latest_version_has_it(self, database):
+        holds_it_now, held_it_later, form = (
+            ids.new_document_id(),
+            ids.new_document_id(),
+            _canonical(),
+        )
+        await _saved(database, holds_it_now, 0, form)
+        await _saved(database, held_it_later, 1, form)
+        await _saved(database, held_it_later, 2, _canonical())
+
+        known = await records.guides_known_by(database, [form])
+
+        assert known == {form: holds_it_now}
+
+    async def test_a_link_no_latest_version_has_names_the_guide_that_held_it_last(
+        self, database
+    ):
+        held_it_first, held_it_last, form = (
+            ids.new_document_id(),
+            ids.new_document_id(),
+            _canonical(),
+        )
+        await _saved(database, held_it_first, 0, form)
+        await _saved(database, held_it_last, 1, form)
+        await _saved(database, held_it_first, 2, _canonical())
+        await _saved(database, held_it_last, 3, None)
+
+        known = await records.guides_known_by(database, [form])
+
+        assert known == {form: held_it_last}
+
+    async def test_names_no_guide_for_no_links(self, database):
+        assert await records.guides_known_by(database, []) == {}
+
+    async def test_are_found_through_the_index_on_the_canonical_source_link(
+        self, database
+    ):
+        form = _canonical()
+        await _saved(database, ids.new_document_id(), 0, form)
+        before = await _uses_of_the_source_link_index(database)
+
+        await records.guides_known_by(database, [form])
+
+        assert await _uses_of_the_source_link_index(database) > before
+
+
+async def _uses_of_the_source_link_index(database) -> int:
+    """How many operations have used the index on each version's canonical source
+    link."""
+    cursor = await database[records.VERSIONS].aggregate([{"$indexStats": {}}])
+    async for index in cursor:
+        if index["key"] == {"sourceLink.canonicalLink": 1}:
+            return index["accesses"]["ops"]
+    message = "No index on sourceLink.canonicalLink"
+    raise AssertionError(message)

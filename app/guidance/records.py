@@ -39,6 +39,9 @@ _UPLOAD_ID = "source.uploadId"
 
 _METADATA = "metadata"
 _TITLE = "title"
+# The canonical link of the document a version came from, by which links in guides
+# name the guide.
+_CANONICAL_SOURCE_LINK = "sourceLink.canonicalLink"
 
 # The document a version belongs to: the many end of the one-to-many. Its name is the
 # model's, which owns how a version is stored.
@@ -87,6 +90,10 @@ async def ensure_indexes(
     )
     for key in models.FILTERABLE_METADATA:
         await database[DOCUMENTS].create_index(f"{_METADATA}.{key}")
+    await database[VERSIONS].create_index(
+        _CANONICAL_SOURCE_LINK,
+        partialFilterExpression={_CANONICAL_SOURCE_LINK: {"$exists": True}},
+    )
 
 
 @mongo_timeouts.mongo(mongo_timeouts.FAST)
@@ -450,6 +457,44 @@ async def latest_versions_of(
         group["_id"]: models.Version.from_document(group["newest"])
         async for group in cursor
     }
+
+
+@mongo_timeouts.mongo(mongo_timeouts.STANDARD)
+async def guides_known_by(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    canonical_links: Collection[str],
+) -> dict[str, ids.DocumentId]:
+    """The guide each of `canonical_links` names, where one does.
+
+    A guide is known by the source link of any of its versions, so that a new source
+    link does not break the links to an earlier one. When two guides have held a link,
+    the guide whose latest version has it names it; when neither has it in its latest
+    version, the guide that held it last does.
+    """
+    if not canonical_links:
+        return {}
+    cursor = (
+        database[VERSIONS]
+        .find(
+            {_CANONICAL_SOURCE_LINK: {_IN: list(canonical_links)}},
+            {DOCUMENT_ID: 1, _CANONICAL_SOURCE_LINK: 1},
+        )
+        .sort(_NEWEST)
+    )
+    known: dict[str, ids.DocumentId] = {}
+    holders: set[ids.DocumentId] = set()
+    async for held in cursor:
+        known.setdefault(held["sourceLink"]["canonicalLink"], held[DOCUMENT_ID])
+        holders.add(held[DOCUMENT_ID])
+
+    latest = await latest_versions_of(database, list(holders))
+    for guide, version in sorted(latest.items(), key=lambda each: each[1].created_at):
+        if (
+            version.source_link is not None
+            and version.source_link.canonical_link in known
+        ):
+            known[version.source_link.canonical_link] = guide
+    return known
 
 
 @mongo_timeouts.mongo(mongo_timeouts.HEAVY)
