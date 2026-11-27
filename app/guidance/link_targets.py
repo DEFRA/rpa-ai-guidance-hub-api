@@ -91,11 +91,14 @@ def _unwrapped(parts: urllib.parse.SplitResult) -> urllib.parse.SplitResult:
 
 
 def _split(link: str) -> urllib.parse.SplitResult:
-    """`link`'s parts, or none for an address that cannot be read (`https://[x`)."""
+    """`link`'s parts, or none for an address that cannot be read as a browser reads
+    it: a malformed one (`https://[x`), or one with a backslash in its host part,
+    which a browser reads as a slash, so that it goes to another host."""
     try:
-        return urllib.parse.urlsplit(link.strip())
+        parts = urllib.parse.urlsplit(link.strip())
     except ValueError:
         return _UNREADABLE
+    return _UNREADABLE if "\\" in parts.netloc else parts
 
 
 def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
