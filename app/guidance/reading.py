@@ -97,27 +97,69 @@ def links_of(markdown: str) -> list[Link]:
 
 
 @dataclasses.dataclass(frozen=True)
-class LinkLines:
-    """Where a link goes, as written, and the lines of the block it is in: from
-    `first` up to, not including, `end`, counting from 0."""
+class LinkAddress:
+    """Where a link goes, and where its address is written in the guide: from `start`
+    up to `end`, as offsets in the Markdown."""
 
     destination: str
-    first: int
+    start: int
     end: int
 
 
-def link_lines(markdown: str) -> list[LinkLines]:
-    """Every link in the guide, in order, with the lines of its block."""
-    found: list[LinkLines] = []
+def link_addresses(markdown: str) -> list[LinkAddress]:
+    """Every link that has an address of its own, in order; a reference-style link has
+    none. The parser notes where each address is in its block's inline text, which
+    lacks the block's indents, quote marks and table pipes; the address is the same
+    occurrence of the same text in the block's lines, counted from the start."""
+    starts = _line_starts(markdown)
+    read: dict[tuple[int, int], str] = {}
+    found: list[LinkAddress] = []
     for token in _reader().parse(markdown):
-        if token.map is None:
+        if token.type != "inline" or token.map is None:
             continue
         first, end = token.map
-        found.extend(
-            LinkLines(destination, first, end)
-            for destination, _ in _links_in(token.children or [])
-        )
+        before = read.get((first, end), "")
+        block = markdown[starts[first] : starts[end]]
+        for child in token.children or []:
+            span = child.meta.get(_ADDRESS) if child.type == "link_open" else None
+            if span is None:
+                continue
+            written = token.content[span[0] : span[1]]
+            nth = len(_places(before + token.content[: span[0]], written))
+            places = _places(block, written)
+            if nth < len(places):
+                at = starts[first] + places[nth]
+                found.append(
+                    LinkAddress(str(child.attrGet("href")), at, at + len(written))
+                )
+        read[(first, end)] = f"{before}{token.content}\n"
     return found
+
+
+def _places(text: str, part: str) -> list[int]:
+    """Where `part` starts in `text`, each time."""
+    places: list[int] = []
+    at = text.find(part)
+    while at >= 0:
+        places.append(at)
+        at = text.find(part, at + 1)
+    return places
+
+
+def _line_starts(text: str) -> list[int]:
+    """Where each line starts, as the parser counts lines (a line ends at `\r\n`, `\r`
+    or `\n`), and the end of the text."""
+    starts = [0]
+    at = 0
+    while at < len(text):
+        if text[at] not in "\r\n":
+            at += 1
+            continue
+        at += 2 if text.startswith("\r\n", at) else 1
+        starts.append(at)
+    if starts[-1] != len(text):
+        starts.append(len(text))
+    return starts
 
 
 def _links_in(children: list[md_token.Token]) -> list[tuple[str, str]]:
@@ -239,7 +281,44 @@ def _reader() -> markdown_it.MarkdownIt:
         .disable("text_join")
     )
     parser.inline.ruler.before("link", "colour_span", _colour_span)
+    parser.inline.ruler.at("link", _link_noting_address)
     return parser
+
+
+# Where a link's address is in its block's inline text, on its opening token.
+_ADDRESS = "address"
+
+
+def _link_noting_address(state: rules_inline.StateInline, silent: bool) -> bool:  # noqa: FBT001 - markdown-it's rule signature
+    """markdown-it's own link rule, noting on the link's opening token where its
+    address is written: the start and end of it in the inline text."""
+    start, pushed = state.pos, len(state.tokens)
+    if not rules_inline.link(state, silent):
+        return False
+    if not silent:
+        opening = next(
+            token for token in state.tokens[pushed:] if token.type == "link_open"
+        )
+        span = _address_after(state, start)
+        if span is not None:
+            opening.meta[_ADDRESS] = span
+    return True
+
+
+def _address_after(
+    state: rules_inline.StateInline, start: int
+) -> tuple[int, int] | None:
+    """Where the address of the link whose words start at `start` is written, or None
+    for a reference-style link, which has no address of its own."""
+    label_end = state.md.helpers.parseLinkLabel(state, start, True)
+    at = label_end + 1
+    if label_end < 0 or at >= state.posMax or state.src[at] != "(":
+        return None
+    at += 1
+    while at < state.posMax and state.src[at] in " \t\n":
+        at += 1
+    destination = state.md.helpers.parseLinkDestination(state.src, at, state.posMax)
+    return (at, destination.pos) if destination.ok else None
 
 
 def _colour_span(state: rules_inline.StateInline, silent: bool) -> bool:  # noqa: FBT001 - markdown-it's rule signature

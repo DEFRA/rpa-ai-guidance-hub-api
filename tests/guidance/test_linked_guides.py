@@ -87,6 +87,13 @@ class TestALinkToAGuideInTheHub:
             f"1. Check the claim.\n\n    Then fill in [the form]({PAGE}).\n"
         )
 
+    def test_written_with_an_escape_points_at_the_guides_page(self):
+        written = FORM.replace("&", "\\&")
+
+        assert _pointed(f"Fill in [the form]({written}).\n") == (
+            f"Fill in [the form]({PAGE}).\n"
+        )
+
     def test_written_twice_points_at_the_guides_page_each_time(self):
         markdown = f"[the form]({FORM})\n\n- [the form again]({FORM})\n"
 
