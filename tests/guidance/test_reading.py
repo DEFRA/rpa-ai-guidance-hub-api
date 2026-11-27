@@ -115,6 +115,96 @@ class TestTheText:
 
         assert _texts(markdown) == [("steps", "\n".join(lines))]
 
+    def test_has_a_line_for_each_item_of_a_list_in_a_table_cell_without_its_mark(
+        self,
+    ):
+        markdown = (
+            "## Steps\n\n| Do | How |\n| --- | --- |\n| Pay | - Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nDo\nHow\nPay\nApply\nRecord")]
+
+    def test_has_the_lines_before_a_list_in_a_table_cell_as_one_line(self):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| Then:<br>first<br>- Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nThen: first\nApply\nRecord")]
+
+    def test_has_a_table_cell_as_one_line_when_a_line_after_a_mark_has_none(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| - Apply<br>then record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\n- Apply then record")]
+
+    def test_has_a_number_in_a_table_cell_as_words_not_as_a_mark(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| 1. Apply<br>2. Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\n1. Apply 2. Record")]
+
+    def test_has_a_table_cell_as_one_line_when_bold_runs_on_across_its_marks(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| **Intro<br>- Apply<br>- Record** |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply - Record")]
+
+    def test_has_a_table_cell_as_one_line_when_a_link_runs_on_across_its_marks(self):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| [Intro<br>- Apply<br>- Record](#a) |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply - Record")]
+
+    def test_has_a_table_cell_as_one_line_when_underline_runs_on_across_its_marks(
+        self,
+    ):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| <u>Intro<br>- Apply<br>- Record</u> |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply - Record")]
+
+    def test_has_a_list_in_a_table_cell_after_underline_closed_before_its_marks(
+        self,
+    ):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| <u>Intro</u><br>- Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
+    def test_has_a_list_in_a_table_cell_after_bold_closed_just_after_a_break(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| **Intro<br>**- Apply<br>- Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
+    def test_has_a_list_in_a_table_cell_after_a_link_closed_just_after_a_break(self):
+        markdown = (
+            "## Steps\n\n| How |\n| --- |\n| [Intro<br>](#a)- Apply<br>- Record |"
+        )
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
+    def test_has_a_list_in_a_table_cell_whose_marks_are_escaped(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| \\- Apply<br>\\- Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nApply\nRecord")]
+
+    def test_has_a_list_in_a_table_cell_whose_marks_are_entities(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| &#45; Apply<br>&#45; Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nApply\nRecord")]
+
+    def test_has_a_table_cell_as_one_line_when_underline_with_attributes_runs_on(
+        self,
+    ):
+        markdown = '## Steps\n\n| How |\n| --- |\n| <u class="x">Intro<br>- Apply</u> |'
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro - Apply")]
+
+    def test_has_a_list_in_a_table_cell_after_bold_closed_before_its_marks(self):
+        markdown = "## Steps\n\n| How |\n| --- |\n| **Intro**<br>- Apply<br>- Record |"
+
+        assert _texts(markdown) == [("steps", "Steps\nHow\nIntro\nApply\nRecord")]
+
     def test_has_one_space_between_words_where_a_paragraph_wraps(self):
         assert _texts("## Paying\n\nPay the\nclaim   in full.") == [
             ("paying", "Paying\nPay the claim in full.")

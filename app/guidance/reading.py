@@ -59,9 +59,8 @@ def sections_of(markdown: str) -> list[SectionText]:
         if _starts_section(token):
             lines = []
             sections.append((_numbered(_as_named(tokens[at + 1]), seen), lines))
-        line = _readable(token)
-        if line:
-            lines.append(line)
+        in_cell = at > 0 and tokens[at - 1].type in _CELL_OPENS
+        lines.extend(_cell_lines(token) if in_cell else _one_line(token))
 
     found = [SectionText(None, "\n".join(introduction))] if introduction else []
     return found + [SectionText(anchor, "\n".join(text)) for anchor, text in sections]
@@ -163,6 +162,87 @@ def _numbered(heading: str, seen: dict[str, int]) -> str:
     count = seen.get(base, 0)
     seen[base] = count + 1
     return base if count == 0 else f"{base}-{count}"
+
+
+# What opens a table cell, whose inline token follows it.
+_CELL_OPENS = ("td_open", "th_open")
+# What starts an item of a list in a table cell, as the guide page reads it.
+_ITEM_MARK = "- "
+
+
+def _one_line(token: md_token.Token) -> list[str]:
+    """A block token's words as its one line, or none when it has none."""
+    line = _readable(token)
+    return [line] if line else []
+
+
+def _cell_lines(token: md_token.Token) -> list[str]:
+    """A table cell's lines, as the guide page shows them. Its parts between `<br>`s
+    are a list from the first that starts with an unstyled "- ", when each part after
+    it does too: each item a line of its own, without its mark, after the parts
+    before it as one line. Otherwise the cell is one line (the UI's
+    `tiptap/tables.js`, `promote`). A part is unstyled when no formatting opened
+    before it is still open: bold, a link and the like, and `<u>`, `<sup>`, `<sub>`.
+    Formatting that closes at the very start of a part closes before its words, so it
+    goes with the part before."""
+    parts: list[list[md_token.Token]] = [[]]
+    styled = [False]
+    open_marks = 0
+    for child in token.children or []:
+        if child.type == "html_inline" and _is_break(child.content):
+            parts.append([])
+            styled.append(open_marks > 0)
+            continue
+        change = child.nesting + _tag_nesting(child)
+        open_marks += change
+        if len(parts) > 1 and not parts[-1] and change < 0:
+            parts[-2].append(child)
+            styled[-1] = open_marks > 0
+        else:
+            parts[-1].append(child)
+    starts_item = [
+        not is_styled and _is_item(part)
+        for part, is_styled in zip(parts, styled, strict=True)
+    ]
+    first = next((at for at, item in enumerate(starts_item) if item), None)
+    if first is None or not all(starts_item[first:]):
+        return _one_line(token)
+    lead = " ".join(_words_of(part) for part in parts[:first])
+    items = [_words_of(part).removeprefix(_ITEM_MARK) for part in parts[first:]]
+    found = (" ".join(line.split()) for line in [lead, *items])
+    return [line for line in found if line]
+
+
+def _tag_nesting(token: md_token.Token) -> int:
+    """1 for an underline, superscript or subscript tag that opens, with or without
+    attributes, -1 for one that closes, else 0: the parser gives these no nesting of
+    their own."""
+    if token.type != "html_inline":
+        return 0
+    tag = token.content.strip("<>/ ").split(maxsplit=1)[0].lower()
+    if tag not in _STYLE_TAGS:
+        return 0
+    return -1 if token.content.startswith("</") else 1
+
+
+_STYLE_TAGS = ("u", "sup", "sub")
+
+
+def _is_item(part: list[md_token.Token]) -> bool:
+    """Whether a part of a cell starts with an unmarked "- ", however its dash is
+    written: plain, escaped or as an entity, which the parser gives a token of its
+    own."""
+    leading = ""
+    for token in part:
+        if token.type not in ("text", "text_special"):
+            break
+        leading += token.content
+    return leading.startswith(_ITEM_MARK)
+
+
+def _words_of(part: list[md_token.Token]) -> str:
+    """The words a part of a cell shows, as written."""
+    return "".join(_words(child) for child in part)
 
 
 def _readable(token: md_token.Token) -> str:
