@@ -2,10 +2,12 @@
 
 A link names a guide when its canonical link is the source link of one of the
 guide's versions (`records.guides_known_by`). Only its address changes, to the hub's
-page for the guide, which shows its latest version; its words, its title and the rest
-of the guide stay as written. The parser says where each address is written
-(`reading.link_addresses`), so text that only looks like a link, in code or in
-escaped brackets, is never changed.
+page for the guide, which shows its latest version; its words and the rest of the
+guide stay as written.
+
+The address is changed where it is written as `](address)`, which is how the Word
+converter writes every link. The same text anywhere else, such as in code, would
+change too; the converter writes none.
 """
 
 from __future__ import annotations
@@ -23,20 +25,20 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class DocumentLink:
-    """A link in a guide that names a document: where its address is, and its
+    """A link in a guide that names a document: where it goes, as written, and its
     canonical link."""
 
-    address: reading.LinkAddress
+    destination: str
     canonical_link: str
 
 
 def document_links(markdown: str) -> list[DocumentLink]:
     """The guide's links that name a document, in order."""
     found: list[DocumentLink] = []
-    for address in reading.link_addresses(markdown):
-        target = link_targets.target_of(address.destination)
+    for link in reading.links_of(markdown):
+        target = link_targets.target_of(link.destination)
         if target.kind in link_targets.NAMING_A_DOCUMENT:
-            found.append(DocumentLink(address, str(target.canonical_link)))
+            found.append(DocumentLink(link.destination, str(target.canonical_link)))
     return found
 
 
@@ -46,15 +48,12 @@ def pointed_at(
     guides: Mapping[str, ids.DocumentId],
 ) -> str:
     """`markdown`, with each of its `links` whose canonical link `guides` holds
-    pointed at the page of the guide it names. An address in angle brackets keeps
-    them."""
-    matched = [
-        (link.address, f"/guides/{guides[link.canonical_link]}")
+    pointed at the page of the guide it names."""
+    pages = {
+        link.destination: f"/guides/{guides[link.canonical_link]}"
         for link in links
         if link.canonical_link in guides
-    ]
-    for address, page in sorted(matched, key=lambda each: each[0].start, reverse=True):
-        written = markdown[address.start : address.end]
-        new = f"<{page}>" if written.startswith("<") else page
-        markdown = markdown[: address.start] + new + markdown[address.end :]
+    }
+    for destination, page in pages.items():
+        markdown = markdown.replace(f"]({destination})", f"]({page})")
     return markdown

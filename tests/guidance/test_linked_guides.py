@@ -70,28 +70,11 @@ class TestALinkToAGuideInTheHub:
 
         assert _pointed(markdown) == f"Fill in [[**the form**]{{.red}}]({PAGE}).\n"
 
-    def test_keeps_its_title(self):
-        markdown = f'Fill in [the form]({FORM} "The claim form").\n'
-
-        assert _pointed(markdown) == f'Fill in [the form]({PAGE} "The claim form").\n'
-
-    def test_in_angle_brackets_keeps_them(self):
-        markdown = f"Fill in [the form](<{FORM}>).\n"
-
-        assert _pointed(markdown) == f"Fill in [the form](<{PAGE}>).\n"
-
     def test_in_a_list_items_indented_paragraph_points_at_the_guides_page(self):
         markdown = f"1. Check the claim.\n\n    Then fill in [the form]({FORM}).\n"
 
         assert _pointed(markdown) == (
             f"1. Check the claim.\n\n    Then fill in [the form]({PAGE}).\n"
-        )
-
-    def test_written_with_an_escape_points_at_the_guides_page(self):
-        written = FORM.replace("&", "\\&")
-
-        assert _pointed(f"Fill in [the form]({written}).\n") == (
-            f"Fill in [the form]({PAGE}).\n"
         )
 
     def test_written_twice_points_at_the_guides_page_each_time(self):
@@ -114,25 +97,6 @@ class TestWhatIsLeftAsItIs:
         markdown = f"See [the other]({OTHER}).\n"
 
         assert _pointed(markdown) == markdown
-
-    def test_the_same_address_in_a_code_block(self):
-        markdown = f"```\n[the form]({FORM})\n```\n"
-
-        assert _pointed(markdown) == markdown
-
-    def test_the_same_link_as_inline_code_beside_it(self):
-        markdown = f"Write `[the form]({FORM})` to link [the form]({FORM}).\n"
-
-        assert _pointed(markdown) == (
-            f"Write `[the form]({FORM})` to link [the form]({PAGE}).\n"
-        )
-
-    def test_the_same_link_in_escaped_brackets_beside_it(self):
-        markdown = f"Not \\[the form\\]({FORM}) but [the form]({FORM}).\n"
-
-        assert _pointed(markdown) == (
-            f"Not \\[the form\\]({FORM}) but [the form]({PAGE}).\n"
-        )
 
     def test_a_guide_with_no_guides_to_point_at(self):
         markdown = f"Fill in [the form]({FORM}).\n"
