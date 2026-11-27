@@ -66,25 +66,25 @@ _UNREADABLE = urllib.parse.urlsplit("")
 
 def target_of(link: str) -> Target:
     """What `link`, as written in a guide, points at. Only a link reached by http or
-    https can be SharePoint's: any other with a SharePoint host is external."""
+    https can be SharePoint's or a safe link: any other with such a host is external."""
     if link.startswith("#"):
         return Target(Kind.INTERNAL)
 
     parts = _unwrapped(_split(link))
     if parts.scheme.lower() == "file":
         return Target(Kind.NETWORK_SHARE)
-    if not _is_sharepoint(parts):
+    if not _is_web_link_under(parts, _SHAREPOINT):
         return Target(Kind.EXTERNAL)
     return _sharepoint(parts)
 
 
-def _is_sharepoint(parts: urllib.parse.SplitResult) -> bool:
-    return parts.scheme.lower() in _WEB and (parts.hostname or "").endswith(_SHAREPOINT)
+def _is_web_link_under(parts: urllib.parse.SplitResult, domain: str) -> bool:
+    return parts.scheme.lower() in _WEB and (parts.hostname or "").endswith(domain)
 
 
 def _unwrapped(parts: urllib.parse.SplitResult) -> urllib.parse.SplitResult:
     """The link an Outlook safe link wraps, or the link itself."""
-    if not (parts.hostname or "").endswith(_SAFE_LINKS):
+    if not _is_web_link_under(parts, _SAFE_LINKS):
         return parts
     wrapped = dict(urllib.parse.parse_qsl(parts.query)).get("url")
     return parts if wrapped is None else _split(wrapped)

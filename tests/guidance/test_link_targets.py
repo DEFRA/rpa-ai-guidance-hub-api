@@ -207,6 +207,12 @@ class TestALinkNeverCanonicalised:
                 id="a SharePoint host reached by neither http nor https",
             ),
             pytest.param(
+                "javascript://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2F"
+                "example.sharepoint.com%2FGuide.docx",
+                link_targets.Kind.EXTERNAL,
+                id="a safe link reached by neither http nor https",
+            ),
+            pytest.param(
                 "https://[broken",
                 link_targets.Kind.EXTERNAL,
                 id="an address that cannot be read",
