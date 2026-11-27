@@ -6,17 +6,19 @@ its id or by its path, with its spaces as `%20` or `+`, in any case, behind an
 Outlook safe link, and with query noise that changes from one copy to the next. Its
 canonical link is what is left when all that is evened out: the address in lower
 case, encoded one way, with only what identifies the target - a document's id and
-name (`sourcedoc`, `file`), a library view's folder (`id`), or nothing for a path.
-Two links to one document in the same form have the same canonical link; a document
-linked in two forms has two, since only SharePoint itself could say for sure that
-two forms are one document, and so each form is remapped on its own.
+name (`sourcedoc`, `file`), a library view's folder or a Document ID (`id`), or nothing
+for a path. Two links to one document in the same form have the same canonical link;
+a document linked in two forms has two, since only SharePoint itself could say for
+sure that two forms are one document, and so each form is remapped on its own.
 
 A link is a **named Word document** when it is marked as Word, or not marked at all,
 and names a `.docx` file: by `file=`, by the path in `sourcedoc` or `id`, or by
 its own path. Any other SharePoint link - a folder, a page, a sharing link that names
-nothing, another kind of file - is another SharePoint item. A link to any other site,
-or one whose address cannot be read, is external, and a `file:` link names a network
-share; neither is canonicalised.
+nothing, another kind of file - is another SharePoint item, except a **Document ID
+link** (`/_layouts/15/DocIdRedir.aspx?ID=…`), which names a document by the id the
+Document ID service gave it, kept when it moves. A link to any other site, or one
+whose address cannot be read, is external, and a `file:` link names a network share;
+neither is canonicalised.
 """
 
 from __future__ import annotations
@@ -28,16 +30,23 @@ import urllib.parse
 
 class Kind(enum.StrEnum):
     WORD_DOCUMENT = "word-document"
+    DOCUMENT_ID = "document-id"
     SHAREPOINT_OTHER = "sharepoint-other"
     EXTERNAL = "external"
     INTERNAL = "internal"
     NETWORK_SHARE = "network-share"
 
 
+# The kinds of link that name a document for certain: a guide keeps them, and a
+# source link must be one.
+NAMING_A_DOCUMENT = (Kind.WORD_DOCUMENT, Kind.DOCUMENT_ID)
+
+
 @dataclasses.dataclass(frozen=True)
 class Target:
     """What a link points at. Only a SharePoint item has a canonical link, and only
-    a named Word document a file name, as the link gives it."""
+    a named Word document, or a Document ID link naming a Word file, a file name, as
+    the link gives it."""
 
     kind: Kind
     canonical_link: str | None = None
@@ -60,6 +69,8 @@ _BY_PATH = "r"
 
 _DOCX = ".docx"
 _PAGE = ".aspx"
+_DOCUMENT_ID_PAGE = "docidredir.aspx"
+_LAYOUTS = "_layouts"
 
 _UNREADABLE = urllib.parse.urlsplit("")
 
@@ -92,10 +103,12 @@ def _unwrapped(parts: urllib.parse.SplitResult) -> urllib.parse.SplitResult:
 
 def _split(link: str) -> urllib.parse.SplitResult:
     """`link`'s parts, or none for an address that cannot be read as a browser reads
-    it: a malformed one (`https://[x`), or one with a backslash in its host part,
-    which a browser reads as a slash, so that it goes to another host."""
+    it: a malformed one (`https://[x`), one with a malformed or out-of-range port
+    (`:not-a-port`, `:99999`), or one with a backslash in its host part, which a
+    browser reads as a slash, so that it goes to another host."""
     try:
         parts = urllib.parse.urlsplit(link.strip())
+        parts.port  # noqa: B018 - raises ValueError for a bad port
     except ValueError:
         return _UNREADABLE
     return _UNREADABLE if "\\" in parts.netloc else parts
@@ -108,13 +121,26 @@ def _sharepoint(parts: urllib.parse.SplitResult) -> Target:
     path = segments[2:] if by_path else segments
     query = _identifying(parts.query)
 
+    host = parts.hostname or ""
     named = _file_name(path, query)
-    is_word = marker in ("", _WORD) and named is not None and _is_docx(named)
+    word_file = named if named is not None and _is_docx(named) else None
+    if _is_document_id_handler(path) and query.get("id"):
+        canonical = _canonical(host, path, {"id": query["id"]})
+        return Target(Kind.DOCUMENT_ID, canonical, word_file)
+
+    is_word = marker in ("", _WORD) and word_file is not None
     return Target(
         Kind.WORD_DOCUMENT if is_word else Kind.SHAREPOINT_OTHER,
-        _canonical(parts.hostname or "", path, query),
+        _canonical(host, path, query),
         named if is_word else None,
     )
+
+
+def _is_document_id_handler(path: list[str]) -> bool:
+    """Whether a path is SharePoint's Document ID handler, `DocIdRedir.aspx` in its
+    `_layouts` folder (`/_layouts/15/` today); a page of that name elsewhere is not."""
+    folders = [segment.lower() for segment in path[:-1]]
+    return bool(path) and path[-1].lower() == _DOCUMENT_ID_PAGE and _LAYOUTS in folders
 
 
 def _is_marker(segment: str) -> bool:

@@ -16,7 +16,7 @@ import datetime as dt
 from collections.abc import Mapping
 from typing import Any
 
-from app.guidance import ids
+from app.guidance import ids, source_links
 
 # The document a version belongs to: the many end of the one-to-many.
 DOCUMENT_ID = "documentId"
@@ -129,6 +129,9 @@ class Version:
     # The guide's details as given with this version: None for one saved before
     # versions kept their own.
     metadata: Mapping[str, Any] | None = None
+    # Where the maintainer said the document came from, as given and canonical: None
+    # when they gave none, as for every version saved before there were source links.
+    source_link: source_links.SourceLink | None = None
 
     def to_document(self) -> dict[str, Any]:
         created_by = (
@@ -163,6 +166,16 @@ class Version:
             **given,
             **({} if self.follows is None else {FOLLOWS: self.follows}),
             **({} if self.metadata is None else {"metadata": dict(self.metadata)}),
+            **(
+                {}
+                if self.source_link is None
+                else {
+                    "sourceLink": {
+                        "link": self.source_link.link,
+                        "canonicalLink": self.source_link.canonical_link,
+                    }
+                }
+            ),
         }
 
     @classmethod
@@ -192,6 +205,14 @@ class Version:
             upload_id=source.get("uploadId"),
             file_id=source.get("fileId"),
             metadata=document.get("metadata"),
+            source_link=(
+                None
+                if "sourceLink" not in document
+                else source_links.SourceLink(
+                    document["sourceLink"]["link"],
+                    document["sourceLink"]["canonicalLink"],
+                )
+            ),
         )
 
 

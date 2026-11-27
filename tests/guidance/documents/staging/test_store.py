@@ -82,6 +82,7 @@ class TestMarkComplete:
             title="Guidance Scheme A",
             version="1.2",
             last_modified=last_modified,
+            document_id_link="https://example.sharepoint.com/_layouts/15/DocIdRedir.aspx?ID=A-1-2",
         )
 
         await staging_store.mark_complete(file_id, info)
@@ -93,6 +94,9 @@ class TestMarkComplete:
         assert staged_document.title == "Guidance Scheme A"
         assert staged_document.version == "1.2"
         assert staged_document.last_modified == last_modified
+        assert staged_document.document_id_link == (
+            "https://example.sharepoint.com/_layouts/15/DocIdRedir.aspx?ID=A-1-2"
+        )
         assert staged_document.parse_error is None
 
 

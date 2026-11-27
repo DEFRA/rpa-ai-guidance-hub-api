@@ -4,6 +4,8 @@ Each case is a form of link seen in the guides (554 links, read on 2026-10-30), 
 the site, ids and names invented, as everywhere in this package.
 """
 
+import urllib.parse
+
 import pytest
 
 from app.guidance import link_targets
@@ -142,6 +144,65 @@ class TestANamedWordDocument:
         assert _target(link).canonical_link == WORD_BY_PATH_CANONICAL
 
 
+DOCUMENT_ID_LINK = (
+    "https://example.sharepoint.com/teams/Team1234/_layouts/15/DocIdRedir.aspx"
+    "?ID=RPAINTRA-405-3434"
+)
+
+
+class TestADocumentIdLink:
+    """The link SharePoint's Document ID service gives a document, which stays the
+    same when the document moves."""
+
+    def test_keeps_only_the_id(self):
+        target = _target(f"{DOCUMENT_ID_LINK}&web=1")
+
+        assert target.kind == link_targets.Kind.DOCUMENT_ID
+        assert target.canonical_link == (
+            "https://example.sharepoint.com/teams/team1234/_layouts/15/docidredir.aspx"
+            "?id=rpaintra-405-3434"
+        )
+        assert target.file_name is None
+
+    def test_keeps_its_id_alone_whatever_else_its_query_names(self):
+        """So one document has one canonical link, however it is linked by its ID."""
+        link = f"{DOCUMENT_ID_LINK}&file=Old%20Name.docx&sourcedoc=%7BAB12%7D"
+
+        assert _target(link).canonical_link == _target(DOCUMENT_ID_LINK).canonical_link
+
+    def test_behind_a_safe_link_is_the_link_it_wraps(self):
+        link = (
+            "https://eur03.safelinks.protection.outlook.com/?url="
+            + urllib.parse.quote(DOCUMENT_ID_LINK, safe="")
+            + "&data=05%7C02"
+        )
+
+        assert _target(link) == _target(DOCUMENT_ID_LINK)
+
+    def test_naming_a_word_file_keeps_its_name(self):
+        target = _target(f"{DOCUMENT_ID_LINK}&file=Claim%20Form.docx")
+
+        assert (target.kind, target.file_name) == (
+            link_targets.Kind.DOCUMENT_ID,
+            "Claim Form.docx",
+        )
+
+    def test_of_the_same_name_outside_the_layouts_folder_is_another_sharepoint_item(
+        self,
+    ):
+        """Only SharePoint's own handler, under `_layouts`, redirects by the ID."""
+        link = "https://example.sharepoint.com/teams/T/SitePages/DocIdRedir.aspx?ID=42"
+
+        assert _target(link).kind == link_targets.Kind.SHAREPOINT_OTHER
+
+    def test_without_an_id_is_another_sharepoint_item(self):
+        link = (
+            "https://example.sharepoint.com/teams/Team1234/_layouts/15/DocIdRedir.aspx"
+        )
+
+        assert _target(link).kind == link_targets.Kind.SHAREPOINT_OTHER
+
+
 class TestAnotherSharePointItem:
     @pytest.mark.parametrize(
         ("link", "canonical"),
@@ -244,6 +305,23 @@ class TestALinkNeverCanonicalised:
                 "%5Bbroken&data=05%7C02",
                 link_targets.Kind.EXTERNAL,
                 id="an address that cannot be read behind a safe link",
+            ),
+            pytest.param(
+                "https://example.sharepoint.com:not-a-port/_layouts/15/"
+                "DocIdRedir.aspx?ID=A-1-2",
+                link_targets.Kind.EXTERNAL,
+                id="a port that is not a number",
+            ),
+            pytest.param(
+                "https://example.sharepoint.com:99999/Guide.docx",
+                link_targets.Kind.EXTERNAL,
+                id="a port out of range",
+            ),
+            pytest.param(
+                "https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2F"
+                "example.sharepoint.com%3A99999%2FGuide.docx&data=05%7C02",
+                link_targets.Kind.EXTERNAL,
+                id="a port out of range behind a safe link",
             ),
             pytest.param(
                 "file://share.example.gov.uk/user/Shared/Draft%20Letter",

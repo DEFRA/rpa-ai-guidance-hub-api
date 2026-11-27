@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 import docx
 import lxml.etree
+from docx.opc import constants as opc_constants
 from docx.opc.exceptions import PackageNotFoundError
+from docx.oxml import parser as oxml_parser
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
@@ -99,7 +101,43 @@ def parse_minimal(source: bytes) -> MinimalDocumentInfo:
         title=_extract_title(document),
         version=(core_properties.version or "").strip(),
         last_modified=core_properties.modified,
+        document_id_link=_document_id_link(document),
     )
+
+
+# The custom property SharePoint's Document ID service writes into a file in a library:
+# the link to the document by its ID, a comma, then the ID.
+_DOCUMENT_ID_URL = "_dlc_DocIdUrl"
+_CUSTOM_PROPERTY = (
+    "{http://schemas.openxmlformats.org/officeDocument/2006/custom-properties}property"
+)
+
+
+def _document_id_link(document: docx.document.Document) -> str | None:
+    """The link to the document by its SharePoint Document ID, if the file has one."""
+    for property_ in _custom_properties(document):
+        if property_.get("name") == _DOCUMENT_ID_URL:
+            link = "".join(property_.itertext()).partition(",")[0].strip()
+            return link or None
+    return None
+
+
+def _custom_properties(document: docx.document.Document) -> list[Any]:
+    """The file's custom properties, read without resolving entities; none for a file
+    that has no such part, or one outside it, or one that cannot be read. They are
+    SharePoint's, not the author's, so they never stop the file being read."""
+    package = document.part.package
+    for relationship in package.rels.values():
+        if (
+            relationship.reltype == opc_constants.RELATIONSHIP_TYPE.CUSTOM_PROPERTIES
+            and not relationship.is_external
+        ):
+            try:
+                properties = oxml_parser.parse_xml(relationship.target_part.blob)
+            except lxml.etree.XMLSyntaxError:
+                return []
+            return list(properties.iterchildren(_CUSTOM_PROPERTY))
+    return []
 
 
 def _open(source: bytes) -> docx.document.Document:

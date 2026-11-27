@@ -45,6 +45,8 @@ class StagedDocument:
     title: str | None = None
     version: str | None = None
     last_modified: datetime | None = None
+    # The link to the document by its SharePoint Document ID, if the file has one.
+    document_id_link: str | None = None
     parse_error: str | None = None
     # The ids a document made from this file is stored under, reserved the first
     # time it is created and reused by every attempt after (see store.reserve_ids).
@@ -69,6 +71,7 @@ class StagedDocument:
             "title": self.title,
             "version": self.version,
             "last_modified": self.last_modified,
+            "document_id_link": self.document_id_link,
             "parse_error": self.parse_error,
             "document_id": self.document_id,
             "version_id": self.version_id,
@@ -112,6 +115,7 @@ class StagedDocument:
             title=document.get("title", None),
             version=document.get("version", None),
             last_modified=last_modified,
+            document_id_link=document.get("document_id_link", None),
             parse_error=document.get("parse_error", None),
             document_id=document.get("document_id", None),
             version_id=document.get("version_id", None),

@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 import pydantic
 
-from app.guidance import ids, models
+from app.guidance import ids, models, source_links
 
 # The digits a version number is written in: ASCII only, where `str.isdigit` would
 # also take superscripts and other scripts' digits.
@@ -47,6 +47,16 @@ def _not_blank(title: str) -> str:
 
 
 Title = Annotated[str, pydantic.AfterValidator(_not_blank)]
+
+
+def _names_a_document(link: str) -> str:
+    """Refuse a link that names no Word document for certain. The details screen checks
+    it first (`CheckedSourceLink`), so this is for any other caller."""
+    source_links.checked(link)
+    return link
+
+
+SourceLinkGiven = Annotated[str, pydantic.AfterValidator(_names_a_document)]
 
 
 class Source(pydantic.BaseModel):
@@ -92,6 +102,12 @@ class NewDocument(pydantic.BaseModel):
         description="Two whole numbers with a full stop between them, such as 1.0",
     )
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
+    source_link: SourceLinkGiven | None = pydantic.Field(
+        default=None,
+        alias="sourceLink",
+        description="Where the maintainer says the document came from: a SharePoint "
+        "link to a named Word document, or a Document ID link",
+    )
 
     def document_for(
         self, document_id: ids.DocumentId, created_at: dt.datetime
@@ -123,6 +139,11 @@ class NewDocument(pydantic.BaseModel):
             created_at=created_at,
             upload_id=self.source.upload_id,
             file_id=self.source.file_id,
+            source_link=(
+                None
+                if self.source_link is None
+                else source_links.checked(self.source_link)
+            ),
         )
 
 
@@ -156,6 +177,7 @@ class Version(pydantic.BaseModel):
     version_number: str | None = pydantic.Field(default=None, alias="versionNumber")
     created_by: Person | None = pydantic.Field(default=None, alias="createdBy")
     created_at: dt.datetime = pydantic.Field(alias="createdAt")
+    source_link: str | None = pydantic.Field(default=None, alias="sourceLink")
 
     @classmethod
     def from_model(cls, version: models.Version) -> Version:
@@ -174,6 +196,7 @@ class Version(pydantic.BaseModel):
             versionNumber=version.version_number,
             createdBy=created_by,
             createdAt=version.created_at,
+            sourceLink=version.source_link.link if version.source_link else None,
         )
 
 
@@ -301,3 +324,24 @@ class DocumentPage(pydantic.BaseModel):
             nextCursor=page.next_cursor,
             counts=counts_from_model(page.counts),
         )
+
+
+class SourceLinkCheck(pydantic.BaseModel):
+    """A SharePoint link a maintainer gives for the document they upload."""
+
+    link: str
+
+
+class CheckedSourceLink(pydantic.BaseModel):
+    """A source link's canonical link when it is taken, or why it is not."""
+
+    canonical_link: str | None = pydantic.Field(alias="canonicalLink")
+    refusal: source_links.Refusal | None
+
+    @classmethod
+    def of(cls, link: str) -> CheckedSourceLink:
+        try:
+            checked = source_links.checked(link)
+        except source_links.RefusedSourceLinkError as refused:
+            return cls(canonicalLink=None, refusal=refused.reason)
+        return cls(canonicalLink=checked.canonical_link, refusal=None)

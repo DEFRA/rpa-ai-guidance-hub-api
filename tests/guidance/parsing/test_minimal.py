@@ -11,10 +11,15 @@ import pytest
 
 from app.guidance.parsing import parser
 from app.guidance.parsing.errors import DocumentParseError
+from tests.fixtures import word_documents
 
 TITLE = "Example Grant Scheme Guide"
 VERSION = "2.1"
 MODIFIED = datetime(2026, 3, 4, 9, 30, tzinfo=UTC)
+DOCUMENT_ID_LINK = (
+    "https://example.sharepoint.com/teams/Team1234/_layouts/15/DocIdRedir.aspx"
+    "?ID=RPAINTRA-405-3434"
+)
 
 
 class TestParseMinimal:
@@ -41,6 +46,28 @@ class TestParseMinimal:
         info = parser.parse_minimal(docx_bytes(core_title=TITLE))
 
         assert info.title == TITLE
+
+    def test_reads_the_document_id_link_sharepoint_wrote_into_the_file(self):
+        """Its value is the link, a comma, then the ID."""
+        source = word_documents.with_custom_property(
+            "_dlc_DocIdUrl", f"{DOCUMENT_ID_LINK}, RPAINTRA-405-3434"
+        )
+
+        assert parser.parse_minimal(source).document_id_link == DOCUMENT_ID_LINK
+
+    def test_a_file_whose_custom_properties_cannot_be_read_has_none(self):
+        """They are SharePoint's, not the author's: the file is still read."""
+        source = word_documents.with_custom_properties("<broken")
+
+        assert parser.parse_minimal(source).document_id_link is None
+
+    def test_a_file_whose_custom_properties_are_outside_it_has_none(self):
+        source = word_documents.with_external_custom_properties()
+
+        assert parser.parse_minimal(source).document_id_link is None
+
+    def test_a_file_with_no_document_id_link_has_none(self, docx_bytes):
+        assert parser.parse_minimal(docx_bytes()).document_id_link is None
 
     def test_raises_document_parse_error_for_a_file_that_is_not_a_docx(self):
         """AC7: unreadable is the only failure mode - not a missing field."""

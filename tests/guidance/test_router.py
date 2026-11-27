@@ -56,6 +56,23 @@ METADATA = {
 
 # Who was signed in, which is not who owns the document - see `records`.
 AUTHOR = {"id": "dev-user-123", "displayName": "Dev User"}
+# Where the maintainer says the document came from, and its canonical link.
+SOURCE_LINK = (
+    "https://example.sharepoint.com/:w:/r/teams/Team1234/Claims/"
+    "CS%20Revenue%20Claims.docx?d=w1&web=1"
+)
+SOURCE_CANONICAL = (
+    "https://example.sharepoint.com/teams/team1234/claims/cs%20revenue%20claims.docx"
+)
+# Where the maintainer says the next version came from: another edition's file.
+NEXT_SOURCE_LINK = (
+    "https://example.sharepoint.com/:w:/r/teams/Team1234/Claims/2026/"
+    "CS%20Revenue%20Claims%202026.docx?d=w2&web=1"
+)
+NEXT_SOURCE_CANONICAL = (
+    "https://example.sharepoint.com/teams/team1234/claims/2026/"
+    "cs%20revenue%20claims%202026.docx"
+)
 
 # A second upload: a new version of the document the first one made.
 NEXT_UPLOAD = "6f1d2c3b-1e8a-4c27-9b0d-3a5f7e9c1b24"
@@ -346,7 +363,19 @@ def document(client, staging, converts, mocker):
     Its sections' ids are not what the version cases are about, and need the
     versions' content and a real database: see the conversion's cases.
     """
-    client.post("/guides", json=_request())
+    return _made_with_next_staged(client, staging, converts, mocker, _request())
+
+
+@pytest.fixture
+def linked_document(client, staging, converts, mocker):
+    """As `document`, with the first version's source link given."""
+    return _made_with_next_staged(
+        client, staging, converts, mocker, _request(sourceLink=SOURCE_LINK)
+    )
+
+
+def _made_with_next_staged(client, staging, converts, mocker, first):
+    client.post("/guides", json=first)
     mocker.patch.object(conversion.section_ids, "of_new_version", return_value={})
     staging.minted = OTHER_DOCUMENT
     staging.stage(
@@ -480,6 +509,39 @@ class TestCreatingADocument:
         client.post("/guides", json=_request())
 
         assert versions.documents[0]["title"] == COVER_TITLE
+
+    def test_the_source_link_is_kept_as_given_with_its_canonical_link(
+        self, client, versions
+    ):
+        client.post("/guides", json=_request(sourceLink=SOURCE_LINK))
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert versions.documents[0]["sourceLink"] == {
+            "link": SOURCE_LINK,
+            "canonicalLink": SOURCE_CANONICAL,
+        }
+        assert body["versions"][0]["sourceLink"] == SOURCE_LINK
+
+    def test_without_a_source_link_the_version_has_none(self, client, versions):
+        """As every version saved before there were source links."""
+        client.post("/guides", json=_request())
+
+        body = client.get(f"/guides/{DOCUMENT}").json()
+
+        assert "sourceLink" not in versions.documents[0]
+        assert body["versions"][0]["sourceLink"] is None
+
+    def test_a_source_link_that_names_no_word_document_is_refused(
+        self, client, documents
+    ):
+        """The details screen checks it first; this is for any other caller."""
+        response = client.post(
+            "/guides", json=_request(sourceLink="https://www.gov.uk/claims")
+        )
+
+        assert response.status_code == 422
+        assert documents.documents == []
 
     @pytest.mark.parametrize("title", ["", " ", "   ", "\t\n"])
     def test_a_blank_title_is_refused(self, client, documents, title):
@@ -1138,6 +1200,55 @@ class TestAddingAVersionToADocument:
         assert response.status_code == 422
         assert len(submitter.sent) == 1
 
+    def test_a_version_whose_source_link_names_no_word_document_is_refused(
+        self, client, document, submitter
+    ):
+        response = client.post(
+            f"/guides/{document}/versions",
+            json=self._next(sourceLink="https://example.sharepoint.com/:f:/r/teams/T"),
+        )
+
+        assert response.status_code == 422
+        assert len(submitter.sent) == 1
+
+    def test_each_version_keeps_its_own_source_link(
+        self, client, linked_document, versions
+    ):
+        client.post(
+            f"/guides/{linked_document}/versions",
+            json=self._next(sourceLink=NEXT_SOURCE_LINK),
+        )
+
+        stored = {version["_id"]: version for version in versions.documents}
+        body = client.get(f"/guides/{linked_document}").json()
+
+        assert stored[NEXT_VERSION]["sourceLink"] == {
+            "link": NEXT_SOURCE_LINK,
+            "canonicalLink": NEXT_SOURCE_CANONICAL,
+        }
+        assert stored[VERSION]["sourceLink"] == {
+            "link": SOURCE_LINK,
+            "canonicalLink": SOURCE_CANONICAL,
+        }
+        assert [version["sourceLink"] for version in body["versions"]] == [
+            NEXT_SOURCE_LINK,
+            SOURCE_LINK,
+        ]
+
+    def test_a_version_without_a_source_link_does_not_take_the_one_before(
+        self, client, linked_document, versions
+    ):
+        client.post(f"/guides/{linked_document}/versions", json=self._next())
+
+        stored = {version["_id"]: version for version in versions.documents}
+        body = client.get(f"/guides/{linked_document}").json()
+
+        assert "sourceLink" not in stored[NEXT_VERSION]
+        assert [version["sourceLink"] for version in body["versions"]] == [
+            None,
+            SOURCE_LINK,
+        ]
+
     def test_a_version_with_a_blank_title_is_refused(self, client, document, submitter):
         response = client.post(
             f"/guides/{document}/versions", json=self._next(title="   ")
@@ -1288,3 +1399,36 @@ class TestAddingAVersionToADocument:
 
         assert len(versions.documents) == 2
         assert converts.call_count == 2
+
+
+class TestCheckingASourceLink:
+    """The details screen asks before it takes the link, so the rule is the API's
+    alone."""
+
+    def test_a_link_to_a_named_word_document_answers_its_canonical_link(self, client):
+        response = client.post(
+            "/guides/source-link-checks",
+            json={
+                "link": "https://example.sharepoint.com/:w:/r/teams/Team1234/"
+                "Claims/The%20Claim%20Form.docx?web=1"
+            },
+        )
+
+        assert (response.status_code, response.json()) == (
+            200,
+            {
+                "canonicalLink": "https://example.sharepoint.com/teams/team1234/"
+                "claims/the%20claim%20form.docx",
+                "refusal": None,
+            },
+        )
+
+    def test_any_other_link_answers_why_it_is_refused(self, client):
+        response = client.post(
+            "/guides/source-link-checks", json={"link": "https://www.gov.uk/claims"}
+        )
+
+        assert (response.status_code, response.json()) == (
+            200,
+            {"canonicalLink": None, "refusal": "not-sharepoint"},
+        )

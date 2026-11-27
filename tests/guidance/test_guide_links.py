@@ -131,6 +131,30 @@ class TestAVersionsLinks:
         assert await guide_links.links_of(database, version.document_id) == []
 
 
+class TestADocumentIdLink:
+    """A link to a document by its SharePoint Document ID names it for certain too,
+    and is the form a source link can take."""
+
+    async def test_is_kept_and_its_guide_found_by_its_canonical_link(self, database):
+        version = _version()
+        await guide_links.keep(
+            database,
+            version,
+            "## 1 Introduction\n\n[the form by its ID](https://example.sharepoint.com/"
+            "teams/Team1234/_layouts/15/DocIdRedir.aspx?ID=RPAINTRA-405-3434)",
+        )
+
+        [link] = await guide_links.links_of(database, version.document_id)
+        found = await guide_links.guides_linking_to(
+            database,
+            "https://example.sharepoint.com/teams/team1234/_layouts/15/docidredir.aspx"
+            "?id=rpaintra-405-3434",
+        )
+
+        assert (link.text, link.file_name) == ("the form by its ID", None)
+        assert found == [version.document_id]
+
+
 class TestAGuideSavedBeforeLinksWereKept:
     async def test_has_none(self, database):
         assert await guide_links.links_of(database, ids.new_document_id()) == []
