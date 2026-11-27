@@ -307,6 +307,23 @@ class TestALinkNeverCanonicalised:
                 id="an address that cannot be read behind a safe link",
             ),
             pytest.param(
+                "https://example.sharepoint.com:not-a-port/_layouts/15/"
+                "DocIdRedir.aspx?ID=A-1-2",
+                link_targets.Kind.EXTERNAL,
+                id="a port that is not a number",
+            ),
+            pytest.param(
+                "https://example.sharepoint.com:99999/Guide.docx",
+                link_targets.Kind.EXTERNAL,
+                id="a port out of range",
+            ),
+            pytest.param(
+                "https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2F"
+                "example.sharepoint.com%3A99999%2FGuide.docx&data=05%7C02",
+                link_targets.Kind.EXTERNAL,
+                id="a port out of range behind a safe link",
+            ),
+            pytest.param(
                 "file://share.example.gov.uk/user/Shared/Draft%20Letter",
                 link_targets.Kind.NETWORK_SHARE,
                 id="a network share",
