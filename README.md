@@ -340,6 +340,24 @@ HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
 - The role decides the file, not the library: `AppConfig` is Pydantic and lives in
   `config.py`.
 
+### Admin operations
+
+`app/admin/` holds what the hub's admins run on the search index; the UI enforces
+`Hub.Admin` and vouches for the user, so the API only checks the caller is the UI.
+There are two, each its own route and each its own button:
+
+- **Delete** (`DELETE /admin/search-index`) has the search service wipe its index and
+  stores, and answers with what it deleted (502 if it failed; asking again does no
+  harm). It waits on the search service, so it has to stay inside CDP's request time.
+- **Rebuild** (`POST /admin/search-index/rebuild`) sends every document's newest
+  version to the search service, as a save does, and deletes nothing first. It answers
+  201 at once and runs as a background task (`app/admin/tasks.py`) that the lifespan
+  cancels at shutdown; a rebuild cut short is asked for again. The WARNING log line
+  it ends with, which carries `requestedBy`, is the only record of how it went.
+
+A full rebuild is delete, then rebuild. Nothing orders them: a delete during a rebuild
+leaves the index partial, and a rebuild asked for again fills it.
+
 ### Ids
 
 `app/guidance/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
@@ -440,6 +458,8 @@ Tokens are never logged, and neither are exceptions' tracebacks for auth failure
 | `GET: /guides/{id}/assets/{name}` | Gets asset content by name   |
 | `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
 | `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file, and how far its save has got (404 if unknown) |
+| `DELETE: /admin/search-index`   | Has the search service delete its index and stores (200 with what it deleted; 502 if it failed); `x-requested-by` header |
+| `POST: /admin/search-index/rebuild` | Starts sending every guide's newest version to the search service (201 at once; the log says how it went); body `{"requestedBy": ...}` |
 
 All routes except `/health`, `/health/sqs-worker/status` and the generated docs require a token when `USE_AUTH=true`, see
 [Authentication](#authentication).

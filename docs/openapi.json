@@ -342,6 +342,25 @@
         "title": "Identity",
         "type": "object"
       },
+      "IndexDeleted": {
+        "description": "What the search service deleted: the objects in its index's storage, and the\nrecords that track what has been applied to it.",
+        "properties": {
+          "deletedObjects": {
+            "title": "Deletedobjects",
+            "type": "integer"
+          },
+          "deletedStateRecords": {
+            "title": "Deletedstaterecords",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deletedObjects",
+          "deletedStateRecords"
+        ],
+        "title": "IndexDeleted",
+        "type": "object"
+      },
       "JsonValue": {},
       "Match": {
         "description": "Where the words match in a text, from `start` up to `end`, and the words there\nas the text has them.",
@@ -942,6 +961,36 @@
         "title": "Preferences",
         "type": "object"
       },
+      "RebuildRequest": {
+        "additionalProperties": false,
+        "description": "Who asked for the rebuild: the hub user the UI vouches for. It is for the log\nonly.",
+        "properties": {
+          "requestedBy": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Requestedby",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestedBy"
+        ],
+        "title": "RebuildRequest",
+        "type": "object"
+      },
+      "RebuildStarted": {
+        "description": "The rebuild has been started, not finished: how it went is in the log.",
+        "properties": {
+          "status": {
+            "const": "started",
+            "default": "started",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "RebuildStarted",
+        "type": "object"
+      },
       "RecentlyOpened": {
         "description": "The guides the user opened most recently, newest first, as `GET /guides`\nlists them, and each filter's values among them with their counts.",
         "properties": {
@@ -1503,6 +1552,105 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/search-index": {
+      "delete": {
+        "description": "Delete the search service's index and stores, so that search returns nothing\nuntil the rebuild gives it the guides again. Answers when it is done; a 502 says\nit failed, and asking again does no harm.",
+        "operationId": "delete_search_index_admin_search_index_delete",
+        "parameters": [
+          {
+            "description": "The hub user the UI vouches for; for the log only",
+            "in": "header",
+            "name": "x-requested-by",
+            "required": true,
+            "schema": {
+              "description": "The hub user the UI vouches for; for the log only",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "X-Requested-By",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Search Index",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/search-index/rebuild": {
+      "post": {
+        "description": "Give the search service every guide's latest version again, as a save does. It\ndeletes nothing first, and answers at once: the log says how it went.",
+        "operationId": "rebuild_search_index_admin_search_index_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebuildStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rebuild Search Index",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/guides": {
       "get": {
         "description": "The documents there are, a page at a time, in order of when each last\nchanged, with each filter's values and how many guides have each.\n\nFilters take values from the reference data and can be repeated. `no_scheme`\nchooses the guides specific to no scheme, beside any `scheme`s chosen. Follow\n`nextCursor` for the next page; it is null on the last.",

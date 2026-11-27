@@ -73,6 +73,27 @@ def test_lifespan_works_the_queue(mocker, aws_at_startup):
     consumer_class.return_value.stop.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("aws_at_startup")
+def test_lifespan_cancels_admin_tasks_before_closing_mongo(mocker):
+    """A rebuild cut short by a restart is asked for again, and it reads from Mongo,
+    so it stops before Mongo closes. That it cancels what runs is shown in
+    `tests/admin/test_tasks.py`."""
+    _a_lifespan_with_no_database(mocker)
+    mongo_client = mocker.AsyncMock()
+    mocker.patch("app.common.mongo.get_mongo_client", return_value=mongo_client)
+    order: list[str] = []
+    cancelled = mocker.patch(
+        "app.admin.tasks.cancel_all",
+        mocker.AsyncMock(side_effect=lambda: order.append("tasks cancelled")),
+    )
+    mongo_client.close.side_effect = lambda: order.append("mongo closed")
+
+    with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
+        cancelled.assert_not_awaited()
+
+    assert order == ["tasks cancelled", "mongo closed"]
+
+
 def test_lifespan_refuses_to_start_without_aws_credentials(mocker, aws_at_startup):
     """The buckets and the queue need them, and boto3 makes a client without any."""
     _a_lifespan_with_no_database(mocker)

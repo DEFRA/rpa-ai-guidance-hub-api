@@ -334,6 +334,63 @@ class TestLatestVersions:
         assert {k: v.id for k, v in latest.items()} == {with_two: new.id}
 
 
+class TestEveryLatestVersion:
+    @pytest.fixture(autouse=True)
+    async def nothing_recorded(self, database):
+        """The database is shared by the session, and this asks for all of it."""
+        await database[records.DOCUMENTS].delete_many({})
+        await database[records.VERSIONS].delete_many({})
+
+    async def test_each_document_with_a_version_is_given_with_its_newest(
+        self, database
+    ):
+        with_two, with_one, with_none = (ids.new_document_id() for _ in range(3))
+        for document_id in (with_two, with_one, with_none):
+            await records.create(
+                database,
+                _document(document_id, str(uuid.uuid4()), {"title": str(document_id)}),
+            )
+        old = _version(ids.new_version_id(), with_two, "s3://d/old")
+        new = dataclasses.replace(
+            old,
+            id=ids.new_version_id(),
+            content_url="s3://d/new",
+            created_at=old.created_at + dt.timedelta(seconds=1),
+        )
+        only = _version(ids.new_version_id(), with_one, "s3://d/only")
+        for version in (old, new, only):
+            await records.create_version(database, version)
+
+        every = await records.every_latest_version(database)
+
+        assert {document.id: version.id for document, version in every} == {
+            with_two: new.id,
+            with_one: only.id,
+        }
+
+    async def test_a_document_is_as_recorded_not_as_its_latest_version_has_it(
+        self, database
+    ):
+        document_id = ids.new_document_id()
+        await records.create(
+            database, _document(document_id, str(uuid.uuid4()), {"title": "recorded"})
+        )
+        await records.create_version(
+            database,
+            dataclasses.replace(
+                _version(ids.new_version_id(), document_id, "s3://d/v"),
+                metadata={"title": "of the version"},
+            ),
+        )
+
+        [(document, _version_found)] = await records.every_latest_version(database)
+
+        assert document.metadata == {"title": "recorded"}
+
+    async def test_there_are_none_when_there_are_no_documents(self, database):
+        assert await records.every_latest_version(database) == []
+
+
 class TestIndexes:
     async def test_filterable_metadata_is_indexed(self, database):
         indexes = await database[records.DOCUMENTS].index_information()

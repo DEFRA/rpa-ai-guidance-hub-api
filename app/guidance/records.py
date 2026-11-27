@@ -467,6 +467,41 @@ async def latest_titles(
     return {group["_id"]: group[_TITLE] async for group in cursor}
 
 
+@mongo_timeouts.mongo(mongo_timeouts.HEAVY)
+async def every_latest_version(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+) -> list[tuple[models.Document, models.Version]]:
+    """Every document that has a version, as its record, with its newest version, in
+    a single query.
+
+    The document is as it is recorded, not as a read answers it (see `find_many`): its
+    details are the ones a version saved before versions kept their own falls back to.
+    A document with no version is left out: its first conversion failed, and there is
+    nothing of it to give anyone.
+    """
+    pipeline: list[dict[str, Any]] = [
+        {_SORT: dict(_NEWEST)},
+        {_GROUP: {"_id": f"${DOCUMENT_ID}", "newest": {_FIRST: "$$ROOT"}}},
+        {
+            "$lookup": {
+                "from": DOCUMENTS,
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "document",
+            }
+        },
+        {"$unwind": "$document"},
+    ]
+    cursor = await database[VERSIONS].aggregate(pipeline)
+    return [
+        (
+            models.Document.from_document(group["document"]),
+            models.Version.from_document(group["newest"]),
+        )
+        async for group in cursor
+    ]
+
+
 @mongo_timeouts.mongo(mongo_timeouts.STANDARD)
 async def versions_of(
     database: pymongo.asynchronous.database.AsyncDatabase, document_id: ids.DocumentId

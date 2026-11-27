@@ -3,6 +3,7 @@ where the words are in the version of the guide it has indexed
 (`GET /v1/documents/{documentId}/matches`). Finding guides by title: it gives the
 guides whose titles are like the one given (`GET /v1/search?title=`). Indexing: it is
 given each version saved (`PUT /documents/{documentId}/versions/{versionId}`).
+Resetting: it is told to delete its index and stores (`POST /admin/index/reset`).
 
 When the search service does not answer, or answers with an error, each raises
 `SearchServiceError`; indexing raises `IndexRefusedError`, one of them, when it
@@ -11,7 +12,9 @@ refuses a version.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
+import functools
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +33,11 @@ if TYPE_CHECKING:
 # How much of a refusal's text is kept: enough to say why, not the whole request
 # echoed back.
 _REFUSAL_TEXT_LIMIT = 200
+
+# How long a reset is waited for: longer than the default for a search, as it deletes
+# a whole index, but within the time CDP gives a request, as the admin's Delete waits
+# on it through this service.
+_RESET_TIMEOUT_SECONDS = 45
 
 
 class SearchServiceError(Exception):
@@ -162,6 +170,44 @@ class SearchServiceIndex:
             )
             raise IndexRefusedError(message)
         _successful(response)
+
+
+@dataclasses.dataclass(frozen=True)
+class ResetResult:
+    """What a reset deleted: the objects in the index's storage, and the records
+    that track what has been applied to it."""
+
+    deleted_objects: int
+    deleted_state_records: int
+
+
+class SearchServiceAdmin:
+    def __init__(
+        self,
+        base_url: str,
+        open_client: Callable[[], httpx2.AsyncClient] = functools.partial(
+            http_client.create_async_client, request_timeout=_RESET_TIMEOUT_SECONDS
+        ),
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._open_client = open_client
+
+    async def reset(self) -> ResetResult:
+        """Have the search service delete its index and stores, so that it returns
+        nothing until guides are given to it again. Doing it again does no harm.
+
+        Raises:
+            SearchServiceError: if it does not answer, or fails, so that it can be
+                tried again.
+        """
+        response = await _asked(
+            self._open_client, "POST", f"{self._base_url}/admin/index/reset"
+        )
+        body = _successful(response).json()
+        return ResetResult(
+            deleted_objects=body["deletedObjects"],
+            deleted_state_records=body["deletedStateRecords"],
+        )
 
 
 def _index_request(
