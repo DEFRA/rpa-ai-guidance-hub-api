@@ -471,7 +471,8 @@ async def guides_known_by(
     A guide is known by the source link of any of its versions, so that a new source
     link does not break the links to an earlier one. When two guides have held a link,
     the guide whose latest version has it names it, the newer if both do; when neither
-    has it in its latest version, the guide that held it last does.
+    has it in its latest version, the guide that held it last does. A version whose
+    guide is not recorded yet, or never was, names nothing (`create`).
     """
     if not canonical_links:
         return {}
@@ -483,11 +484,15 @@ async def guides_known_by(
         )
         .sort(_NEWEST)
     )
+    held = [
+        (version[_SOURCE_LINK][_CANONICAL_LINK], version[DOCUMENT_ID])
+        async for version in cursor
+    ]
+    holders = await existing(database, list({guide for _, guide in held}))
     known: dict[str, ids.DocumentId] = {}
-    holders: set[ids.DocumentId] = set()
-    async for held in cursor:
-        known.setdefault(held[_SOURCE_LINK][_CANONICAL_LINK], held[DOCUMENT_ID])
-        holders.add(held[DOCUMENT_ID])
+    for link, guide in held:
+        if guide in holders:
+            known.setdefault(link, guide)
 
     latest = await latest_versions_of(database, list(holders))
     for guide, version in sorted(latest.items(), key=lambda each: each[1].created_at):

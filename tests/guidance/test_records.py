@@ -353,10 +353,15 @@ def _canonical() -> str:
 
 
 async def _saved(
-    database, guide: ids.DocumentId, minutes: int, canonical: str | None
+    database,
+    guide: ids.DocumentId,
+    minutes: int,
+    canonical: str | None,
+    *,
+    committed: bool = True,
 ) -> None:
     """A version of `guide` saved `minutes` after SAVED, from `canonical`, or from no
-    source link."""
+    source link; then the guide's record, unless the save stopped before it."""
     await records.create_version(
         database,
         models.Version(
@@ -371,6 +376,8 @@ async def _saved(
             ),
         ),
     )
+    if committed:
+        await records.create(database, _document(guide, str(uuid.uuid4())))
 
 
 class TestGuidesKnownBySourceLinks:
@@ -445,6 +452,27 @@ class TestGuidesKnownBySourceLinks:
         known = await records.guides_known_by(database, [form])
 
         assert known == {form: held_it_last}
+
+    async def test_a_version_whose_guide_was_never_recorded_names_no_guide(
+        self, database
+    ):
+        form = _canonical()
+        await _saved(database, ids.new_document_id(), 0, form, committed=False)
+
+        known = await records.guides_known_by(database, [form])
+
+        assert known == {}
+
+    async def test_a_version_whose_guide_was_never_recorded_takes_no_link_from_a_guide(
+        self, database
+    ):
+        guide, form = ids.new_document_id(), _canonical()
+        await _saved(database, guide, 0, form)
+        await _saved(database, ids.new_document_id(), 1, form, committed=False)
+
+        known = await records.guides_known_by(database, [form])
+
+        assert known == {form: guide}
 
     async def test_names_no_guide_for_no_links(self, database):
         assert await records.guides_known_by(database, []) == {}
