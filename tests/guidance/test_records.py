@@ -418,6 +418,17 @@ class TestGuidesKnownBySourceLinks:
 
         assert known == {form: holds_it_now}
 
+    async def test_a_link_two_latest_versions_have_names_the_newer_ones_guide(
+        self, database
+    ):
+        older, newer, form = ids.new_document_id(), ids.new_document_id(), _canonical()
+        await _saved(database, newer, 1, form)
+        await _saved(database, older, 0, form)
+
+        known = await records.guides_known_by(database, [form])
+
+        assert known == {form: newer}
+
     async def test_a_link_no_latest_version_has_names_the_guide_that_held_it_last(
         self, database
     ):
